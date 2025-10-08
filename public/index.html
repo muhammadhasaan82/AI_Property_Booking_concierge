@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>Calling Agent</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    .row { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+    button { padding: .6rem 1rem; font-size: 1rem; }
+    #log { border: 1px solid #ddd; padding: 1rem; height: 260px; overflow: auto; white-space: pre-wrap; background:#fafafa; }
+    #status { font-weight: 600; }
+    .pill { display:inline-block; padding:.15rem .5rem; border-radius:999px; background:#eee; font-size:.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Calling Agent</h1>
+  <div class="row">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+    <span id="status" class="pill">disconnected</span>
+  </div>
+  <div class="row">
+    <button id="sayHelloBtn" disabled>Say hello</button>
+    <button id="muteBtn" disabled>Mute/unmute mic</button>
+    <button id="downloadTranscriptBtn" disabled>Download Transcript</button>
+  </div>
+  <h3>Events & Transcript</h3>
+  <div id="log"></div>
+
+<script type="module">
+  // Version: 2025-09-13 — transcript via session.history + terminal logging
+  import { RealtimeAgent, RealtimeSession } from "https://esm.run/@openai/agents-realtime@0.1.0";
+
+  const connectBtn = document.getElementById("connectBtn");
+  const disconnectBtn = document.getElementById("disconnectBtn");
+  const sayHelloBtn = document.getElementById("sayHelloBtn");
+  const muteBtn = document.getElementById("muteBtn");
+  const downloadTranscriptBtn = document.getElementById("downloadTranscriptBtn");
+  const statusEl = document.getElementById("status");
+  const logEl = document.getElementById("log");
+
+  let session = null;
+  let agent = null;
+  let muted = false;
+  let transcript = [];
+  const seenIds = new Set(); // avoid re-adding same history items
+
+  function log(line) {
+    const ts = new Date().toLocaleTimeString();
+    logEl.textContent += `[${ts}] ${line}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function addToTranscript(speaker, message) {
+    const ts = new Date().toLocaleTimeString();
+    const entry = `[${ts}] ${speaker}: ${message}`;
+    transcript.push(entry);
+
+    // show in UI
+    logEl.textContent += entry + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+
+    // also send to backend so it prints in your terminal
+    fetch("/transcript", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ line: entry }),
+    }).catch(() => {});
+  }
+
+  function downloadTranscript() {
+    if (transcript.length === 0) {
+      alert("No transcript available to download.");
+      return;
+    }
+    const content =
+      "Call Transcript\n" +
+      "===============\n" +
+      `Generated on: ${new Date().toLocaleString()}\n\n` +
+      transcript.join("\n");
+
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `call-transcript-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  async function connect() {
+    if (session || agent) {
+      log("Already connected or connecting...");
+      return;
+    }
+
+    try {
+      log("requesting ephemeral token…");
+      const r = await fetch("/session", { method: "POST" });
+      const { client_secret, error } = await r.json();
+      if (error) throw new Error(error);
+      if (!client_secret?.value) throw new Error("Missing client_secret.value");
+      log("token received, initializing Realtime session…");
+
+      agent = new RealtimeAgent({
+        name: "Assistant",
+        instructions:
+          "You are a helpful multilingual voice assistant. You can communicate in English, Arabic, Korean, and Urdu. Respond in the same language the user speaks, or in English if unsure. Be brief and clear in your responses.",
+      });
+
+      // Create Realtime session with audio configuration
+      session = new RealtimeSession(agent, {
+        model: "gpt-realtime",
+        modalities: ["text", "audio"],
+        input_audio_transcription: {
+          model: "whisper-1"
+        },
+        output_audio: {
+          model: "tts-1",
+          voice: "alloy"
+        }
+      });
+
+      log("Attempting WebRTC connection...");
+      await session.connect({ apiKey: client_secret.value }); // WebRTC in browser
+      log("WebRTC connection established successfully!");
+
+      statusEl.textContent = "connected (webrtc)";
+      connectBtn.disabled = true;
+      disconnectBtn.disabled = false;
+      sayHelloBtn.disabled = false;
+      muteBtn.disabled = false;
+      downloadTranscriptBtn.disabled = false;
+      log("connected");
+
+      // Clear previous transcript
+      transcript = [];
+      seenIds.clear();
+      logEl.textContent = "";
+      log("Connection ready. Click 'Say hello' to test voice or start speaking.");
+
+      // Listen to session events
+      session.on("history_updated", (history) => {
+        log(`History updated with ${history.length} items`);
+        
+        for (const item of history) {
+          if (!item || item.type !== "message") continue;
+          if (seenIds.has(item.id)) continue;
+          
+          seenIds.add(item.id);
+          log(`New message from ${item.role}: ${JSON.stringify(item.content)}`);
+
+          // Extract text from the content parts
+          let text = null;
+          const parts = Array.isArray(item.content) ? item.content : [];
+
+          // helper to find first matching part type
+          const firstText = (types) => {
+            for (const t of types) {
+              const p = parts.find((c) => c && c.type === t && typeof c.text === "string");
+              if (p?.text) return p.text;
+            }
+            return null;
+          };
+
+          if (item.role === "user") {
+            text = firstText(["input_text", "transcript", "text"]);
+            if (text) {
+              log(`User said: ${text}`);
+              addToTranscript("User", text);
+            }
+          } else if (item.role === "assistant") {
+            text = firstText(["output_text", "text"]);
+            if (text) {
+              log(`Assistant said: ${text}`);
+              addToTranscript("Assistant", text);
+            }
+          }
+        }
+      });
+
+      // Listen for audio events
+      session.on("audio", (event) => {
+        log(`Audio event: ${JSON.stringify(event)}`);
+      });
+
+      // Listen for connection events
+      session.on("connection_state", (state) => {
+        log(`Connection state: ${state}`);
+      });
+
+      // Listen for errors
+      session.on("error", (error) => {
+        log(`Session error: ${JSON.stringify(error)}`);
+      });
+
+      // Optional: listen to transport audio events if you want
+      // session.on('audio', (evt) => { ... });
+
+    } catch (e) {
+      log("connect error: " + (e?.message || e));
+      session = null;
+      agent = null;
+      connectBtn.disabled = false;
+      disconnectBtn.disabled = true;
+      sayHelloBtn.disabled = true;
+      muteBtn.disabled = true;
+      downloadTranscriptBtn.disabled = true;
+      statusEl.textContent = "disconnected";
+    }
+  }
+
+  async function disconnect() {
+    try {
+      if (session) await session.disconnect();
+    } finally {
+      session = null;
+      agent = null;
+      statusEl.textContent = "disconnected";
+      connectBtn.disabled = false;
+      disconnectBtn.disabled = true;
+      sayHelloBtn.disabled = true;
+      muteBtn.disabled = true;
+      downloadTranscriptBtn.disabled = true;
+      log("disconnected");
+    }
+  }
+
+  connectBtn.addEventListener("click", connect);
+  disconnectBtn.addEventListener("click", disconnect);
+
+  sayHelloBtn.addEventListener("click", () => {
+    if (agent && session) {
+      try {
+        log("Testing voice input - please speak into your microphone now!");
+        log("The agent should respond to your voice. Try saying 'Hello' or 'How are you?'");
+        addToTranscript("System", "Voice test initiated - please speak now");
+      } catch (e) {
+        log("Say hello error: " + (e?.message || e));
+      }
+    } else {
+      log("Not connected. Please connect first.");
+    }
+  });
+
+  muteBtn.addEventListener("click", async () => {
+    if (!session) return;
+    muted = !muted;
+    await session.setMicrophoneEnabled(!muted);
+    log(muted ? "mic muted" : "mic unmuted");
+  });
+
+  downloadTranscriptBtn.addEventListener("click", downloadTranscript);
+
+  log("UI script loaded");
+</script>
+</body>
+</html>
