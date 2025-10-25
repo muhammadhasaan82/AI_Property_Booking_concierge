@@ -75,3 +75,28 @@ debug_*.py
 # Temporary files
 *.tmp
 *.temp
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Frontend dependencies
+Frontend/node_modules/
+Frontend/.next/
+Frontend/out/
+Frontend/build/
+Frontend/dist/
+
+# Package manager lock files (optional - you can keep package-lock.json if you want)
+# package-lock.json
+# yarn.lock
