@@ -87,14 +87,14 @@ async def options_echo(request: Request):
     )
 
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
-app.include_router(properties.router, prefix="/api/v1", tags=["properties"])
-app.include_router(booking.router, prefix="/api/v1", tags=["booking"])
-app.include_router(faq.router, prefix="/api/v1", tags=["faq"])
+# app.include_router(properties.router, prefix="/api/v1", tags=["properties"])
+# app.include_router(booking.router, prefix="/api/v1", tags=["booking"])
+# app.include_router(faq.router, prefix="/api/v1", tags=["faq"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
-app.include_router(test_router.router, prefix="/api/v1", tags=["test"])
+# app.include_router(test_router.router, prefix="/api/v1", tags=["test"])
 
 # Mobile API endpoints
-app.include_router(mobile.router, prefix="/api/v1", tags=["mobile"])
+# app.include_router(mobile.router, prefix="/api/v1", tags=["mobile"])
 
 # Serve your existing static UI (voice page)
 app.mount("/static", StaticFiles(directory="public", html=True), name="public")

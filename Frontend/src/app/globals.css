@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, :root {
+  height: 100%;
+  background: #0B0219;
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-white/5 backdrop-blur-md;
+  }
+}
