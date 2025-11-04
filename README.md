@@ -44,18 +44,45 @@ cd ai_booking
 
 ### 2. Backend Setup
 ```bash
+# Create a Python virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+# On Windows:
+.\venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+
 # Install Python dependencies
-uv add fastapi uvicorn langgraph openai chromadb
+pip install -r requirements.txt
 
 # Set up environment variables
 cp .env.example .env
 # Edit .env with your API keys
 
-# Run the backend
-python -m uvicorn main:app --reload
+# Run the backend server
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### 3. Frontend Setup
+### 3. Access the Chatbot Interfaces
+
+Once the server is running, you can access:
+
+1. **AI Estate Text Chatbot**:
+   - Open http://127.0.0.1:8000/chatbot in your browser
+   - Features:
+     - Real-time text chat with AI
+     - Property search and recommendations
+     - Click the phone icon to switch to calling agent
+
+2. **Voice Calling Agent**:
+   - Open http://127.0.0.1:8000/static/index.html in your browser
+   - Features:
+     - Voice conversations with AI
+     - Real-time transcription
+     - Multi-language support
+
+### 4. Frontend Development Setup (Optional)
 ```bash
 # Navigate to frontend directory
 cd Frontend

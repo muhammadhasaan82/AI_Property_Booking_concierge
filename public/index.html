@@ -107,8 +107,15 @@
     try {
       log("requesting ephemeral token…");
       const r = await fetch("/session", { method: "POST" });
-      const { client_secret, error } = await r.json();
-      if (error) throw new Error(error);
+      const raw = await r.text();
+      let parsed = {};
+      try {
+        parsed = raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        throw new Error(`Bad JSON from /session (status ${r.status}): ${raw?.slice(0,200)}`);
+      }
+      const { client_secret, error } = parsed;
+      if (error) throw new Error(typeof error === "string" ? error : JSON.stringify(error));
       if (!client_secret?.value) throw new Error("Missing client_secret.value");
       log("token received, initializing Realtime session…");
 
