@@ -100,3 +100,8 @@ Frontend/dist/
 # Package manager lock files (optional - you can keep package-lock.json if you want)
 # package-lock.json
 # yarn.lock"node_modules/" 
+
+# User specified ignores
+PRD.pdf
+prompt.txt
+pyproject.toml
