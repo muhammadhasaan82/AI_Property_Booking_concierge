@@ -1,64 +1,111 @@
 # services/booking.py
-# Booking/storage helpers with automatic mock fallback if Supabase env is missing.
+# Booking/storage helpers — fully async with Supabase REST via httpx.
 from __future__ import annotations
 import os
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-_SUPABASE_URL = os.getenv("SUPABASE_URL")
-_SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+import httpx
+
+_SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+_SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
 
 # In-memory mock DB for local/dev usage
 _USERS: Dict[str, Dict[str, Any]] = {}
 _BOOKINGS: Dict[str, Dict[str, Any]] = {}
 
+
 def _mock_user_key(email: str) -> str:
     return email.strip().lower()
 
-def get_or_create_user(name: str, email: str, phone: str | None = None) -> str:
+
+def _supabase_headers() -> Dict[str, str]:
+    return {
+        "apikey": _SUPABASE_KEY,
+        "Authorization": f"Bearer {_SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+
+def _rest_url(table: str) -> str:
+    """Build Supabase PostgREST URL for a table."""
+    base = _SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/{table}"
+
+
+async def get_or_create_user(name: str, email: str, phone: Optional[str] = None) -> str:
     """
     Returns a user_id. Uses mock store if Supabase env not set.
+    Fully async — safe to call from FastAPI/LangGraph without blocking.
     """
     if not email:
         raise ValueError("email required")
+
     # Mock mode (no Supabase env)
     if not (_SUPABASE_URL and _SUPABASE_KEY):
         key = _mock_user_key(email)
         if key not in _USERS:
-            _USERS[key] = {"id": f"user_{uuid.uuid4().hex[:8]}", "name": name, "email": email, "phone": phone}
+            _USERS[key] = {
+                "id": f"user_{uuid.uuid4().hex[:8]}",
+                "name": name,
+                "email": email,
+                "phone": phone,
+            }
         else:
-            # Update basic fields
-            _USERS[key].update({"name": name or _USERS[key]["name"], "phone": phone or _USERS[key].get("phone")})
+            _USERS[key].update({
+                "name": name or _USERS[key]["name"],
+                "phone": phone or _USERS[key].get("phone"),
+            })
         return _USERS[key]["id"]
 
-    # Real Supabase path (optional): implement if you want real persistence
-    # Import lazily to avoid dependency if not configured
+    # Real Supabase path — async via httpx
     try:
-        from supabase import create_client, Client  # type: ignore
-        client: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
-        # Upsert user
-        data = {"name": name, "email": email, "phone": phone}
-        res = client.table("users").upsert(data, on_conflict="email").execute()
-        if not res.data:
-            # Try select if upsert returns nothing
-            res = client.table("users").select("*").eq("email", email).execute()
-        user = (res.data or [{}])[0]
-        if not user.get("id"):
-            raise RuntimeError("Supabase user upsert failed")
-        return str(user["id"])
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Upsert user
+            data = {"name": name, "email": email, "phone": phone}
+            r = await client.post(
+                _rest_url("users"),
+                headers={
+                    **_supabase_headers(),
+                    "Prefer": "return=representation,resolution=merge-duplicates",
+                },
+                json=data,
+            )
+            if r.status_code in (200, 201):
+                rows = r.json()
+                user = rows[0] if isinstance(rows, list) and rows else {}
+                if user.get("id"):
+                    return str(user["id"])
+
+            # Fallback: select existing
+            r2 = await client.get(
+                f"{_rest_url('users')}?email=eq.{email}&select=id",
+                headers=_supabase_headers(),
+            )
+            if r2.status_code == 200:
+                rows2 = r2.json()
+                if rows2 and rows2[0].get("id"):
+                    return str(rows2[0]["id"])
+
+            raise RuntimeError(f"Supabase user upsert failed: {r.status_code} {r.text[:200]}")
     except Exception as e:
-        # Fall back to mock if Supabase errors out
         print(f"[BOOKING] Supabase user creation failed: {e}, falling back to mock")
         key = _mock_user_key(email)
-        _USERS[key] = {"id": f"user_{uuid.uuid4().hex[:8]}", "name": name, "email": email, "phone": phone, "note": f"mock:{e}"}
+        _USERS[key] = {
+            "id": f"user_{uuid.uuid4().hex[:8]}",
+            "name": name,
+            "email": email,
+            "phone": phone,
+            "note": f"mock:{e}",
+        }
         return _USERS[key]["id"]
 
-def create_booking(payload: Dict[str, Any]) -> Dict[str, Any]:
+
+async def create_booking(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Expects:
-      user_id, property_id, check_in, check_out, guests, phone
-    Returns:
-      {"ok": True, "booking_id": "...", "status": "confirmed", "payment_url": "..."}
+    Expects: user_id, property_id, check_in, check_out, guests, phone
+    Returns: {"ok": True, "booking_id": "...", "status": "pending", "payment_url": "..."}
     """
     required = ["user_id", "property_id", "check_in", "check_out"]
     missing = [k for k in required if not payload.get(k)]
@@ -76,30 +123,46 @@ def create_booking(payload: Dict[str, Any]) -> Dict[str, Any]:
             "check_out": payload["check_out"],
             "guests": int(payload.get("guests", 1)),
             "phone": payload.get("phone"),
-            "status": "confirmed",
+            "status": "pending",
             "payment_url": f"https://example.com/pay/{booking_id}",
         }
         _BOOKINGS[booking_id] = rec
-        return {"ok": True, "booking_id": booking_id, "status": rec["status"], "payment_url": rec["payment_url"]}
+        return {
+            "ok": True,
+            "booking_id": booking_id,
+            "status": rec["status"],
+            "payment_url": rec["payment_url"],
+        }
 
-    # Real Supabase (optional)
+    # Real Supabase (async)
     try:
-        from supabase import create_client, Client  # type: ignore
-        client: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
-        res = client.table("bookings").insert(payload).execute()
-        row = (res.data or [{}])[0]
-        if not row.get("id"):
-            raise RuntimeError("insert booking failed")
-        # Create a fake payment link or use your payments table/webhook
-        payment_url = f"https://example.com/pay/{row['id']}"
-        return {"ok": True, "booking_id": row["id"], "status": row.get("status", "confirmed"), "payment_url": payment_url}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                _rest_url("bookings"),
+                headers=_supabase_headers(),
+                json=payload,
+            )
+            if r.status_code in (200, 201):
+                rows = r.json()
+                row = rows[0] if isinstance(rows, list) and rows else {}
+                if row.get("id"):
+                    payment_url = f"https://example.com/pay/{row['id']}"
+                    return {
+                        "ok": True,
+                        "booking_id": row["id"],
+                        "status": row.get("status", "pending"),
+                        "payment_url": payment_url,
+                    }
+            raise RuntimeError(f"insert booking failed: {r.status_code}")
     except Exception as e:
         print(f"[BOOKING] Supabase booking creation failed: {e}")
         return {"ok": False, "error": str(e)}
 
-def get_booking_status(booking_id: str) -> Dict[str, Any]:
+
+async def get_booking_status(booking_id: str) -> Dict[str, Any]:
     if not booking_id:
         return {"ok": False, "error": "booking_id required"}
+
     # Mock
     if booking_id in _BOOKINGS:
         rec = _BOOKINGS[booking_id]
@@ -109,40 +172,52 @@ def get_booking_status(booking_id: str) -> Dict[str, Any]:
             "check_in": rec.get("check_in"),
             "check_out": rec.get("check_out"),
         }
-    # Real Supabase (optional)
+
+    # Real Supabase (async)
     if _SUPABASE_URL and _SUPABASE_KEY:
         try:
-            from supabase import create_client, Client  # type: ignore
-            client: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
-            res = client.table("bookings").select("status, check_in, check_out").eq("id", booking_id).single().execute()
-            if not res.data:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(
+                    f"{_rest_url('bookings')}?id=eq.{booking_id}&select=status,check_in,check_out",
+                    headers={**_supabase_headers(), "Accept": "application/vnd.pgrst.object+json"},
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    return {
+                        "ok": True,
+                        "status": data.get("status", "unknown"),
+                        "check_in": data.get("check_in"),
+                        "check_out": data.get("check_out"),
+                    }
                 return {"ok": False, "error": "not found"}
-            return {
-                "ok": True,
-                "status": res.data.get("status", "unknown"),
-                "check_in": res.data.get("check_in"),
-                "check_out": res.data.get("check_out"),
-            }
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
     return {"ok": False, "error": "not found"}
 
-def update_booking_status(booking_id: str, current_status: str, new_status: str) -> Dict[str, Any]:
+
+async def update_booking_status(booking_id: str, current_status: str, new_status: str) -> Dict[str, Any]:
     if not booking_id or not new_status:
         return {"ok": False, "error": "booking_id and new_status required"}
+
     # Mock
     if booking_id in _BOOKINGS:
         _BOOKINGS[booking_id]["status"] = new_status
         return {"ok": True}
-    # Real Supabase (optional)
+
+    # Real Supabase (async)
     if _SUPABASE_URL and _SUPABASE_KEY:
         try:
-            from supabase import create_client, Client  # type: ignore
-            client: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
-            res = client.table("bookings").update({"status": new_status}).eq("id", booking_id).execute()
-            if not res.data:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.patch(
+                    f"{_rest_url('bookings')}?id=eq.{booking_id}",
+                    headers=_supabase_headers(),
+                    json={"status": new_status},
+                )
+                if r.status_code in (200, 204):
+                    return {"ok": True}
                 return {"ok": False, "error": "not found"}
-            return {"ok": True}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
     return {"ok": False, "error": "not found"}

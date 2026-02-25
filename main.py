@@ -2,6 +2,7 @@
 from fastapi import FastAPI, Request, Response
 
 from route import health, properties, booking, faq, chat, mobile
+from route import stripe_webhook
 from route import test as test_router
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
@@ -94,6 +95,7 @@ app.include_router(health.router, prefix="/api/v1", tags=["health"])
 # app.include_router(booking.router, prefix="/api/v1", tags=["booking"])
 # app.include_router(faq.router, prefix="/api/v1", tags=["faq"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
+app.include_router(stripe_webhook.router, prefix="/api/v1", tags=["webhooks"])
 # app.include_router(test_router.router, prefix="/api/v1", tags=["test"])
 
 # Mobile API endpoints

@@ -32,187 +32,167 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 CHROMA_PATH = Path(__file__).parent.parent / "chroma_faq"
 CHROMA_PATH.mkdir(exist_ok=True)
 
-# Global vector store instance
-_vector_store: Optional[Chroma] = None
-_embeddings: Optional[OpenAIEmbeddings] = None
+# ---------------------------------------------------------------------------
+# FAQService class — replaces global state with dependency injection
+# ---------------------------------------------------------------------------
+
+class FAQService:
+    """
+    Encapsulates vector store, embeddings, and FAQ operations.
+    Inject via FastAPI app.state or pass explicitly.
+    """
+
+    def __init__(self, chroma_path: Optional[Path] = None, openai_api_key: Optional[str] = None):
+        self._openai_api_key = openai_api_key or OPENAI_API_KEY
+        self._chroma_path = chroma_path or CHROMA_PATH
+        self._chroma_path.mkdir(exist_ok=True)
+        self._vector_store: Optional[Chroma] = None
+        self._embeddings: Optional[OpenAIEmbeddings] = None
+        self._healthy = False
+
+    @property
+    def is_healthy(self) -> bool:
+        return self._healthy
+
+    # --- PDF ingestion ---
+
+    @staticmethod
+    def load_pdf_document(pdf_path: str) -> str:
+        """Load and extract text from PDF document."""
+        try:
+            reader = PdfReader(pdf_path)
+            text = ""
+            for page_num, page in enumerate(reader.pages, 1):
+                page_text = page.extract_text()
+                if page_text:
+                    text += f"\n[Page {page_num}]\n{page_text}\n"
+            return text
+        except Exception as e:
+            print(f"[FAQ] Error loading PDF: {e}")
+            return ""
+
+    def process_policy_document(self, pdf_path: str, force_reload: bool = False) -> Chroma:
+        if not self._openai_api_key:
+            raise ValueError("OpenAI API key not found in environment variables")
+
+        if self._embeddings is None:
+            self._embeddings = OpenAIEmbeddings(
+                openai_api_key=self._openai_api_key,
+                model="text-embedding-3-small",
+            )
+
+        if self._vector_store is not None and not force_reload:
+            return self._vector_store
+
+        persist_directory = str(self._chroma_path)
+        if os.path.exists(persist_directory) and not force_reload:
+            try:
+                self._vector_store = Chroma(
+                    persist_directory=persist_directory,
+                    embedding_function=self._embeddings,
+                    collection_name="company_policies",
+                )
+                self._healthy = True
+                print("[FAQ] Loaded existing vector store")
+                return self._vector_store
+            except Exception as e:
+                print(f"[FAQ] Error loading existing store: {e}, creating new one")
+
+        print(f"[FAQ] Processing PDF document: {pdf_path}")
+        pdf_text = self.load_pdf_document(pdf_path)
+        if not pdf_text:
+            raise ValueError("Could not extract text from PDF")
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, chunk_overlap=200,
+            length_function=len, separators=["\n\n", "\n", ". ", " ", ""],
+        )
+        chunks = text_splitter.split_text(pdf_text)
+        documents = []
+        for i, chunk in enumerate(chunks):
+            page_match = re.search(r'\[Page (\d+)\]', chunk)
+            page_num = page_match.group(1) if page_match else "Unknown"
+            clean_chunk = re.sub(r'\[Page \d+\]', '', chunk).strip()
+            doc = Document(
+                page_content=clean_chunk,
+                metadata={"source": "Company Policy", "page": page_num, "chunk_index": i, "document": "company_policy.pdf"},
+            )
+            documents.append(doc)
+        print(f"[FAQ] Created {len(documents)} document chunks")
+
+        self._vector_store = Chroma.from_documents(
+            documents=documents, embedding=self._embeddings,
+            persist_directory=persist_directory, collection_name="company_policies",
+        )
+        self._healthy = True
+        print("[FAQ] Vector store created and persisted")
+        return self._vector_store
+
+    # --- Semantic search ---
+
+    def semantic_search(self, question: str, k: int = 3, score_threshold: float = 0.5) -> Tuple[str, List[Dict[str, Any]]]:
+        if self._vector_store is None:
+            pdf_path = Path(__file__).parent.parent / "Company policy.pdf"
+            if not pdf_path.exists():
+                return "Company policy document not found. Please ensure the PDF is uploaded.", []
+            self.process_policy_document(str(pdf_path))
+
+        results = self._vector_store.similarity_search_with_score(question, k=k)
+        relevant_docs = [(doc, score) for doc, score in results if score >= score_threshold]
+        if not relevant_docs:
+            relevant_docs = [results[0]] if results else []
+        if not relevant_docs:
+            return "I couldn't find specific information about that in our policies. Would you like to speak with a human agent?", []
+
+        sources: List[Dict[str, Any]] = []
+        combined_context = ""
+        for doc, score in relevant_docs:
+            content = doc.page_content.strip()
+            page = doc.metadata.get("page", "Unknown")
+            combined_context += content + "\n\n"
+            sources.append({"content": content, "page": page, "score": score, "metadata": doc.metadata})
+
+        answer = generate_concise_answer(question, combined_context)
+        pages = list(set(doc.metadata.get("page", "Unknown") for doc, _ in relevant_docs))
+        if pages and pages != ["Unknown"]:
+            page_refs = ", ".join(f"Page {p}" for p in pages if p != "Unknown")
+            answer += f"\n\n[Reference: {page_refs} of Company Policy]"
+        return answer, sources
+
+    # --- Health & initialization ---
+
+    def initialize(self) -> bool:
+        """Initialize FAQ system. Returns True on success."""
+        try:
+            pdf_path = Path(__file__).parent.parent / "Company policy.pdf"
+            if pdf_path.exists():
+                self.process_policy_document(str(pdf_path))
+                print("[FAQ] System initialized successfully")
+                return True
+            else:
+                print("[FAQ][CRITICAL] Company policy.pdf not found — FAQ will not function")
+                return False
+        except Exception as e:
+            print(f"[FAQ][CRITICAL] Initialization failed: {e}")
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton for backwards compatibility
+# ---------------------------------------------------------------------------
+_faq_service = FAQService()
 
 
 def load_pdf_document(pdf_path: str) -> str:
-    """Load and extract text from PDF document"""
-    try:
-        reader = PdfReader(pdf_path)
-        text = ""
-        for page_num, page in enumerate(reader.pages, 1):
-            page_text = page.extract_text()
-            if page_text:
-                # Add page number for reference
-                text += f"\n[Page {page_num}]\n{page_text}\n"
-        return text
-    except Exception as e:
-        print(f"Error loading PDF: {e}")
-        return ""
+    return FAQService.load_pdf_document(pdf_path)
 
 
 def process_policy_document(pdf_path: str, force_reload: bool = False) -> Chroma:
-    """
-    Process the company policy PDF and create/load vector store
-    
-    Args:
-        pdf_path: Path to the PDF document
-        force_reload: If True, recreate the vector store even if it exists
-    
-    Returns:
-        Chroma vector store instance
-    """
-    global _vector_store, _embeddings
-    
-    if not OPENAI_API_KEY:
-        raise ValueError("OpenAI API key not found in environment variables")
-    
-    # Initialize embeddings if not already done
-    if _embeddings is None:
-        _embeddings = OpenAIEmbeddings(
-            openai_api_key=OPENAI_API_KEY,
-            model="text-embedding-3-small"
-        )
-    
-    # Check if vector store already exists and we're not forcing reload
-    if _vector_store is not None and not force_reload:
-        return _vector_store
-    
-    # Check if persisted store exists
-    persist_directory = str(CHROMA_PATH)
-    if os.path.exists(persist_directory) and not force_reload:
-        try:
-            _vector_store = Chroma(
-                persist_directory=persist_directory,
-                embedding_function=_embeddings,
-                collection_name="company_policies"
-            )
-            print("Loaded existing vector store")
-            return _vector_store
-        except Exception as e:
-            print(f"Error loading existing store: {e}, creating new one")
-    
-    # Load and process the PDF
-    print(f"Processing PDF document: {pdf_path}")
-    pdf_text = load_pdf_document(pdf_path)
-    
-    if not pdf_text:
-        raise ValueError("Could not extract text from PDF")
-    
-    # Split text into chunks
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        length_function=len,
-        separators=["\n\n", "\n", ". ", " ", ""]
-    )
-    
-    # Create documents with metadata
-    chunks = text_splitter.split_text(pdf_text)
-    documents = []
-    
-    for i, chunk in enumerate(chunks):
-        # Extract page number if present
-        page_match = re.search(r'\[Page (\d+)\]', chunk)
-        page_num = page_match.group(1) if page_match else "Unknown"
-        
-        # Clean the chunk text
-        clean_chunk = re.sub(r'\[Page \d+\]', '', chunk).strip()
-        
-        # Create document with metadata
-        doc = Document(
-            page_content=clean_chunk,
-            metadata={
-                "source": "Company Policy",
-                "page": page_num,
-                "chunk_index": i,
-                "document": "company_policy.pdf"
-            }
-        )
-        documents.append(doc)
-    
-    print(f"Created {len(documents)} document chunks")
-    
-    # Create and persist vector store
-    _vector_store = Chroma.from_documents(
-        documents=documents,
-        embedding=_embeddings,
-        persist_directory=persist_directory,
-        collection_name="company_policies"
-    )
-    
-    print("Vector store created and persisted")
-    return _vector_store
+    return _faq_service.process_policy_document(pdf_path, force_reload)
 
 
-def semantic_faq_search(
-    question: str,
-    k: int = 3,
-    score_threshold: float = 0.5
-) -> Tuple[str, List[Dict[str, Any]]]:
-    """
-    Perform semantic search on the FAQ/policy documents
-    
-    Args:
-        question: User's question
-        k: Number of relevant chunks to retrieve
-        score_threshold: Minimum similarity score threshold
-    
-    Returns:
-        Tuple of (formatted answer, list of source documents)
-    """
-    global _vector_store
-    
-    if _vector_store is None:
-        # Initialize vector store with company policy PDF
-        pdf_path = Path(__file__).parent.parent / "Company policy.pdf"
-        if not pdf_path.exists():
-            return "Company policy document not found. Please ensure the PDF is uploaded.", []
-        
-        _vector_store = process_policy_document(str(pdf_path))
-    
-    # Perform similarity search with scores
-    results = _vector_store.similarity_search_with_score(question, k=k)
-    
-    # Filter by score threshold
-    relevant_docs = [(doc, score) for doc, score in results if score >= score_threshold]
-    
-    if not relevant_docs:
-        # If no high-confidence matches, return top result anyway
-        if results:
-            relevant_docs = [results[0]]
-        else:
-            return "I couldn't find specific information about that in our policies. Would you like to speak with a human agent?", []
-    
-    # Collect source content and metadata
-    sources = []
-    combined_context = ""
-    
-    for doc, score in relevant_docs:
-        content = doc.page_content.strip()
-        page = doc.metadata.get("page", "Unknown")
-        combined_context += content + "\n\n"
-        
-        # Track sources
-        sources.append({
-            "content": content,
-            "page": page,
-            "score": score,
-            "metadata": doc.metadata
-        })
-    
-    # Use OpenAI to generate a concise answer if available
-    answer = generate_concise_answer(question, combined_context)
-    
-    # Add source reference if we have page numbers
-    pages = list(set(doc.metadata.get("page", "Unknown") for doc, _ in relevant_docs))
-    if pages and pages != ["Unknown"]:
-        page_refs = ", ".join(f"Page {p}" for p in pages if p != "Unknown")
-        answer += f"\n\n[Reference: {page_refs} of Company Policy]"
-    
-    return answer, sources
+def semantic_faq_search(question: str, k: int = 3, score_threshold: float = 0.5) -> Tuple[str, List[Dict[str, Any]]]:
+    return _faq_service.semantic_search(question, k, score_threshold)
 
 
 def detect_faq_intent(user_text: str) -> bool:
@@ -369,16 +349,8 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
 
 # Initialize the vector store on module load
 def initialize_faq_system():
-    """Initialize the FAQ system with the company policy document"""
-    try:
-        pdf_path = Path(__file__).parent.parent / "Company policy.pdf"
-        if pdf_path.exists():
-            process_policy_document(str(pdf_path))
-            print("FAQ system initialized successfully")
-        else:
-            print("Warning: Company policy.pdf not found")
-    except Exception as e:
-        print(f"Error initializing FAQ system: {e}")
+    """Initialize the FAQ system with the company policy document."""
+    return _faq_service.initialize()
 
 
 def generate_concise_answer(question: str, context: str) -> str:

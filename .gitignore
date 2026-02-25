@@ -105,3 +105,8 @@ Frontend/dist/
 PRD.pdf
 prompt.txt
 pyproject.toml
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
