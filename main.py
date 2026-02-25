@@ -1,7 +1,6 @@
 # main.py
 from fastapi import FastAPI, Request, Response
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+
 from route import health, properties, booking, faq, chat, mobile
 from route import test as test_router
 from datetime import datetime, timezone
@@ -35,10 +34,7 @@ async def root():
     }
 
 
-    @app.get("/chatbot", include_in_schema=False)
-    async def serve_chatbot():
-        """Serve the integrated React-based chatbot UI."""
-        return FileResponse("public/ai-estate-chatbot.html")
+
 
 # POST example: echoes JSON payload
 @app.post("/echo")
@@ -103,5 +99,3 @@ app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
 # Mobile API endpoints
 # app.include_router(mobile.router, prefix="/api/v1", tags=["mobile"])
 
-# Serve your existing static UI (voice page)
-app.mount("/static", StaticFiles(directory="public", html=True), name="public")

@@ -9,8 +9,6 @@ A sophisticated AI-powered real estate chatbot built with FastAPI backend and Re
 - **Booking Management**: Complete booking workflow with payment integration
 - **FAQ System**: Automated responses to common real estate questions
 - **Multi-language Support**: English, Arabic, Korean, and Urdu
-- **Voice Integration**: OpenAI Realtime API for voice conversations
-- **Modern UI**: Beautiful dark-themed interface with Tailwind CSS
 
 ## 🛠️ Tech Stack
 
@@ -22,18 +20,12 @@ A sophisticated AI-powered real estate chatbot built with FastAPI backend and Re
 - **PostgreSQL** - Database for bookings and user data
 - **Supabase** - Backend-as-a-Service
 
-### Frontend
-- **React 18** - Modern React with hooks
-- **Next.js 14** - Full-stack React framework
-- **TypeScript** - Type-safe development
-- **Tailwind CSS** - Utility-first CSS framework
-- **Heroicons** - Beautiful SVG icons
+
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Python 3.12+
-- Node.js 18+
 - PostgreSQL (or use Supabase)
 
 ### 1. Clone the Repository
@@ -66,36 +58,7 @@ python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 ### 3. Access the Chatbot Interfaces
 
-Once the server is running, you can access:
-
-1. **AI Estate Text Chatbot**:
-   - Open http://127.0.0.1:8000/chatbot in your browser
-   - Features:
-     - Real-time text chat with AI
-     - Property search and recommendations
-     - Click the phone icon to switch to calling agent
-
-2. **Voice Calling Agent**:
-   - Open http://127.0.0.1:8000/static/index.html in your browser
-   - Features:
-     - Voice conversations with AI
-     - Real-time transcription
-     - Multi-language support
-
-### 4. Frontend Development Setup (Optional)
-```bash
-# Navigate to frontend directory
-cd Frontend
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-### 4. Access the Application
-- **Frontend**: http://localhost:3000
+Once the server is running, you can access the API at:
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 
@@ -103,11 +66,6 @@ npm run dev
 
 ```
 Calling-Agent-Chatbot/
-├── Frontend/                 # React Next.js frontend
-│   ├── src/app/             # Next.js app directory
-│   ├── package.json         # Node.js dependencies
-│   └── tailwind.config.ts   # Tailwind configuration
-├── public/                   # Static files (legacy)
 ├── services/                 # Core business logic
 │   ├── agents.py           # AI agent implementations
 │   ├── graph.py            # LangGraph workflow
@@ -178,22 +136,7 @@ The system includes specialized AI agents:
 - **Status Agent**: Tracks booking status
 - **Payment Agent**: Handles payment processing
 
-## 🎨 Frontend Development
 
-### Available Scripts
-```bash
-# Development
-npm run dev          # Start development server
-npm run build        # Build for production
-npm run start        # Start production server
-npm run lint         # Run ESLint
-```
-
-### UI Components
-- **Chat Interface**: Real-time messaging with AI
-- **Property Cards**: Beautiful property listings
-- **Booking Forms**: Streamlined booking process
-- **Responsive Design**: Mobile-first approach
 
 ## 🔌 API Endpoints
 
@@ -233,15 +176,7 @@ docker run -p 8000:8000 ai-estate-backend
 git push heroku main
 ```
 
-### Frontend Deployment
-```bash
-# Build for production
-cd Frontend
-npm run build
 
-# Deploy to Vercel/Netlify
-npm run deploy
-```
 
 ## 🧪 Testing
 
@@ -249,9 +184,7 @@ npm run deploy
 # Backend tests
 python -m pytest tests/
 
-# Frontend tests
-cd Frontend
-npm test
+
 
 # API smoke tests
 python tests/api_smoke.py
