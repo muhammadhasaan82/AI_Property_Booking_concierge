@@ -16,4 +16,4 @@ langgraph==0.6.7               # orchestration framework
 # --- database & payments ---
 supabase==2.6.0
 stripe==10.7.0
-streamlit
+chainlit
