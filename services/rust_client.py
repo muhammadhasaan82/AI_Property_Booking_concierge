@@ -32,7 +32,6 @@ async def execute_tool(data: Dict[str, Any], context: Optional[Dict[str, Any]] =
     """
     Call the Rust autonomous gateway's POST /execute endpoint.
     Uses TOON encoding for internal Python ↔ Rust communication.
-    Falls back to JSON if TOON parsing fails.
     Returns the Rust response, or {"fallback": True} if the gateway is unavailable.
     """
     try:
@@ -40,41 +39,22 @@ async def execute_tool(data: Dict[str, Any], context: Optional[Dict[str, Any]] =
         if context:
             payload["context"] = context
 
-        # Try TOON encoding for internal communication
-        use_toon = True
-        try:
-            from .toon import toon_encode, toon_decode
-            body_str = toon_encode(payload)
-            headers = {
-                "Content-Type": "application/toon",
-                "Accept": "application/toon",
-            }
-        except Exception:
-            use_toon = False
-            body_str = json.dumps(payload)
-            headers = {"Content-Type": "application/json"}
+        from . import toon
+        toon_payload = toon.toon_encode(payload)
+        headers = {
+            "Content-Type": "application/toon",
+            "Accept": "application/toon",
+        }
 
         async with httpx.AsyncClient(timeout=RUST_TIMEOUT) as client:
-            if use_toon:
-                r = await client.post(
-                    f"{RUST_GATEWAY_URL}/execute",
-                    content=body_str,
-                    headers=headers,
-                )
-            else:
-                r = await client.post(
-                    f"{RUST_GATEWAY_URL}/execute",
-                    json=payload,
-                )
+            r = await client.post(
+                f"{RUST_GATEWAY_URL}/execute",
+                content=toon_payload,
+                headers=headers,
+            )
 
         if r.status_code == 200:
-            content_type = r.headers.get("content-type", "")
-            if "toon" in content_type and use_toon:
-                try:
-                    return toon_decode(r.text)
-                except Exception:
-                    pass  # Fall through to JSON
-            return r.json()
+            return toon.toon_decode(r.text)
         else:
             print(f"[RUST] Gateway returned {r.status_code}: {r.text[:200]}")
             return {"fallback": True, "error": f"HTTP {r.status_code}"}

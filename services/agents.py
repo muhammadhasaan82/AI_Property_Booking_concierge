@@ -1820,7 +1820,7 @@ def _need_booking_fields(args: Dict[str, Any]) -> List[str]:
         if not args.get(k): missing.append(k)
     return missing
 
-def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
+async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
     missing=_need_booking_fields(args)
     if missing:
         return {"reply": f"To finalize the booking I need: {', '.join(missing).replace('_',' ')}.",
@@ -1831,49 +1831,15 @@ def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
     # If the gateway is unreachable, skip validation and proceed
     # ──────────────────────────────────────────────────────────
     try:
-        import asyncio
-        from . import rust_client
+        from .rust_client import validate_booking
 
-        validation_payload = {
-            "property_id": args.get("property_id", ""),
-            "check_in": args.get("check_in", ""),
-            "check_out": args.get("check_out", ""),
-            "guests": int(args.get("guests", 1)),
-            "email": args.get("email", ""),
-        }
-
-        # Run the async call from sync context using asyncio
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # We're inside an async context — schedule but can't await directly
-            # Use a future; but since booking_agent is sync, this is the one
-            # place we create a new loop on a thread
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                rust_validation = pool.submit(
-                    asyncio.run,
-                    rust_client.validate_booking(
-                        property_id=validation_payload["property_id"],
-                        check_in=validation_payload["check_in"],
-                        check_out=validation_payload["check_out"],
-                        guests=validation_payload["guests"],
-                        email=validation_payload.get("email"),
-                    )
-                ).result(timeout=6)
-        else:
-            rust_validation = asyncio.run(
-                rust_client.validate_booking(
-                    property_id=validation_payload["property_id"],
-                    check_in=validation_payload["check_in"],
-                    check_out=validation_payload["check_out"],
-                    guests=validation_payload["guests"],
-                    email=validation_payload.get("email"),
-                )
-            )
+        rust_validation = await validate_booking(
+            property_id=args.get("property_id", ""),
+            check_in=args.get("check_in", ""),
+            check_out=args.get("check_out", ""),
+            guests=int(args.get("guests", 1)),
+            email=args.get("email", "")
+        )
 
         if not rust_validation.get("fallback"):
             # Unwrap: the gateway wraps in {ok, result, ...}
@@ -1882,19 +1848,19 @@ def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
             errors = inner.get("errors", [])
             warnings = inner.get("warnings", [])
 
-            if not is_valid and errors:
+            if not is_valid:
                 error_list = "\n".join(f"• {e}" for e in errors)
                 warn_text = ""
                 if warnings:
                     warn_text = "\n\n⚠️ Warnings:\n" + "\n".join(f"• {w}" for w in warnings)
                 return {
                     "reply": f"❌ **Booking validation failed:**\n\n{error_list}{warn_text}\n\nPlease correct the above and try again.",
-                    "tool_result": {"ok": False, "validation_errors": errors, "warnings": warnings},
+                    "tool_result": {"ok": False, "need": ["correction"], "validation_errors": errors, "warnings": warnings},
                 }
             # Validation passed — log any warnings
             if warnings:
                 print(f"[RUST] Booking validation warnings: {warnings}")
-            print(f"[RUST] Booking validated OK via gateway (nights={inner.get('nights', '?')})")
+            print(f"[RUST] Booking validated OK via gateway")
     except Exception as e:
         print(f"[RUST] Booking validation offload failed: {e}, proceeding with Python logic")
     
@@ -2106,21 +2072,17 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     # ──────────────────────────────────────────────────────────
     results = None
     try:
-        from . import rust_client
-        rust_payload = {
-            "location": requested_city or "",
-            "budget": extracted.get("budget"),
-            "beds": extracted.get("beds"),
-            "amenities": extracted.get("amenities") or [],
-            "property_type": prop_type or "",
-            "query_text": enhanced,
-        }
-        # Include the dataset so Rust can filter it server-side
+        from .rust_client import search_properties
         from .search import _DATASET
-        if _DATASET:
-            rust_payload["properties"] = _DATASET
 
-        rust_result = await rust_client.execute_tool(rust_payload)
+        rust_result = await search_properties(
+            location=requested_city or "",
+            budget=extracted.get("budget"),
+            beds=extracted.get("beds"),
+            amenities=extracted.get("amenities") or [],
+            property_type=prop_type or "",
+            properties=_DATASET if _DATASET else None,
+        )
 
         if not rust_result.get("fallback"):
             # Extract results from the Rust response

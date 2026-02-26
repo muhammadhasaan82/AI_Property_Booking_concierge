@@ -141,9 +141,9 @@ async def node_property(state: ChatState) -> ChatState:
         out = await property_agent(state.get("user_text", ""), state.get("filters", {}) or {})
         return {**state, **out}
 
-def node_booking(state: ChatState) -> ChatState:
-    with span("node_booking"):
-        out = booking_agent(state.get("booking_args", {}) or {})
+async def node_booking(state: ChatState) -> ChatState:
+    async with span("node_booking"):
+        out = await booking_agent(state.get("booking_args", {}) or {})
         result = {**state, **out}
         
         # If booking was successful, clear all booking-related state
