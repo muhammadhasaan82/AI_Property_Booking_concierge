@@ -197,80 +197,19 @@ def semantic_faq_search(question: str, k: int = 3, score_threshold: float = 0.5)
 
 def detect_faq_intent(user_text: str) -> bool:
     """
-    Detect if the user's message is asking about policies, terms, or FAQs
-    
+    Detect if the user's message is asking about policies, terms, or FAQs.
+
+    Uses NLP-powered semantic classification via nlp_engine instead of
+    hardcoded keyword arrays.
+
     Args:
         user_text: User's input text
-    
+
     Returns:
         True if this appears to be a FAQ/policy question
     """
-    text_lower = user_text.lower()
-    
-    # FAQ trigger keywords
-    faq_keywords = [
-        # Policy-related
-        "policy", "policies", "terms", "conditions", "rules", "regulations",
-        "requirements", "guidelines", "procedures", "protocol",
-        
-        # Refund and cancellation
-        "refund", "cancel", "cancellation", "reschedule", "postpone",
-        "money back", "reimbursement", "compensation", "return",
-        
-        # Payment
-        "payment", "pay", "deposit", "fee", "charge", "cost", "price",
-        "billing", "invoice", "transaction", "method of payment",
-        
-        # Check-in/out
-        "check-in", "checkin", "check in", "check-out", "checkout", "check out",
-        "arrival", "departure", "early check", "late check",
-        
-        # Disputes and issues
-        "dispute", "complaint", "issue", "problem", "concern", "grievance",
-        "resolution", "support", "help", "assistance",
-        
-        # Amenities and services
-        "amenities", "facilities", "services", "included", "provided",
-        "wifi", "parking", "breakfast", "cleaning", "maintenance",
-        
-        # Pets and smoking
-        "pet", "pets", "animal", "dog", "cat", "smoking", "smoke",
-        
-        # Damage and security
-        "damage", "security", "deposit", "liability", "responsible",
-        "insurance", "coverage", "protection",
-        
-        # Guest-related
-        "guest", "visitor", "occupancy", "capacity", "maximum",
-        "additional", "extra person", "children", "infant",
-        
-        # Question indicators
-        "what is", "what are", "what's", "how does", "how do", "how to",
-        "can i", "can we", "is it", "are there", "do you", "does the",
-        "tell me about", "explain", "clarify", "understand"
-    ]
-    
-    # Check for FAQ keywords
-    for keyword in faq_keywords:
-        if keyword in text_lower:
-            # Additional context check - make sure it's actually a question
-            # and not just mentioning these terms in booking context
-            question_patterns = [
-                r'\?',  # Has question mark
-                r'^(what|how|when|where|why|can|do|does|is|are|tell|explain)',  # Starts with question word
-                r'(please )?(tell|explain|clarify|help|show) (me |us )?',  # Request patterns
-            ]
-            
-            for pattern in question_patterns:
-                if re.search(pattern, text_lower):
-                    return True
-            
-            # Even without question patterns, strong policy keywords should trigger FAQ
-            strong_triggers = ["policy", "refund", "cancel", "terms", "conditions", "dispute"]
-            if any(trigger in text_lower for trigger in strong_triggers):
-                return True
-    
-    return False
+    from . import nlp_engine
+    return nlp_engine.detect_faq_intent(user_text)
 
 
 def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -371,12 +310,15 @@ def generate_concise_answer(question: str, context: str) -> str:
     try:
         import httpx
         
-        # Determine if this is a simple or complex question
-        simple_keywords = ["allowed", "permitted", "can i", "is it", "are there", "what time", "when"]
-        complex_keywords = ["explain", "how does", "process", "procedure", "policy", "terms", "conditions"]
-        
-        is_simple = any(kw in question.lower() for kw in simple_keywords)
-        is_complex = any(kw in question.lower() for kw in complex_keywords)
+        # Determine question complexity using VADER + heuristics
+        from . import nlp_engine
+        vader = nlp_engine._get_vader()
+        q_lower = question.lower()
+        q_words = len(q_lower.split())
+        scores = vader.polarity_scores(q_lower)
+        # Simple: short, direct questions; Complex: longer, analytical questions
+        is_simple = q_words <= 6 and "?" in question
+        is_complex = q_words > 10 or any(w in q_lower for w in ["explain", "how does", "process", "procedure"])
         
         # Set length guidance
         if is_simple and not is_complex:

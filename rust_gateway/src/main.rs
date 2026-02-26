@@ -1,13 +1,16 @@
 mod gateway;
 mod tools;
 mod cache;
+mod toon;
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{StatusCode, HeaderMap},
     routing::{get, post},
     Json, Router,
 };
+use axum::body::Body;
+use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
@@ -30,13 +33,39 @@ async fn health() -> Json<Value> {
 }
 
 /// Schema-agnostic autonomous gateway.
-/// Accepts arbitrary JSON, infers intent, routes to the best tool.
+/// Accepts JSON or TOON payloads, infers intent, routes to the best tool.
+/// Responds in TOON if Accept header requests it.
 async fn execute(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> (StatusCode, Json<Value>) {
-    let data = body.get("data").cloned().unwrap_or(body.clone());
-    let context = body.get("context").cloned().unwrap_or(json!({}));
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    // Parse body based on Content-Type
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
+
+    let parsed: Value = if content_type.contains("toon") {
+        match toon::decode(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                let err = json!({"ok": false, "error": format!("TOON parse error: {}", e)});
+                return make_response(&headers, &err);
+            }
+        }
+    } else {
+        match serde_json::from_str(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                let err = json!({"ok": false, "error": format!("JSON parse error: {}", e)});
+                return make_response(&headers, &err);
+            }
+        }
+    };
+
+    let data = parsed.get("data").cloned().unwrap_or(parsed.clone());
+    let context = parsed.get("context").cloned().unwrap_or(json!({}));
 
     // Check cache first
     let cache_key = cache::cache_key("execute", &data);
@@ -45,7 +74,7 @@ async fn execute(
         if let Some(obj) = result.as_object_mut() {
             obj.insert("cached".to_string(), json!(true));
         }
-        return (StatusCode::OK, Json(result));
+        return make_response(&headers, &result);
     }
 
     // Process through gateway
@@ -62,7 +91,28 @@ async fn execute(
         state.cache.set(cache_key, result.clone(), ttl);
     }
 
-    (StatusCode::OK, Json(result))
+    make_response(&headers, &result)
+}
+
+/// Build a response in JSON or TOON based on the Accept header.
+fn make_response(headers: &HeaderMap, value: &Value) -> Response {
+    let accept = headers
+        .get("accept")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
+
+    if accept.contains("toon") {
+        let toon_body = toon::encode(value);
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", toon::CONTENT_TYPE)
+            .body(Body::from(toon_body))
+            .unwrap_or_else(|_| {
+                Json(json!({"ok": false, "error": "Response build error"})).into_response()
+            })
+    } else {
+        Json(value.clone()).into_response()
+    }
 }
 
 /// Direct property search tool endpoint.

@@ -168,9 +168,35 @@ for a in sorted(DATASET_AMENITIES):
     if a and not any(a in syns for syns in AMENITY_KEYWORDS.values()):
         AMENITY_KEYWORDS.setdefault(a, [a])
 
-# ----------------------- Property types -----------------------------
+# ----------------------- Property types (dataset-driven) ----------------
 
-PROPERTY_TYPES = ["condo", "loft", "apartment", "house", "studio", "villa", "townhouse", "flat", "cottage", "bungalow", "penthouse"]
+# Seed types that are always recognized
+_SEED_PROPERTY_TYPES = {
+    "condo", "loft", "apartment", "house", "studio", "villa",
+    "townhouse", "flat", "cottage", "bungalow", "penthouse",
+}
+
+# Augment from dataset if available
+PROPERTY_TYPES: list[str] = sorted(_SEED_PROPERTY_TYPES)
+
+def _load_property_types_from_dataset() -> None:
+    """Dynamically add property types discovered in the dataset."""
+    global PROPERTY_TYPES
+    if not DATASET_PATH or not Path(DATASET_PATH).exists():
+        return
+    try:
+        found: set[str] = set(_SEED_PROPERTY_TYPES)
+        with open(DATASET_PATH, "r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                pt = _norm(row.get("property_type", ""))
+                if pt and len(pt) >= 3:
+                    found.add(pt)
+        PROPERTY_TYPES = sorted(found)
+    except Exception:
+        pass
+
+_load_property_types_from_dataset()
 
 def _fuzzy_property_type(text: str) -> Optional[str]:
     tokens = re.findall(r"[a-zA-Z]+", text)

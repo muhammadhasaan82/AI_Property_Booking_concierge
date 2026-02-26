@@ -9,7 +9,7 @@ pub struct SentimentTool;
 impl SentimentTool {
     fn build_lexicon() -> HashMap<&'static str, f64> {
         let mut lex = HashMap::new();
-        // Positive words
+        // Positive words (general)
         for (word, score) in [
             ("good", 1.9), ("great", 3.1), ("excellent", 3.4), ("amazing", 3.2),
             ("wonderful", 3.0), ("fantastic", 3.1), ("perfect", 3.0), ("beautiful", 2.7),
@@ -22,7 +22,19 @@ impl SentimentTool {
         ] {
             lex.insert(word, score);
         }
-        // Negative words
+        // Positive words (hospitality domain)
+        for (word, score) in [
+            ("cozy", 2.1), ("charming", 2.3), ("luxurious", 3.0), ("immaculate", 2.8),
+            ("pristine", 2.7), ("welcoming", 2.4), ("modern", 1.6), ("renovated", 1.8),
+            ("stunning", 2.9), ("breathtaking", 3.0), ("serene", 2.3), ("tranquil", 2.2),
+            ("attentive", 2.2), ("responsive", 2.0), ("courteous", 2.2), ("prompt", 1.8),
+            ("delicious", 2.7), ("gourmet", 2.3), ("scenic", 2.1), ("panoramic", 2.0),
+            ("upgraded", 1.9), ("complimentary", 1.8), ("affordable", 1.7),
+            ("spotless", 2.5), ("resort", 1.3), ("paradise", 2.8),
+        ] {
+            lex.insert(word, score);
+        }
+        // Negative words (general)
         for (word, score) in [
             ("bad", -2.5), ("terrible", -3.4), ("awful", -3.1), ("horrible", -3.2),
             ("poor", -2.3), ("worst", -3.5), ("dirty", -2.7), ("ugly", -2.2),
@@ -35,10 +47,20 @@ impl SentimentTool {
         ] {
             lex.insert(word, score);
         }
+        // Negative words (hospitality domain)
+        for (word, score) in [
+            ("moldy", -3.0), ("infested", -3.3), ("cockroach", -3.5), ("bedbug", -3.5),
+            ("stained", -2.3), ("musty", -2.2), ("neglected", -2.5), ("rundown", -2.7),
+            ("unsafe", -2.8), ("misleading", -2.4), ("scam", -3.2), ("overbooked", -2.3),
+            ("unresponsive", -2.2), ("unprofessional", -2.5), ("filthy", -3.0),
+            ("dilapidated", -2.8), ("hazardous", -2.9), ("unacceptable", -2.7),
+        ] {
+            lex.insert(word, score);
+        }
         // Boosters
         for (word, score) in [
             ("very", 0.0), ("really", 0.0), ("extremely", 0.0), ("absolutely", 0.0),
-            ("quite", 0.0), ("so", 0.0),
+            ("quite", 0.0), ("so", 0.0), ("incredibly", 0.0), ("exceptionally", 0.0),
         ] {
             lex.insert(word, score);
         }

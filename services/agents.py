@@ -18,9 +18,10 @@ from .booking import (
     get_booking_status,
 )
 from .faq import faq_lookup
-from .faq_enhanced import enhanced_faq_agent, detect_faq_intent, initialize_faq_system
+from .faq_enhanced import enhanced_faq_agent, initialize_faq_system
 from .whatsapp import send_payment_link_async
 from .nlp_extractor import extract_filters, extract_property_type, KNOWN_CITIES, CITY_ALIASES
+from . import nlp_engine
 from .db_logging import insert_booking_details
 
 # -----------------------
@@ -41,210 +42,69 @@ OPENAI_MAX_TOKENS = os.getenv("OPENAI_MAX_TOKENS")
 LLM_STRUCTURED = os.getenv("LLM_STRUCTURED", "1") not in ("0", "false", "False")
 
 # -----------------------
-# Intent helpers
+# Intent helpers — NLP-powered (delegates to nlp_engine)
 # -----------------------
-_GREETING_PAT = re.compile(
-    r"\b(hi|hello|hey|salam|assalam|assalamu|good morning|good afternoon|good evening|"
-    r"how are you|what's up|whats up|yo|hiya)\b",
-    re.IGNORECASE
-)
-
-_BOOKING_TRIGGERS = [" book ", "reserve", "hold", "lock it", "go ahead", "confirm it"]
-_PROP_TYPES = ["condo", "loft", "apartment", "house", "studio", "villa", "townhouse", "flat", "cottage", "bungalow", "penthouse"]
-_MONEY_PAT = re.compile(r"(\$|€|£)\s*\d+|\b(under|below|less than|max(?:imum)?|up to)\b\s*[\$€£]?\s*\d+", re.I)
-
-def _is_greeting(t: str) -> bool: return bool(_GREETING_PAT.search(t or ""))
-def _is_ack(t: str) -> bool:
-    tl=(t or "").strip().lower()
-    return tl in {"ok","okay","alright","fine","kk","k","oki"} or any(p in tl for p in ["sounds good","got it","thanks"])
-def _is_yes(t: str) -> bool:
-    tl=(t or "").strip().lower()
-    return tl in {"yes","yeah","yep","yup","sure","please","ok","okay","alright","oki"}
-def _is_no(t: str) -> bool:
-    tl=(t or "").strip().lower()
-    return tl in {"no","nope","nah","not now","later","stop","cancel"}
-def _is_handoff_request(t: str) -> bool:
-    tl=(t or "").strip().lower()
-    return any(w in tl for w in ["human","person","agent","representative","support","live chat","talk to","connect me","operator"])
-def _is_availability_query(t: str) -> bool:
-    tl=(t or "").strip().lower()
-    return any(k in tl for k in ["available dates","availability","what dates","which dates","show dates","calendar","date options","open dates"])
-
-def _is_status_query(t: str) -> bool:
-    tl=(t or "").strip().lower()
-    if not tl: return False
-    # Detect questions about booking status or check-in/out
-    status_terms = [
-        "status", "booking status", "check status", "status of my booking",
-        "check-in", "check in", "checkin", "arrival",
-        "check-out", "check out", "checkout", "departure",
-        "booking id", "booking_id", "booking-id", "bookingid", "my booking id", "my booking_id"
-    ]
-    if any(k in tl for k in status_terms):
-        return True
-    # UUID present often implies the user is responding with an ID (likely after we asked for it)
-    if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", tl):
-        return True
-    return False
-
-def _is_end(t: str) -> bool:
-    tl=(t or "").strip().lower()
-    if not tl: return False
-    end_terms = [
-        "end", "end chat", "close", "close chat", "finish", "done",
-        "goodbye", "bye", "exit", "quit", "no thanks", "that's all", "that is all"
-    ]
-    return any(k == tl or k in tl for k in end_terms)
-
-# -----------------------
-# Selection & slot helpers
-# -----------------------
-_ORDINAL_WORDS = {"first":1,"1st":1,"second":2,"2nd":2,"third":3,"3rd":3,"fourth":4,"4th":4,"fifth":5,"5th":5}
-_CARDINAL_WORDS = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10}
+# Structural regex (not semantic, kept minimal)
 _DATE_PAT = re.compile(r"\b(\d{4}-\d{1,2}-\d{1,2})\b")
 _EMAIL_PAT = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
+
+def _is_greeting(t: str) -> bool:
+    return nlp_engine.is_greeting(t or "")
+
+def _is_ack(t: str) -> bool:
+    return nlp_engine.is_acknowledgment(t or "")
+
+def _is_yes(t: str) -> bool:
+    return nlp_engine.classify_affirmation(t or "") == "yes"
+
+def _is_no(t: str) -> bool:
+    return nlp_engine.classify_affirmation(t or "") == "no"
+
+def _is_handoff_request(t: str) -> bool:
+    return nlp_engine.is_handoff_request(t or "")
+
+def _is_availability_query(t: str) -> bool:
+    return nlp_engine.is_availability_query(t or "")
+
+def _is_status_query(t: str) -> bool:
+    return nlp_engine.is_status_query(t or "")
+
+def _is_end(t: str) -> bool:
+    return nlp_engine.is_end_request(t or "")
+
+# -----------------------
+# Selection & slot helpers — NLP-powered
+# -----------------------
+
 def _parse_selection_index(t: str) -> int | None:
-    tl=(t or "").strip().lower()
-    if not tl: return None
-    for rx in [r"\b(\d{1,2})(?:st|nd|rd|th)\b",
-               r"\b(?:option|number|no\.?|#)\s*(\d{1,2})\b",
-               r"\b(?:pick|choose|select|book|take)\s*(\d{1,2})\b",
-               r"^\s*(\d{1,2})\s*$"]:
-        m = re.search(rx, tl)
-        if m:
-            i=int(m.group(1))
-            return i if i>=1 else None
-    for w,i in _ORDINAL_WORDS.items():
-        if w in tl or f"the {w}" in tl or f"{w} one" in tl: return i
-    # Match spelled-out cardinal numbers with optional qualifiers like "option five"
-    m = re.search(r"\b(?:option|number|no\.?|#)?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b", tl)
-    if m:
-        return _CARDINAL_WORDS.get(m.group(1))
-    return None
+    return nlp_engine.extract_cardinal(t or "")
 
-def _parse_email(t:str) -> str|None:
-    m=_EMAIL_PAT.search(t or ""); return m.group(0) if m else None
+def _parse_email(t: str) -> str | None:
+    return nlp_engine.extract_email(t or "")
 
-def _parse_dates(t:str) -> list[str]: return _DATE_PAT.findall(t or "")
+def _parse_dates(t: str) -> list[str]:
+    return nlp_engine.extract_dates(t or "")
 
-def _parse_guests(t:str) -> int|None:
-    tl=(t or "").lower().strip()
-    # Match patterns like "5 guests", "5 people", or just "5"
-    m=re.search(r"(\d{1,3})\s*(guest|guests|people|persons|pax)?\b", tl) or re.search(r"^(\d{1,3})$", tl)
-    if m:
-        try:
-            n=int(m.group(1))
-            # Allow up to 100 guests (reasonable for large properties/events)
-            return n if 1 <= n <= 100 else None
-        except: pass
-    return None
+def _parse_guests(t: str) -> int | None:
+    return nlp_engine.extract_guests(t or "")
 
-_NAME_PATS = [
-    re.compile(r"\bmy name is\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-    re.compile(r"\bname is\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-    re.compile(r"\bi am\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-    re.compile(r"\bI'm\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-    re.compile(r"^([A-Za-z][A-Za-z .'-]{1,60})\b", re.I),
-    re.compile(r"^([A-Za-z]{2,60})$", re.I),  # Allow single word names of 2+ chars
-]
+def _parse_name(t: str) -> str | None:
+    return nlp_engine.extract_person_name(t or "")
 
-def _looks_like_email_username(s:str)->bool:
-    if not s: return False
-    common={'test','example','user','admin','john','jane','info','contact','support','help','demo'}
-    return (len(s)<=3 or s.lower() in common or re.search(r'\d', s) or re.search(r'[^a-zA-Z\s\-.\']', s))
-
-def _parse_name(t:str)->str|None:
-    """Return None if the text looks like a SEARCH or COMMAND (prevents false positives)."""
-    if not t: return None
-    t_lower = t.lower().strip()
-    
-    # If we're explicitly awaiting a name (context-aware), be more lenient
-    # This will be checked by the confirmation agent
-    
-    search_terms = [
-        "find", "show", "search", "look for", "looking for", "want", "need",
-        "rent", "buy", "apartment", "house", "villa", "condo", "loft", "studio",
-        "in ", "under $", "under", "$", "per night", "available", "dates", "amenities"
-    ]
-    if any(term in t_lower for term in search_terms):
-        return None  # don't misread search as a name
-
-    for pat in _NAME_PATS:
-        m=pat.search(t)
-        if m:
-            cand=m.group(1).strip().rstrip('.').strip()
-            # Accept shorter names (2+ chars) when explicitly asked for a name
-            if len(cand) >= 2:
-                return cand
-            if not _looks_like_email_username(cand): 
-                return cand
-    return None
-
-def _parse_phone(t:str)->str|None:
-    m=re.search(r"(\+?[\d\s\-]{8,15}\d)", t or "")
-    if m:
-        num=re.sub(r"[\s\-]","", m.group(1))
-        if re.search(r"\d{4}-\d{1,2}-\d{1,2}", t or ""): return None
-        if re.match(r"^\d{8}$", num): return None
-        return num
-    return None
+def _parse_phone(t: str) -> str | None:
+    return nlp_engine.extract_phone(t or "")
 
 def _parse_booking_id(t: str) -> str | None:
-    """Extract UUID booking ID from user text."""
-    if not t: return None
-    # Look for UUID pattern
-    uuid_match = re.search(r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b", t.lower())
-    if uuid_match:
-        return uuid_match.group(1)
-    # Look for shorter booking ID patterns (8-char hex)
-    short_match = re.search(r"\b([0-9a-f]{8})\b", t.lower())
-    if short_match:
-        return short_match.group(1)
-    return None
+    return nlp_engine.extract_booking_id(t or "")
 
-def _looks_like_property_search(t:str)->bool:
-    tl=(t or "").lower()
-    # Do not treat status-related questions as property search
-    if _is_status_query(t):
-        return False
-    # If message contains a booking ID shape or mentions booking id, it's not a property search
-    if "booking id" in tl or "booking_id" in tl or "booking-id" in tl or "bookingid" in tl:
-        return False
-    if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", tl):
-        return False
-    # Expanded keywords for better detection of property search intent
-    search_keywords = [
-        "want", "need", "looking", "search", "find", "place", "property", "rent",
-        "stay", "accommodation", "lodging", "room", "suite", "home",
-        "show", "available", "availability", "options", "choices", "listings",
-        "interested", "seeking", "hunting", "browse", "explore", "view",
-        "reservation", "reserve", "get", "lease", "hire"
-    ]
-    # Common phrases that indicate property search
-    search_phrases = [
-        "i want", "i need", "i'm looking", "i am looking", "we want", "we need",
-        "we're looking", "we are looking", "looking for", "searching for",
-        "find me", "show me", "what do you have", "what's available",
-        "do you have", "are there any", "i'd like", "we'd like",
-        "interested in", "want to rent", "need to rent", "looking to rent",
-        "find a", "find an", "get me", "get a", "get an"
-    ]
-    
-    return bool(tl) and (
-        any(p in tl for p in _PROP_TYPES) 
-        or any(c in tl for c in KNOWN_CITIES)
-        or any(a in tl for a in CITY_ALIASES.keys()) 
-        or _MONEY_PAT.search(tl)
-        or any(w in tl for w in search_keywords)
-        or any(phrase in tl for phrase in search_phrases)
-    )
+def _looks_like_property_search(t: str) -> bool:
+    return nlp_engine.is_property_search(t or "")
+
 def get_available_cities() -> List[str]:
     """Get list of unique cities from the dataset for display."""
     from .nlp_extractor import KNOWN_CITIES
-    # Convert to title case and sort
     cities = sorted([c.title() for c in KNOWN_CITIES if c and len(c) > 2])
-    # Remove duplicates while preserving order
     seen = set()
     unique_cities = []
     for city in cities:
@@ -254,118 +114,68 @@ def get_available_cities() -> List[str]:
     return unique_cities[:20]
 
 def _wants_property_search_request(t: str) -> bool:
-    tl=(t or "").lower().strip()
-    if not tl: return False
-    phrases=[
-        "search for different properties",
-        "search different properties",
-        "search for other properties",
-        "search other properties",
-        "show other options",
-        "show more options",
-        "more properties",
-        "different options",
-        "other options",
-        "browse more",
-        "see more",
-        "change property",
-        "another property",
-        "different property",
-        "different properties",
-        "other property",
-    ]
-    if any(p in tl for p in phrases):
-        return True
-    # Fallback: strong hint when both search/browse verb and property noun appear
-    return ("search" in tl or "browse" in tl or "show" in tl) and ("property" in tl or "properties" in tl or "options" in tl)
+    return nlp_engine.wants_property_search_request(t or "")
 
 def _wants_modification(t: str) -> bool:
-    tl=(t or "").lower().strip()
-    return any(w in tl for w in [
-        "modify","modification","change","update","edit","correct","fix","adjust","tweak"
-    ])
+    return nlp_engine.wants_modification(t or "")
 
 def _detect_requested_fields(t: str) -> List[str]:
-    """Return list of fields user wants to modify based on common phrases.
-    Possible fields: name, phone, email, check_in, check_out, guests, dates, property
-    """
-    tl=(t or "").lower()
-    fields: List[str] = []
-    def add(f: str):
-        if f not in fields: fields.append(f)
-    # Property
-    if any(p in tl for p in ["different property","another property","other property","change property","switch property","new property","browse more","more options","more listings","search different properties","find different property"]):
-        add("property")
-    # Dates - Enhanced detection
-    if any(p in tl for p in ["check out","checkout","check-out","departure","end date","check_out","check out date"]): add("check_out")
-    if any(p in tl for p in ["check in","checkin","check-in","arrival","start date","check_in","check in date"]): add("check_in")
-    if any(p in tl for p in ["dates","both dates","change dates","update dates","modify dates","my dates","new dates","different dates","change my dates","update my dates","modify my dates"]): add("dates")
-    # Location / city
-    if any(p in tl for p in ["city","location","change city","change location","modify city","modify location","update city","update location"]):
-        add("location")
-    # Contact / identity
-    if any(p in tl for p in ["name","my name","change name","update name","modify name"]): add("name")
-    if any(p in tl for p in ["phone","mobile","number","contact number","phone number","my phone","change phone","update phone","modify phone"]): add("phone")
-    if any(p in tl for p in ["email","e-mail","mail","email address","my email","change email","update email","modify email"]): add("email")
-    # Guests
-    if any(p in tl for p in ["guest","guests","people","persons","pax","number of guests","change guests","update guests","modify guests","my guests"]): add("guests")
-    return fields
+    return nlp_engine.detect_requested_fields(t or "")
 
-def triage_intent(user_text:str)->str:
-    t=user_text or ""
-    
+def triage_intent(user_text: str) -> str:
+    t = user_text or ""
+
     # IMPORTANT: Check greetings FIRST, before any other intent
-    # This prevents "hi" from being misinterpreted as a name or other input
     if _is_greeting(t): return "greeting"
-    
+
     # Check for FAQ/Policy questions EARLY in the flow
-    # This allows FAQ questions to be handled even during booking
     try:
-        if detect_faq_intent(t):
+        if nlp_engine.detect_faq_intent(t):
             return "faq"
-    except Exception as e:
-        # Fallback to basic FAQ detection if enhanced fails
-        tl=t.lower()
-        if any(w in tl for w in ["wifi","faq","policy","check-in time","rules","password","refund","cancel","terms"]): 
+    except Exception:
+        tl = t.lower()
+        if any(w in tl for w in ["wifi", "faq", "policy", "check-in time",
+                                  "rules", "password", "refund", "cancel", "terms"]):
             return "faq"
-    
+
     # Check for booking status queries BEFORE property search
-    if _is_status_query(t):
-        return "status_update"
+    if _is_status_query(t): return "status_update"
 
     # Check for explicit end requests BEFORE other intents
-    if _is_end(t):
-        return "end"
-    
+    if _is_end(t): return "end"
+
     # Check for property search BEFORE confirmation intents
-    # This prevents "find apartment in new york" from being treated as a name
     if _looks_like_property_search(t): return "property_search"
-    
+
     # Then check for other specific intents
     if _is_handoff_request(t): return "handoff"
     if _is_availability_query(t): return "availability"
-    
-    # If user mentions specific fields to change (e.g., "dates", "guests"), treat as confirmation/modification
+
+    # If user mentions specific fields to change, treat as confirmation
     try:
         if _detect_requested_fields(t):
             return "confirmation"
     except Exception:
         pass
-    
-    # If user wants to modify requirements, keep them in confirmation flow
+
+    # If user wants to modify, keep them in confirmation flow
     if _wants_modification(t): return "confirmation"
-    
+
     # If user is giving selection/booking info, go to confirmation
-    # BUT only after we've checked for property search
     if (_EMAIL_PAT.search(t) or _DATE_PAT.search(t) or _parse_phone(t) is not None or
         _parse_name(t) is not None or _is_yes(t) or _is_no(t) or
         _parse_guests(t) is not None or _parse_selection_index(t) is not None):
         return "confirmation"
-    
+
     if _is_ack(t): return "confirmation"
+
+    # Booking triggers — semantic agent routing
+    _BOOKING_TRIGGERS = [" book ", "reserve", "hold", "lock it", "go ahead", "confirm it"]
     if any(w in t.lower() for w in _BOOKING_TRIGGERS): return "booking"
-    if any(w in t.lower() for w in ["check in","check-in","check out","check-out","status"]): return "status_update"
-    if any(w in t.lower() for w in ["pay","payment","link","invoice"]): return "payment_link"
+    if any(w in t.lower() for w in ["check in", "check-in", "check out", "check-out", "status"]):
+        return "status_update"
+    if any(w in t.lower() for w in ["pay", "payment", "link", "invoice"]):
+        return "payment_link"
     return "property_search"
 
 # -----------------------

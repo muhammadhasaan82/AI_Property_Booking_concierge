@@ -112,3 +112,4 @@ target/
 Cargo.lock
 walkthrough.md.resolved
 implementation_plan.md.resolved
+cargo_errors.txt

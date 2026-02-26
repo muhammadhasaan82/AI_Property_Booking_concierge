@@ -3,6 +3,11 @@ fastapi==0.111.1
 python-dotenv==1.0.1
 httpx==0.27.0
 
+# --- NLP engine ---
+vaderSentiment~=3.3
+spacy~=3.7
+numpy>=1.24
+
 # --- RAG stack ---
 chromadb==1.1.0             # vector DB
 sentence-transformers==2.7.0   # Hugging Face embeddings
