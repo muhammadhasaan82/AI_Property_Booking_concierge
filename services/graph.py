@@ -79,6 +79,11 @@ def node_triage(state: ChatState) -> ChatState:
             elif awaiting_field in ["name", "phone", "email", "check_in", "check_out", "guests", "modification", "modification_choice", "location"]:
                 # User is providing data for a requested field, keep in confirmation flow
                 intent = "confirmation"
+                
+        # Guard: Orphaned affirmations (e.g. user says "ok" after a greeting) shouldn't trigger the booking loop 
+        # unless they have actually selected a property or are explicitly awaiting a booking field
+        if intent == "confirmation" and not filters.get("selected_property") and not filters.get("awaiting_field"):
+            intent = "greeting"
 
         # If status intent, opportunistically extract booking_id from the user's text
         if intent == "status_update":
