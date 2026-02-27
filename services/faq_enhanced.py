@@ -14,10 +14,10 @@ from datetime import datetime
 from PyPDF2 import PdfReader
 
 # LangChain imports
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 # Load environment variables
 from dotenv import load_dotenv
