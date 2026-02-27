@@ -22,9 +22,13 @@ from langchain_core.documents import Document
 # Load environment variables
 from dotenv import load_dotenv
 
-env_path = Path(__file__).parent.parent / ".env"
-if env_path.exists():
-    load_dotenv(env_path)
+env_path_root = Path(__file__).parent.parent / ".env"
+env_path_services = Path(__file__).parent / ".env"
+
+if env_path_root.exists():
+    load_dotenv(env_path_root)
+elif env_path_services.exists():
+    load_dotenv(env_path_services)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
