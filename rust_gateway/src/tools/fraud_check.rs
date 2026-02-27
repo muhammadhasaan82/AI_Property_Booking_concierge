@@ -17,7 +17,7 @@ impl Tool for FraudCheckTool {
 
     fn confidence(&self, input: &Value) -> f64 {
         if input.get("check_fraud").is_some() { return 0.95; }
-        let mut score = 0.0;
+        let mut score: f64 = 0.0;
         if input.get("email").is_some() { score += 0.1; }
         if input.get("phone").is_some() { score += 0.1; }
         if input.get("amount").is_some() { score += 0.1; }

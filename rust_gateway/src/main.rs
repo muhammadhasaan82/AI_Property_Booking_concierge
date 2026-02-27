@@ -3,6 +3,7 @@ mod tools;
 mod cache;
 mod toon;
 
+use crate::tools::Tool;
 use axum::{
     extract::State,
     http::{StatusCode, HeaderMap},

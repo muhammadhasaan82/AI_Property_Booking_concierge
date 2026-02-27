@@ -16,7 +16,7 @@ impl Tool for BookingValidatorTool {
     }
 
     fn confidence(&self, input: &Value) -> f64 {
-        let mut score = 0.0;
+        let mut score: f64 = 0.0;
         let booking_keys = ["property_id", "check_in", "check_out", "user_id", "guests", "name", "email"];
         for key in &booking_keys {
             if input.get(*key).is_some() {

@@ -15,7 +15,7 @@ impl Tool for PricingTool {
     }
 
     fn confidence(&self, input: &Value) -> f64 {
-        let mut score = 0.0;
+        let mut score: f64 = 0.0;
         if input.get("price_per_night").is_some() { score += 0.3; }
         if input.get("nights").is_some() { score += 0.2; }
         if input.get("check_in").is_some() && input.get("check_out").is_some() { score += 0.2; }

@@ -41,7 +41,7 @@ impl Tool for PropertySearchTool {
     }
 
     fn confidence(&self, input: &Value) -> f64 {
-        let mut score = 0.0;
+        let mut score: f64 = 0.0;
         let keys = ["location", "city", "budget", "beds", "amenities", "property_type", "query_text"];
         for key in &keys {
             if input.get(*key).is_some() {
