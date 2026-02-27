@@ -1,41 +1,67 @@
-# AI Estate - Real Estate Chatbot
+# AI Hotel Booking Platform (Hybrid Python + Rust)
 
-A sophisticated AI-powered real estate chatbot built with FastAPI backend and React frontend, designed to provide comprehensive real estate advice and property management assistance.
+A sophisticated AI-powered hotel booking chatbot and platform built with a hybrid **Python + Rust** architecture. The system combines the conversational capabilities of LLMs and LangGraph in Python with the blazing fast computational performance of Rust microservices, all communicating via the custom serialized **TOON** protocol.
 
 ## 🏠 Features
 
-- **Intelligent Chat Interface**: Natural language processing for real estate queries
-- **Property Search & Recommendations**: AI-powered property discovery and filtering
-- **Booking Management**: Complete booking workflow with payment integration
-- **FAQ System**: Automated responses to common real estate questions
-- **Multi-language Support**: English, Arabic, Korean, and Urdu
+- **Intelligent Chat Interface**: A ChatGPT-like interactive UI built with Chainlit.
+- **Natural Language Processing**: Dynamic intent triage, sentiment analysis, entity extraction using VADER, spaCy, and sentence-transformers.
+- **High-Performance Rust Microservices**: Deterministic computation offloaded to an Axum-based Rust Autonomous Gateway.
+- **Custom TOON Protocol**: High-efficiency, LLM-optimized data serialization format for Python ↔ Rust communication.
+- **Property Search & Recommendations**: AI-powered property discovery and filtering from a rich dataset.
+- **Booking Management**: Complete booking validation workflow, pricing calculation, and fraud checks via Rust.
+- **FAQ System**: Automated semantic responses to common hospitality questions.
 
 ## 🛠️ Tech Stack
 
-### Backend
-- **FastAPI** - Modern Python web framework
-- **LangGraph** - AI agent orchestration
-- **ChromaDB** - Vector database for embeddings
-- **OpenAI GPT** - Language model integration
-- **PostgreSQL** - Database for bookings and user data
-- **Supabase** - Backend-as-a-Service
+### Python Orchestrator & UI
+- **Chainlit** - Conversational ChatGPT-like frontend interface.
+- **FastAPI** - Modern Python web framework for background API routing.
+- **LangGraph** - AI agent orchestration and state graph.
+- **spaCy, VADER, sentence-transformers** - Local NLP evaluation models.
+- **OpenAI GPT** - Structured LLM processing.
 
+### Rust Autonomous Gateway
+- **Rust (Cargo)** - High-performance systems language backend.
+- **Axum & Tokio** - Async HTTP gateway and event loops.
+- **Serde** - Robust value serialization.
+- **Custom Tool Registry** - Modular Search, Validation, Pricing, Sentiment, and Fraud tools.
 
+### Database
+- **PostgreSQL / Supabase** - Database for persisting bookings and users.
+- **ChromaDB** - Vector database for embeddings.
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.12+
-- PostgreSQL (or use Supabase)
+- **Python 3.12+**
+- **Rust toolchain** (cargo, rustc - MSVC on Windows)
+- **PostgreSQL / Supabase** account
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/wenawa/ai_booking.git
-cd ai_booking
+git clone https://github.com/muhammadhasaan82/Hotel_Booking.git
+cd Hotel_Booking
 ```
 
-### 2. Backend Setup
+### 2. Rust Gateway Setup
+Start the high-performance Rust microservices server locally. This handles heavy computations like search, booking validation, and sentiment analysis.
+
 ```bash
+cd rust_gateway
+cargo update
+# Build and run the Axum server
+cargo run --release
+```
+The Rust gateway will run continuously on `http://localhost:3001`.
+
+### 3. Python Backend & UI Setup
+In a separate terminal, install the dependencies and boot the python orchestrator and Chainlit interface.
+
+```bash
+# Return to the root directory
+cd ..
+
 # Create a Python virtual environment
 python -m venv venv
 
@@ -48,188 +74,85 @@ source venv/bin/activate
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your API keys
+# Download required spaCy core model
+python -m spacy download en_core_web_sm
 
-# Run the backend server
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+# Set up environment variables
+cp services/env.example .env
+# Edit .env with your OpenAI API keys and Supabase credentials
 ```
 
-### 3. Access the Chatbot Interfaces
+### 4. Access the Application
+Start the Chainlit conversational interface:
 
-Once the server is running, you can access the API at:
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
+```bash
+chainlit run chainlit_app.py -w
+```
+The application will open in your browser at `http://localhost:8000`.
 
 ## 📁 Project Structure
 
-```
-Calling-Agent-Chatbot/
-├── services/                 # Core business logic
-│   ├── agents.py           # AI agent implementations
-│   ├── graph.py            # LangGraph workflow
-│   ├── retrieval.py        # Vector search
-│   └── dataset_loader.py   # Data ingestion
-├── route/                   # API endpoints
-│   ├── chat.py             # Chat API
-│   ├── booking.py          # Booking management
-│   └── health.py           # Health checks
-├── main.py                 # FastAPI application
+```text
+Hotel_Booking/
+├── chainlit_app.py         # Conversational UI entrypoint
+├── services/               # Python Core Business Logic
+│   ├── agents.py           # LangGraph agent implementations
+│   ├── graph.py            # Chat state graph
+│   ├── nlp_engine.py       # Entity extraction and semantic classification
+│   ├── rust_client.py      # Async client for Rust gateway calls
+│   └── toon.py             # Custom TOON protocol serializer
+├── rust_gateway/           # Rust Microservice Backend
+│   ├── src/
+│   │   ├── main.rs         # Axum server & dual-format parsing
+│   │   ├── gateway.rs      # Gateway routing logic
+│   │   ├── toon.rs         # Native Rust TOON implementation
+│   │   └── tools/          # Tool definitions (search, sentiment, validator)
+│   └── Cargo.toml          # Rust dependencies
+├── route/                  # FastAPI endpoints
+├── main.py                 # FastAPI Application
 └── requirements.txt        # Python dependencies
 ```
 
 ## 🔧 Configuration
 
 ### Environment Variables
-Create a `.env` file in the root directory:
+Edit your `.env` file referencing `services/env.example`:
 
 ```env
 # OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key_here
 
-# Database Configuration
-SUPABASE_DB_URL=your_supabase_connection_string
-SUPABASE_DB_HOST=127.0.0.1
-SUPABASE_DB_PORT=54322
-SUPABASE_DB_NAME=postgres
-SUPABASE_DB_USER=postgres
-SUPABASE_DB_PASSWORD=postgres
+# Database Configuration (Supabase)
+SUPABASE_DB_URL=...
+SUPABASE_DB_PASSWORD=...
 
-# Vector Database
-CHROMA_DIR=./chroma
-EMBED_MODEL=thenlper/gte-small
-CHROMA_COLLECTION=properties
-
-# Dataset Configuration
-DATASET_PATH=./services/dataset.csv
-DATASET_FORMAT=csv
+# Rust Gateway
+RUST_GATEWAY_URL=http://localhost:3001
+RUST_TIMEOUT=5.0
 ```
 
-## 📊 Data Sources
+## 🤖 AI Agents & Tools
 
-The system supports multiple data formats:
+The platform routes user intents dynamically using local NLP models before executing tasks:
 
-- **CSV Files**: Property listings with automatic ingestion
-- **Excel Files**: XLSX support for property data
-- **JSON Files**: Structured property data
-- **PDF Documents**: Policy documents and FAQs
-- **Database**: Direct PostgreSQL integration
+- **Triage Agent**: Routes user intents across the state graph.
+- **FAQ Agent**: Answers common hotel/real-estate questions.
+- **Property Agent**: Connects to the **Rust `PropertySearchTool`** to semantically filter local properties via the TOON protocol.
+- **Booking Agent**: Validates parameters instantly using the **Rust `BookingValidatorTool`** before writing data limits into Postgres.
+- **Status & Payment**: Automatically generates tracking links seamlessly in the UI.
 
-### Adding New Data Sources
-```python
-# Example: Load from Excel
-python services/dataset_loader.py --path "data/properties.xlsx" --fmt xlsx
-
-# Example: Load from JSON
-python services/dataset_loader.py --path "data/properties.json" --fmt json
-```
-
-## 🤖 AI Agents
-
-The system includes specialized AI agents:
-
-- **Triage Agent**: Routes user intents to appropriate handlers
-- **FAQ Agent**: Answers common real estate questions
-- **Property Agent**: Handles property search and recommendations
-- **Booking Agent**: Manages booking workflows
-- **Status Agent**: Tracks booking status
-- **Payment Agent**: Handles payment processing
-
-
-
-## 🔌 API Endpoints
-
-### Chat API
-```http
-POST /api/v1/chat/message
-Content-Type: application/json
-
-{
-  "message": "I'm looking for a 2-bedroom apartment in New York",
-  "filters": {
-    "city": "New York",
-    "bedrooms": 2
-  }
-}
-```
-
-### Health Check
-```http
-GET /api/v1/health
-```
-
-### Property Search
-```http
-GET /api/v1/properties?city=New York&bedrooms=2&max_price=3000
-```
-
-## 🚀 Deployment
-
-### Backend Deployment
-```bash
-# Using Docker
-docker build -t ai-estate-backend .
-docker run -p 8000:8000 ai-estate-backend
-
-# Using Railway/Heroku
-git push heroku main
-```
-
-
-
-## 🧪 Testing
+## 🛑 Testing
+Both halves of the stack carry their own rigorous testing:
 
 ```bash
-# Backend tests
-python -m pytest tests/
+# Test Python NLP, TOON format, and Langchain integrations
+python -m pytest tests/test_nlp_engine.py -v
+python -m pytest tests/test_toon.py -v
 
-
-
-# API smoke tests
-python tests/api_smoke.py
+# Test Rust TOON protocols natively
+cd rust_gateway
+cargo test
 ```
-
-## 📈 Performance
-
-- **Vector Search**: Sub-second property retrieval
-- **Caching**: Redis integration for improved performance
-- **CDN**: Static asset optimization
-- **Database**: Optimized queries with proper indexing
-
-## 🔒 Security
-
-- **CORS**: Configured for production origins
-- **API Keys**: Secure environment variable management
-- **Input Validation**: Pydantic models for data validation
-- **Rate Limiting**: Protection against abuse
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **Documentation**: Check the `/docs` endpoint for API documentation
-- **Issues**: Report bugs via GitHub Issues
-- **Discussions**: Use GitHub Discussions for questions
-
-## 🎯 Roadmap
-
-- [ ] Mobile app (React Native)
-- [ ] Advanced analytics dashboard
-- [ ] Multi-tenant support
-- [ ] Integration with popular real estate platforms
-- [ ] Advanced AI features (image recognition, market analysis)
-
----
-
-**Built with ❤️ for the real estate industry**
+This project is licensed under the MIT License - see the LICENSE file for details.
