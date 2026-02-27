@@ -84,7 +84,7 @@ def _parse_kv_list(values: Optional[List[str]]) -> Dict[str, Any]:
 def _pretty(o: Any) -> str: return json.dumps(o, indent=2, ensure_ascii=False)
 
 async def cmd_chat(args: argparse.Namespace) -> int:
-    print("[BOT] AgenticRAG Property Assistant (interactive). Type 'exit' to quit.")
+    print("[BOT] AI Concierge Console (interactive). Type 'exit' to quit.")
     # Streaming callback for CLI (default ON)
     def stream_cb(chunk: str):
         print(chunk, end="", flush=True)
@@ -98,6 +98,9 @@ async def cmd_chat(args: argparse.Namespace) -> int:
         "stream": not args.no_stream,         # default True
         "stream_callback": stream_cb if not args.no_stream else None,
     }
+    session_booking = _parse_kv_list(args.booking_args)
+    session_status = _parse_kv_list(args.status_args)
+    session_payment = _parse_kv_list(args.payment_args)
 
     while True:
         try:
@@ -116,13 +119,20 @@ async def cmd_chat(args: argparse.Namespace) -> int:
         result = await run_chat_graph(
             message=user,
             filters=current_filters,
-            booking_args=_parse_kv_list(args.booking_args),
-            status_args=_parse_kv_list(args.status_args),
-            payment_args=_parse_kv_list(args.payment_args),
+            booking_args=session_booking,
+            status_args=session_status,
+            payment_args=session_payment,
         )
 
+        # Persist states returned by graph natively into local dicts
         if result.get("filters"):
-            session_filters.update(result["filters"])
+            session_filters = result["filters"]
+        if result.get("booking_args"):
+            session_booking = result["booking_args"]
+        if result.get("status_args"):
+            session_status = result["status_args"]
+        if result.get("payment_args"):
+            session_payment = result["payment_args"]
 
         print(f"\n[BOT] ({result.get('intent','?')}): {result.get('reply','(no reply)')}")
 
