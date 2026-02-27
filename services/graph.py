@@ -92,7 +92,7 @@ def node_triage(state: ChatState) -> ChatState:
 
 def node_greeting(state: ChatState) -> ChatState:
     with span("node_greeting"):
-        out = greeting_agent(state.get("filters", {}) or {})
+        out = greeting_agent(state.get("filters", {}) or {}, state.get("user_text", ""))
         return {**state, **out}
 
 def node_faq(state: ChatState) -> ChatState:

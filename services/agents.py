@@ -396,7 +396,7 @@ def _format_property_brief(p: Dict[str, Any]) -> str:
 # -----------------------
 # Agents
 # -----------------------
-def greeting_agent(filters: Dict[str, Any]) -> Dict[str, Any]:
+def greeting_agent(filters: Dict[str, Any], user_text: str = "") -> Dict[str, Any]:
     # Clear any stale booking context when greeting
     clean_filters = {k: v for k, v in filters.items() 
                     if k not in ["awaiting_field", "awaiting_selection_confirm", "receipt_shown", 
@@ -410,8 +410,13 @@ def greeting_agent(filters: Dict[str, Any]) -> Dict[str, Any]:
     if beds: parts.append(f"{beds} beds")
     if budget: parts.append(f"budget ${budget}")
     hint=f" (noted: {', '.join(parts)})" if parts else ""
-    return {"reply": f"Hi there! 👋 I'm your property assistant{hint}. How can I help you today?",
-            "filters": clean_filters}
+
+    name = _parse_name(user_text) or clean_filters.get("name")
+    if name:
+        clean_filters["name"] = name
+        return {"reply": f"Hi {name.title()}! 👋 I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
+
+    return {"reply": f"Hi there! 👋 I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
 
 async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     """

@@ -300,7 +300,7 @@ def is_greeting(text: str) -> bool:
 
     if tokens[0] in _GREETING_SEEDS:
         return True
-    if any(p in tl for p in _GREETING_PHRASES):
+    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in _GREETING_PHRASES):
         return True
 
     # Semantic classification fallback
@@ -426,17 +426,17 @@ def is_property_search(text: str) -> bool:
         "want to rent", "find a", "get me",
     }
 
-    if any(p in tl for p in PROPERTY_TYPES):
+    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in PROPERTY_TYPES):
         return True
-    if any(c in tl for c in KNOWN_CITIES):
+    if any(re.search(r'\b' + re.escape(c) + r'\b', tl) for c in KNOWN_CITIES):
         return True
-    if any(a in tl for a in CITY_ALIASES):
+    if any(re.search(r'\b' + re.escape(a) + r'\b', tl) for a in CITY_ALIASES):
         return True
     if _MONEY_PAT.search(tl):
         return True
-    if any(w in tl for w in _SEARCH_SIGNALS):
+    if any(re.search(r'\b' + re.escape(w) + r'\b', tl) for w in _SEARCH_SIGNALS):
         return True
-    if any(p in tl for p in _SEARCH_PHRASES):
+    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in _SEARCH_PHRASES):
         return True
 
     return False
@@ -486,7 +486,7 @@ def detect_faq_intent(text: str) -> bool:
     # Strong trigger keywords (policy/terms are always FAQ)
     _STRONG = {"policy", "refund", "cancel", "cancellation", "terms",
                "conditions", "dispute"}
-    if any(s in tl for s in _STRONG):
+    if any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in _STRONG):
         return True
 
     # Broader keyword + question pattern check
@@ -498,7 +498,7 @@ def detect_faq_intent(text: str) -> bool:
     }
     _QUESTION_STARTS = {"what", "how", "when", "where", "why", "can",
                         "do", "does", "is", "are", "tell", "explain"}
-    has_faq_seed = any(s in tl for s in _FAQ_SEEDS)
+    has_faq_seed = any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in _FAQ_SEEDS)
     has_question = ("?" in tl or any(tl.startswith(q) for q in _QUESTION_STARTS) or
                     "tell me" in tl or "explain" in tl)
     return has_faq_seed and has_question
