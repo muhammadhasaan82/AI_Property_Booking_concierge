@@ -16,6 +16,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,6 +38,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 # ---------------------------------------------------------------------------
 _cross_encoder = None
 _cross_encoder_lock = threading.Lock()
+_rerank_pool = ThreadPoolExecutor(max_workers=2)
 
 
 def _get_cross_encoder():
@@ -190,9 +192,16 @@ def hybrid_retrieve(
 # ---------------------------------------------------------------------------
 # 4. Cross-Encoder Re-ranking
 # ---------------------------------------------------------------------------
+def _predict_sync(encoder, pairs: List[Tuple[str, str]]) -> List[float]:
+    """Run encoder.predict in a worker thread (CPU-bound)."""
+    return encoder.predict(pairs).tolist()
+
+
 def rerank(query: str, documents: List[Any], top_n: int = 3) -> List[Any]:
     """Re-rank documents using a cross-encoder model.
 
+    The heavy ``encoder.predict()`` call is dispatched to a thread-pool so it
+    never blocks the async event loop.
     Falls back to original order if the model is unavailable.
     """
     if not documents:
@@ -204,7 +213,7 @@ def rerank(query: str, documents: List[Any], top_n: int = 3) -> List[Any]:
 
     try:
         pairs = [(query, doc.page_content if hasattr(doc, "page_content") else str(doc)) for doc in documents]
-        scores = encoder.predict(pairs)
+        scores = _rerank_pool.submit(_predict_sync, encoder, pairs).result()
         scored = sorted(zip(documents, scores), key=lambda x: x[1], reverse=True)
         return [doc for doc, _ in scored[:top_n]]
     except Exception as e:

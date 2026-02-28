@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import json
+import threading
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
@@ -23,24 +24,27 @@ except Exception as _e:
 # ---------- Fallback storage (JSON) ----------
 _properties_file = Path(CHROMA_DIR) / "properties.json"
 _properties_data: List[Dict] = []
+_properties_lock = threading.RLock()
 
 def _load_properties():
     global _properties_data
-    if _properties_file.exists():
-        try:
-            with open(_properties_file, "r", encoding="utf-8") as f:
-                _properties_data = json.load(f)
-        except Exception as e:
-            print(f"[retrieval] WARN load properties.json: {e}")
-            _properties_data = []
+    with _properties_lock:
+        if _properties_file.exists():
+            try:
+                with open(_properties_file, "r", encoding="utf-8") as f:
+                    _properties_data = json.load(f)
+            except Exception as e:
+                print(f"[retrieval] WARN load properties.json: {e}")
+                _properties_data = []
 
 def _save_properties():
-    try:
-        _properties_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(_properties_file, "w", encoding="utf-8") as f:
-            json.dump(_properties_data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"[retrieval] WARN save properties.json: {e}")
+    with _properties_lock:
+        try:
+            _properties_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(_properties_file, "w", encoding="utf-8") as f:
+                json.dump(_properties_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[retrieval] WARN save properties.json: {e}")
 
 _load_properties()
 
@@ -140,10 +144,10 @@ def upsert_property(p: Dict) -> None:
             print(f"[retrieval] vector upsert error (fallback to JSON): {e}")
 
     # Fallback path
-    global _properties_data
-    _properties_data[:] = [x for x in _properties_data if str(x.get("id")) != prop["id"]]
-    _properties_data.append(prop)
-    _save_properties()
+    with _properties_lock:
+        _properties_data[:] = [x for x in _properties_data if str(x.get("id")) != prop["id"]]
+        _properties_data.append(prop)
+        _save_properties()
 
 def bulk_upsert(properties: List[Dict]) -> None:
     if not properties:
@@ -180,23 +184,23 @@ def bulk_upsert(properties: List[Dict]) -> None:
             print(f"[retrieval] vector bulk_upsert error (fallback to JSON): {e}")
 
     # Fallback: JSON append with de-dupe
-    global _properties_data
-    incoming_ids = {str(p["id"]) for p in properties}
-    _properties_data[:] = [x for x in _properties_data if str(x.get("id")) not in incoming_ids]
-    for p in properties:
-        _properties_data.append({
-            "id": str(p["id"]),
-            "property_id": str(p["id"]),
-            "title": p.get("title"),
-            "city": p.get("city") or p.get("location"),
-            "country": p.get("country"),
-            "price_per_night": p.get("price_per_night"),
-            "bedrooms": p.get("bedrooms"),
-            "amenities": p.get("amenities", []) or [],
-            "description": p.get("description", ""),
-            "document": build_doc_text(p),
-        })
-    _save_properties()
+    with _properties_lock:
+        incoming_ids = {str(p["id"]) for p in properties}
+        _properties_data[:] = [x for x in _properties_data if str(x.get("id")) not in incoming_ids]
+        for p in properties:
+            _properties_data.append({
+                "id": str(p["id"]),
+                "property_id": str(p["id"]),
+                "title": p.get("title"),
+                "city": p.get("city") or p.get("location"),
+                "country": p.get("country"),
+                "price_per_night": p.get("price_per_night"),
+                "bedrooms": p.get("bedrooms"),
+                "amenities": p.get("amenities", []) or [],
+                "description": p.get("description", ""),
+                "document": build_doc_text(p),
+            })
+        _save_properties()
 
 def query_properties(
     query_text: str,
@@ -257,8 +261,10 @@ def query_properties(
             print(f"[retrieval] vector query error (fallback to JSON): {e}")
 
     # ---------- Fallback: JSON text search ----------
+    with _properties_lock:
+        snapshot = list(_properties_data)
     filtered = []
-    for prop in _properties_data:
+    for prop in snapshot:
         filtered.append({
             "id": prop.get("property_id"),
             "title": prop.get("title"),
