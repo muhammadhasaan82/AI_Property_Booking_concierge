@@ -1,14 +1,32 @@
 # services/booking.py
 # Booking/storage helpers — fully async with Supabase REST via httpx.
 from __future__ import annotations
+import logging
 import os
 import uuid
 from typing import Dict, Any, Optional
 
 import httpx
 
+from .config import MOCK_MODE, PAYMENT_BASE_URL
+
+logger = logging.getLogger(__name__)
+
 _SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
 _SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+
+# Explicit mock mode: either env flag or missing Supabase credentials
+_USE_MOCK = MOCK_MODE or not (_SUPABASE_URL and _SUPABASE_KEY)
+
+if _USE_MOCK:
+    if MOCK_MODE:
+        logger.warning("[BOOKING] MOCK_MODE=true: all booking operations use in-memory store")
+    else:
+        logger.warning(
+            "[BOOKING] SUPABASE_URL or SUPABASE_KEY not set — "
+            "falling back to in-memory mock store. "
+            "Set MOCK_MODE=true to silence this warning, or configure Supabase."
+        )
 
 # In-memory mock DB for local/dev usage
 _USERS: Dict[str, Dict[str, Any]] = {}
@@ -43,7 +61,7 @@ async def get_or_create_user(name: str, email: str, phone: Optional[str] = None)
         raise ValueError("email required")
 
     # Mock mode (no Supabase env)
-    if not (_SUPABASE_URL and _SUPABASE_KEY):
+    if _USE_MOCK:
         key = _mock_user_key(email)
         if key not in _USERS:
             _USERS[key] = {
@@ -91,6 +109,7 @@ async def get_or_create_user(name: str, email: str, phone: Optional[str] = None)
             raise RuntimeError(f"Supabase user upsert failed: {r.status_code} {r.text[:200]}")
     except Exception as e:
         print(f"[BOOKING] Supabase user creation failed: {e}, falling back to mock")
+        logger.warning("[BOOKING] Supabase user creation failed: %s, falling back to mock", e)
         key = _mock_user_key(email)
         _USERS[key] = {
             "id": f"user_{uuid.uuid4().hex[:8]}",
@@ -113,7 +132,7 @@ async def create_booking(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": f"missing: {', '.join(missing)}"}
 
     # Mock path
-    if not (_SUPABASE_URL and _SUPABASE_KEY):
+    if _USE_MOCK:
         booking_id = uuid.uuid4().hex[:8].upper()
         rec = {
             "id": booking_id,
@@ -124,7 +143,7 @@ async def create_booking(payload: Dict[str, Any]) -> Dict[str, Any]:
             "guests": int(payload.get("guests", 1)),
             "phone": payload.get("phone"),
             "status": "pending",
-            "payment_url": f"https://example.com/pay/{booking_id}",
+            "payment_url": f"{PAYMENT_BASE_URL}/{booking_id}",
         }
         _BOOKINGS[booking_id] = rec
         return {
@@ -146,7 +165,7 @@ async def create_booking(payload: Dict[str, Any]) -> Dict[str, Any]:
                 rows = r.json()
                 row = rows[0] if isinstance(rows, list) and rows else {}
                 if row.get("id"):
-                    payment_url = f"https://example.com/pay/{row['id']}"
+                    payment_url = f"{PAYMENT_BASE_URL}/{row['id']}"
                     return {
                         "ok": True,
                         "booking_id": row["id"],
@@ -174,7 +193,7 @@ async def get_booking_status(booking_id: str) -> Dict[str, Any]:
         }
 
     # Real Supabase (async)
-    if _SUPABASE_URL and _SUPABASE_KEY:
+    if not _USE_MOCK:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(
@@ -206,7 +225,7 @@ async def update_booking_status(booking_id: str, current_status: str, new_status
         return {"ok": True}
 
     # Real Supabase (async)
-    if _SUPABASE_URL and _SUPABASE_KEY:
+    if not _USE_MOCK:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.patch(

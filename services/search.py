@@ -5,6 +5,8 @@ import csv
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from .config import SEED_PROPERTY_TYPES
+
 _DATASET_PATHS = [
     Path(__file__).parent / "dataset.csv",                # services/dataset.csv
     Path(__file__).parent.parent / "services" / "dataset.csv",  # fallback
@@ -97,7 +99,7 @@ def property_search(
     
     # Extract property type from query if not explicitly provided
     if not property_type:
-        property_types = ["apartment", "house", "condo", "villa", "studio", "loft", "townhouse", "cottage", "bungalow", "duplex"]
+        property_types = sorted(SEED_PROPERTY_TYPES)
         for pt in property_types:
             if pt in q:
                 property_type = pt

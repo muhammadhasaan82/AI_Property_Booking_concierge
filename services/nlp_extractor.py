@@ -17,6 +17,13 @@ import difflib
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set, Tuple
 
+from .config import (
+    FALLBACK_CITIES as _CFG_FALLBACK_CITIES,
+    FALLBACK_CITY_ALIASES as _CFG_FALLBACK_ALIASES,
+    SEED_PROPERTY_TYPES as _CFG_SEED_PROPERTY_TYPES,
+    BASE_AMENITY_SYNONYMS as _CFG_BASE_AMENITY_SYNONYMS,
+)
+
 # ------------------------------- Utils -------------------------------
 
 def _norm(s: str) -> str:
@@ -110,32 +117,14 @@ def _load_from_dataset() -> None:
                 _add_city_alias(init, c)
 
         # ---- Fallback: add common cities even if dataset lacks them ----
-        FALLBACK_CITIES = {
-            "new york", "los angeles", "san francisco", "miami", "boston", "chicago",
-            "seattle", "austin", "dallas", "houston", "washington", "washington dc",
-            "san diego", "san jose", "orlando", "las vegas", "philadelphia", "phoenix",
-            "atlanta"
-        }
-        FALLBACK_ALIASES = {
-            "nyc": "new york",
-            "ny": "new york",
-            "newyork": "new york",
-            "la": "los angeles",
-            "losangeles": "los angeles",
-            "sf": "san francisco",
-            "sanfrancisco": "san francisco",
-            "dc": "washington",
-            "washingtondc": "washington",
-        }
-
         # Merge fallback into vocab
-        KNOWN_CITIES.update(FALLBACK_CITIES)
-        for c in FALLBACK_CITIES:
+        KNOWN_CITIES.update(_CFG_FALLBACK_CITIES)
+        for c in _CFG_FALLBACK_CITIES:
             _add_city_alias(f"{c} city", c)
             init = _initials(c)
             if init:
                 _add_city_alias(init, c)
-        for k, v in FALLBACK_ALIASES.items():
+        for k, v in _CFG_FALLBACK_ALIASES.items():
             # don't override explicit dataset-derived aliases
             if k not in CITY_ALIASES:
                 CITY_ALIASES[k] = v
@@ -148,33 +137,15 @@ _load_from_dataset()
 
 # ----------------------- Amenity vocabulary -------------------------
 
-BASE_AMENITY_SYNONYMS: Dict[str, List[str]] = {
-    "wifi": ["wifi", "wi-fi", "internet", "wireless"],
-    "pool": ["pool", "swimming"],
-    "parking": ["parking", "garage", "car"],
-    "gym": ["gym", "fitness", "workout"],
-    "kitchen": ["kitchen", "cooking"],
-    "ac": ["ac", "air conditioning", "air-conditioning", "cooling"],
-    "heating": ["heating", "heater", "warm"],
-    "washer": ["washer", "washing machine", "laundry"],
-    "dryer": ["dryer", "drying"],
-    "dishwasher": ["dishwasher", "dishes"],
-    "balcony": ["balcony", "terrace", "patio"],
-    "view": ["view", "scenic", "ocean view", "city view"],
-}
-
-AMENITY_KEYWORDS: Dict[str, List[str]] = {k: list(v) for k, v in BASE_AMENITY_SYNONYMS.items()}
+AMENITY_KEYWORDS: Dict[str, List[str]] = {k: list(v) for k, v in _CFG_BASE_AMENITY_SYNONYMS.items()}
 for a in sorted(DATASET_AMENITIES):
     if a and not any(a in syns for syns in AMENITY_KEYWORDS.values()):
         AMENITY_KEYWORDS.setdefault(a, [a])
 
 # ----------------------- Property types (dataset-driven) ----------------
 
-# Seed types that are always recognized
-_SEED_PROPERTY_TYPES = {
-    "condo", "loft", "apartment", "house", "studio", "villa",
-    "townhouse", "flat", "cottage", "bungalow", "penthouse",
-}
+# Seed types that are always recognized (from central config)
+_SEED_PROPERTY_TYPES = _CFG_SEED_PROPERTY_TYPES
 
 # Augment from dataset if available
 PROPERTY_TYPES: list[str] = sorted(_SEED_PROPERTY_TYPES)

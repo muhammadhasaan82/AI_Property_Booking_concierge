@@ -22,16 +22,32 @@ except ImportError:
 
 # If pandas isn't installed yet: uv add pandas
 import pandas as pd
+from pathlib import Path
 
-# ========= CHANGE THIS TO YOUR CSV LOCATION =========
-# Example Windows absolute path:
-DATASET_PATH = r"C:\Users\ASUS\Desktop\Calling-Agent-Chatbot\services\dataset.csv"
-# ===================================================
+try:
+    from .config import DATASET_PATH as _CFG_DATASET_PATH
+except ImportError:
+    from config import DATASET_PATH as _CFG_DATASET_PATH
 
-# Optional: env used by services.retrieval (no changes needed here)
-# CHROMA_DIR=./chroma
-# EMBED_MODEL=thenlper/gte-small
-# CHROMA_COLLECTION=properties
+
+def _resolve_dataset_path() -> str:
+    """Resolve dataset path from config, handling relative paths."""
+    p = Path(_CFG_DATASET_PATH)
+    if p.is_absolute() and p.exists():
+        return str(p)
+    # Resolve relative to project root
+    root = Path(__file__).parent.parent
+    candidate = root / _CFG_DATASET_PATH
+    if candidate.exists():
+        return str(candidate)
+    # Final fallback: next to this file
+    local = Path(__file__).parent / "dataset.csv"
+    if local.exists():
+        return str(local)
+    return _CFG_DATASET_PATH  # Return as-is; will fail at runtime with FileNotFoundError
+
+
+DATASET_PATH = _resolve_dataset_path()
 
 
 # ------------ helpers: row → property mapping ------------
