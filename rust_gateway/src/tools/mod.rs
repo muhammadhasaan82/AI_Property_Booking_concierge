@@ -24,12 +24,6 @@ pub trait Tool: Send + Sync {
     fn confidence(&self, input: &Value) -> f64 {
         if self.can_handle(input) { 0.5 } else { 0.0 }
     }
-
-    /// Execute and return result as TOON text (convenience wrapper).
-    fn execute_toon(&self, input: &Value) -> String {
-        let result = self.execute(input);
-        crate::toon::encode(&result)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -85,12 +79,6 @@ impl ToolRegistry {
                 })
             }
         }
-    }
-
-    /// Execute and return result as TOON text.
-    pub fn auto_execute_toon(&self, input: &Value) -> String {
-        let result = self.auto_execute(input);
-        crate::toon::encode(&result)
     }
 
     pub fn list_tools(&self) -> Vec<&'static str> {

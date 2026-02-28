@@ -86,6 +86,7 @@ async fn execute(
         let intent = result.get("intent").and_then(|v| v.as_str()).unwrap_or("unknown");
         let ttl = match intent {
             "search" => cache::ttl::PROPERTY_SEARCH,
+            "booking" | "status" => cache::ttl::SESSION_STATE,
             "faq" => cache::ttl::FAQ_ANSWER,
             _ => cache::ttl::PRICING,
         };
