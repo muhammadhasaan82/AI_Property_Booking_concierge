@@ -44,3 +44,27 @@ def insert_booking_details(row: Dict[str, Any]) -> bool:
         return False
 
 
+def log_feedback(user_message: str, bot_response: str, rating: str, comment: Optional[str] = None) -> bool:
+    """Log user feedback (thumbs up/down) to Supabase.
+
+    Args:
+        user_message: The user's original message
+        bot_response: The bot's reply
+        rating: 'positive' or 'negative'
+        comment: Optional user comment
+    """
+    c = _client()
+    if not c:
+        return False
+    try:
+        c.table("feedback").insert({
+            "user_message": user_message,
+            "bot_response": bot_response,
+            "rating": rating,
+            "comment": comment,
+        }).execute()
+        return True
+    except Exception:
+        return False
+
+
