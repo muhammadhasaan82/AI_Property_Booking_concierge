@@ -5,6 +5,7 @@ import re
 from langgraph.graph import StateGraph, END
 from .tracing import span
 from .db_logging import log_chat
+from .guardrails import sanitize_input, sanitize_output
 
 from .agents import (
     triage_intent,
@@ -27,6 +28,11 @@ def node_triage(state: ChatState) -> ChatState:
     with span("node_triage", {"user_text_len": len(state.get("user_text", ""))}):
         user_text = state.get("user_text", "")
         filters = state.get("filters", {}) or {}
+
+        # --- Guardrails: sanitize input before any routing ---
+        user_text, is_safe = sanitize_input(user_text)
+        if not is_safe:
+            return {**state, "intent": "greeting", "reply": "I'm here to help with hotel bookings and policy questions. How can I assist you?"}
 
         intent = triage_intent(user_text, filters)
         
@@ -265,7 +271,7 @@ def build_chat_graph():
         g.add_edge(node, END)
     g.add_edge("end", END)
 
-    return g.compile()
+    return g.compile(recursion_limit=25)
 
 APP = build_chat_graph()
 
@@ -293,6 +299,9 @@ async def run_chat_graph(
         "payment_args": payment_args or {},
     }
     result = await APP.ainvoke(state)
+    # --- Guardrails: sanitize output ---
+    if result.get("reply"):
+        result["reply"] = sanitize_output(result["reply"])
     # Best-effort chat logging (only if both sides present)
     try:
         user_msg = message or ""

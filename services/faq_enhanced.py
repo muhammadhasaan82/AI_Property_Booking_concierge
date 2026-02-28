@@ -132,35 +132,77 @@ class FAQService:
         print("[FAQ] Vector store created and persisted")
         return self._vector_store
 
-    # --- Semantic search ---
+    # --- Semantic search (enhanced with full RAG pipeline) ---
 
     def semantic_search(self, question: str, k: int = 3, score_threshold: float = 0.5) -> Tuple[str, List[Dict[str, Any]]]:
+        from .rag_pipeline import (
+            rewrite_query, hybrid_retrieve, rerank,
+            compress_context, verify_grounding, get_cag_cache,
+        )
+
+        # --- CAG: check cache first ---
+        cache = get_cag_cache()
+        cached = cache.get(question)
+        if cached is not None:
+            return cached  # (answer, sources) tuple
+
         if self._vector_store is None:
             pdf_path = Path(__file__).parent.parent / "Company policy.pdf"
             if not pdf_path.exists():
                 return "Company policy document not found. Please ensure the PDF is uploaded.", []
             self.process_policy_document(str(pdf_path))
 
-        results = self._vector_store.similarity_search_with_score(question, k=k)
-        relevant_docs = [(doc, score) for doc, score in results if score >= score_threshold]
+        # --- Query rewriting ---
+        rewritten = rewrite_query(question)
+
+        # --- Hybrid retrieval (vector + BM25 via RRF) ---
+        hybrid_results = hybrid_retrieve(self._vector_store, rewritten, k=6)
+
+        if not hybrid_results:
+            # Fallback to plain vector search
+            hybrid_results = self._vector_store.similarity_search_with_score(rewritten, k=k)
+
+        relevant_docs = [(doc, score) for doc, score in hybrid_results if score >= score_threshold]
         if not relevant_docs:
-            relevant_docs = [results[0]] if results else []
+            relevant_docs = [hybrid_results[0]] if hybrid_results else []
         if not relevant_docs:
             return "I couldn't find specific information about that in our policies. Would you like to speak with a human agent?", []
 
+        # --- Cross-encoder re-ranking ---
+        docs_only = [doc for doc, _ in relevant_docs]
+        reranked = rerank(rewritten, docs_only, top_n=k)
+
+        # --- Build sources from reranked docs ---
         sources: List[Dict[str, Any]] = []
-        combined_context = ""
-        for doc, score in relevant_docs:
+        raw_chunks: List[str] = []
+        for doc in reranked:
             content = doc.page_content.strip()
             page = doc.metadata.get("page", "Unknown")
-            combined_context += content + "\n\n"
-            sources.append({"content": content, "page": page, "score": score, "metadata": doc.metadata})
+            # Find original score
+            orig_score = next((s for d, s in relevant_docs if d.page_content == doc.page_content), 0.0)
+            raw_chunks.append(content)
+            sources.append({"content": content, "page": page, "score": orig_score, "metadata": doc.metadata})
 
-        answer = generate_concise_answer(question, combined_context)
-        pages = list(set(doc.metadata.get("page", "Unknown") for doc, _ in relevant_docs))
+        # --- Context compression ---
+        compressed = compress_context(rewritten, raw_chunks)
+
+        # --- Generate answer ---
+        answer = generate_concise_answer(question, compressed)
+
+        # --- Answer grounding verification ---
+        answer, grounding_score = verify_grounding(answer, raw_chunks)
+        if grounding_score < 0.5:
+            answer += "\n\n[Note: Some details may need verification. Please contact support for confirmation.]"
+
+        # --- Page references ---
+        pages = list(set(doc.metadata.get("page", "Unknown") for doc in reranked))
         if pages and pages != ["Unknown"]:
             page_refs = ", ".join(f"Page {p}" for p in pages if p != "Unknown")
             answer += f"\n\n[Reference: {page_refs} of Company Policy]"
+
+        # --- CAG: store in cache ---
+        cache.set(question, (answer, sources))
+
         return answer, sources
 
     # --- Health & initialization ---
@@ -333,6 +375,7 @@ def generate_concise_answer(question: str, context: str) -> str:
             length_guide = "Provide a clear, concise answer in 5-10 lines."
         
         system_prompt = f"""You are a helpful property rental assistant. Answer questions based ONLY on the provided policy text.
+Think step by step: 1) Identify the relevant policy section, 2) Extract the specific answer, 3) Provide a clear response.
 {length_guide}
 Be specific and direct. Use bullet points for multiple items.
 Do not add information not present in the context."""

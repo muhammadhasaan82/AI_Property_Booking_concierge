@@ -115,11 +115,8 @@ implementation_plan.md.resolved
 cargo_errors.txt
 services/env
 uv.lock
-tmpclaude-4b97-cwd
-tmpclaude-9a23-cwd
-tmpclaude-77bc-cwd
-rust_gateway/tmpclaude-57c4-cwd
-rust_gateway/tmpclaude-0309-cwd
-rust_gateway/tmpclaude-c4b8-cwd
-tmpclaude-98d9-cwd
-tmpclaude-9b71-cwd
+
+# Claude temporary working files (all variants)
+tmpclaude-*
+**/tmpclaude-*
+=0.2.2
