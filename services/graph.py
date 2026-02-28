@@ -28,7 +28,7 @@ def node_triage(state: ChatState) -> ChatState:
         user_text = state.get("user_text", "")
         filters = state.get("filters", {}) or {}
 
-        intent = triage_intent(user_text)
+        intent = triage_intent(user_text, filters)
         
         # IMPORTANT: Greetings should always be handled as greetings, regardless of context
         # This prevents the bot from asking for booking details when user just says "hi"
