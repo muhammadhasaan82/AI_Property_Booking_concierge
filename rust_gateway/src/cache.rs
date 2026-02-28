@@ -45,30 +45,22 @@ impl Cache {
 
     /// Set a value in the cache with a specific TTL.
     pub fn set(&self, key: String, value: Value, ttl: Duration) {
+        // Opportunistic cleanup keeps the cache healthy even when it never reaches capacity.
+        self.cleanup();
+
         let mut store = match self.store.write() {
             Ok(s) => s,
             Err(_) => return,
         };
 
-        // Evict expired entries if we're at capacity
+        // If still at capacity, remove oldest entry.
         if store.len() >= self.max_entries {
-            let expired_keys: Vec<String> = store
+            if let Some(oldest) = store
                 .iter()
-                .filter(|(_, v)| v.is_expired())
+                .min_by_key(|(_, v)| v.created_at)
                 .map(|(k, _)| k.clone())
-                .collect();
-            for k in expired_keys {
-                store.remove(&k);
-            }
-            // If still full, remove oldest entry
-            if store.len() >= self.max_entries {
-                if let Some(oldest) = store
-                    .iter()
-                    .min_by_key(|(_, v)| v.created_at)
-                    .map(|(k, _)| k.clone())
-                {
-                    store.remove(&oldest);
-                }
+            {
+                store.remove(&oldest);
             }
         }
 
@@ -127,7 +119,7 @@ pub fn cache_key(prefix: &str, data: &Value) -> String {
     // Simple hash: sort keys and serialize
     let canonical = if let Some(obj) = data.as_object() {
         let mut sorted: Vec<_> = obj.iter().collect();
-        sorted.sort_by_key(|(k, _)| k.clone());
+        sorted.sort_by_key(|(k, _)| k.as_str());
         let sorted_map: serde_json::Map<String, Value> = sorted.into_iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
