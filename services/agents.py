@@ -23,6 +23,18 @@ from .whatsapp import send_payment_link_async
 from .nlp_extractor import extract_filters, extract_property_type, KNOWN_CITIES, CITY_ALIASES
 from . import nlp_engine
 from .db_logging import insert_booking_details
+from .config import (
+    FIELD_PROMPTS as _CFG_FIELD_PROMPTS,
+    FIELD_MODIFICATION_PROMPTS as _CFG_FIELD_MOD_PROMPTS,
+    PROCEED_PHRASES as _CFG_PROCEED_PHRASES,
+    MODIFY_PHRASES as _CFG_MODIFY_PHRASES,
+    FAQ_FALLBACK_KEYWORDS,
+    BOOKING_TRIGGERS,
+    STATUS_KEYWORDS,
+    PAYMENT_KEYWORDS,
+    SEED_PROPERTY_TYPES,
+    PAYMENT_BASE_URL,
+)
 
 # -----------------------
 # Load env
@@ -108,15 +120,28 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
 
 
 def _slot_prompt(field: str) -> str:
-    slot_prompts = {
-        "name": "Please share your full name.",
-        "phone": "Please share your phone number.",
-        "email": "Please share your email address.",
-        "check_in": "What is your check-in date (YYYY-MM-DD)?",
-        "check_out": "What is your check-out date (YYYY-MM-DD)?",
-        "guests": "How many guests?",
-    }
-    return slot_prompts.get(field, "Please share that detail.")
+    return _CFG_FIELD_PROMPTS.get(field, "Please share that detail.")
+
+
+def _classify_proceed_or_modify(user_text: str) -> str | None:
+    """Return 'proceed', 'modify', or None based on user intent.
+
+    Uses the canonical phrase lists from config so every call-site
+    shares the same decision logic.
+    """
+    tl = (user_text or "").lower().strip()
+    if not tl:
+        return None
+
+    # Exact "yes" is treated as proceed (existing convention)
+    if tl == "yes":
+        return "proceed"
+
+    if any(p in tl for p in _CFG_PROCEED_PHRASES):
+        return "proceed"
+    if any(p in tl for p in _CFG_MODIFY_PHRASES):
+        return "modify"
+    return None
 
 # -----------------------
 # Intent helpers — NLP-powered (delegates to nlp_engine)
@@ -221,7 +246,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
             return "faq"
     except Exception:
         tl = t.lower()
-        if any(w in tl for w in ["wifi", "faq", "policy", "check-in time", "rules", "password", "refund", "cancel", "terms"]):
+        if any(w in tl for w in FAQ_FALLBACK_KEYWORDS):
             return "faq"
 
     if _looks_like_property_search(t):
@@ -248,12 +273,12 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if _is_ack(t):
         return "confirmation"
 
-    _BOOKING_TRIGGERS = [" book ", "reserve", "hold", "lock it", "go ahead", "confirm it"]
+    _BOOKING_TRIGGERS = BOOKING_TRIGGERS
     if any(w in t.lower() for w in _BOOKING_TRIGGERS):
         return "booking"
-    if any(w in t.lower() for w in ["check in", "check-in", "check out", "check-out", "status"]):
+    if any(w in t.lower() for w in STATUS_KEYWORDS):
         return "status_update"
-    if any(w in t.lower() for w in ["pay", "payment", "link", "invoice"]):
+    if any(w in t.lower() for w in PAYMENT_KEYWORDS):
         return "payment_link"
     return "property_search"
 
@@ -591,16 +616,8 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
     # High-priority: After a modification, the user may say 'no' to proceed to receipt or 'yes' to modify more
     if persisted.get("awaiting_post_mod_choice"):
         tl = (user_text or "").lower().strip()
-        proceed_phrases = [
-            "proceed","continue","receipt","total","total bill","bill","show","final","summary",
-            "confirm","no","see","see receipt","see total","show total","show receipt","go ahead","next","done","updated total",
-            "yes i want to proceed","yes proceed","proceed to total","proceed to payment","show me total bill","please show me my total bill",
-            "i want to proceed","i want total bill","total bill for payment","proceed to total bill"
-        ]
-        modify_phrases = [
-            "modify","change","edit","update","adjust","more","another","again","i want to make more changes",
-            "i want make more changes","make more changes","want to change","want to modify","i want to change","i want to modify"
-        ]
+        proceed_phrases = _CFG_PROCEED_PHRASES
+        modify_phrases = _CFG_MODIFY_PHRASES
         # Check for simple "yes" first - this should proceed to receipt
         if tl.strip() == "yes":
             persisted.pop("awaiting_post_mod_choice", None)
@@ -897,17 +914,9 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
                 persisted["receipt_shown"]=True
                 return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
             # Ask for the next missing field
-            prompts={
-                "name":"Please share your full name.",
-                "phone":"Please share your phone number.",
-                "email":"Please share your email address.",
-                "check_in":"What is your check-in date (YYYY-MM-DD)?",
-                "check_out":"What is your check-out date (YYYY-MM-DD)?",
-                "guests":"How many guests?",
-            }
             nxt=missing[0]
             persisted["awaiting_field"]=nxt
-            return {"reply":prompts[nxt], "tool_result": {"ok": False, "need": [nxt]}, "filters": persisted}
+            return {"reply":_CFG_FIELD_PROMPTS.get(nxt, f"Please provide your {nxt}."), "tool_result": {"ok": False, "need": [nxt]}, "filters": persisted}
         # If neither explicit yes nor no, keep asking for confirmation
         return {"reply": "Please reply with yes or no to continue.",
                 "tool_result": {"ok": False, "need": ["booking_confirmation"]},
@@ -1039,12 +1048,8 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
         # After a modification was applied, ask whether to proceed or modify more
         if persisted.get("awaiting_post_mod_choice"):
             tl = (user_text or "").lower().strip()
-            proceed_phrases = [
-                "proceed","continue","receipt","total","bill","show","final","summary","confirm","see","go ahead","next","done","payment","pay"
-            ]
-            modify_phrases = [
-                "modify","change","edit","update","adjust","more","another","again","yes","tweak","fix"
-            ]
+            proceed_phrases = _CFG_PROCEED_PHRASES
+            modify_phrases = _CFG_MODIFY_PHRASES
             if any(p in tl for p in proceed_phrases):
                 # Skip rendering confirmation receipt; proceed directly to booking/payment
                 persisted.pop("awaiting_post_mod_choice", None)
@@ -1646,15 +1651,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             # If something still needed, set the next required field and prompt
             if need_next:
                 persisted["awaiting_field"] = need_next
-                prompts={
-                    "name":"What's the correct full name?",
-                    "phone":"What's the correct phone number?",
-                    "email":"What's the correct email address?",
-                    "check_in":"What's the new check-in date (YYYY-MM-DD)?",
-                    "check_out":"Please share the new check-out date (YYYY-MM-DD).",
-                    "guests":"How many guests now?",
-                }
-                return {"reply":prompts.get(need_next, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need_next]}}
+                return {"reply":_CFG_FIELD_MOD_PROMPTS.get(need_next, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need_next]}}
 
             # All requested updates applied; if both dates present, proceed to ask next action
             persisted["awaiting_field"] = None
@@ -1672,11 +1669,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             if missing:
                 need = missing[0]
                 persisted["awaiting_field"] = need
-                prompts={
-                    "check_in":"What's the new check-in date (YYYY-MM-DD)?",
-                    "check_out":"Please share the new check-out date (YYYY-MM-DD).",
-                }
-                return {"reply":prompts.get(need, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need]}}
+                return {"reply":_CFG_FIELD_MOD_PROMPTS.get(need, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need]}}
             # Fallback to proceed prompt
             persisted["awaiting_post_mod_choice"] = True
             return {
@@ -1812,19 +1805,11 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
 
     # Ask next missing field (with awaiting_field marker)
     required=["name","phone","email","check_in","check_out","guests"]
-    prompts={
-        "name":"Please share your full name.",
-        "phone":"Please share your phone number.",
-        "email":"Please share your email address.",
-        "check_in":"What is your check-in date (YYYY-MM-DD)?",
-        "check_out":"What is your check-out date (YYYY-MM-DD)?",
-        "guests":"How many guests?",
-    }
     for k in required:
         if not persisted.get(k):
             persisted["awaiting_field"]=k
             persisted["awaiting_selection_confirm"] = False  # Clear this flag when asking for fields
-            return {"reply":prompts[k], "tool_result":{"ok":False,"need":[k]}, "filters":persisted}
+            return {"reply":_CFG_FIELD_PROMPTS.get(k, f"Please provide your {k}."), "tool_result":{"ok":False,"need":[k]}, "filters":persisted}
 
     # Build receipt (only if not already shown)
     if not persisted.get("receipt_shown"):
@@ -1968,7 +1953,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
                 "ok": True,
                 "booking_id": str(uuid.uuid4())[:8],
                 "status": "confirmed",
-                "payment_url": "https://example.com/pay/mock"
+                "payment_url": f"{PAYMENT_BASE_URL}/mock"
             }
             print("[INFO] Mock booking created successfully")
         else:
@@ -1976,7 +1961,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
 
     prop_title=(args.get("selected_property") or {}).get("title","")
     ptype="apartment"
-    for t in ["villa","condo","house","loft","studio","townhouse","apartment","flat","cottage","bungalow","penthouse"]:
+    for t in sorted(SEED_PROPERTY_TYPES):
         if t in prop_title.lower(): ptype=t; break
 
     if r.get("ok"):

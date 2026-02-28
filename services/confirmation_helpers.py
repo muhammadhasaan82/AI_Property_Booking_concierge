@@ -7,6 +7,13 @@ from __future__ import annotations
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
+from .config import (
+    REQUIRED_FIELDS,
+    FIELD_PROMPTS,
+    PROCEED_PHRASES,
+    MODIFY_PHRASES,
+)
+
 
 def _render_receipt(persisted: Dict[str, Any]) -> str:
     """Render the booking summary receipt."""
@@ -47,17 +54,6 @@ def _render_receipt(persisted: Dict[str, Any]) -> str:
 ✅ **Would you like to confirm this booking?**
 Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
 
-
-REQUIRED_FIELDS = ["name", "phone", "email", "check_in", "check_out", "guests"]
-
-FIELD_PROMPTS = {
-    "name": "Please share your full name.",
-    "phone": "Please share your phone number.",
-    "email": "Please share your email address.",
-    "check_in": "What is your check-in date (YYYY-MM-DD)?",
-    "check_out": "What is your check-out date (YYYY-MM-DD)?",
-    "guests": "How many guests?",
-}
 
 
 def _next_missing_field(persisted: Dict[str, Any]) -> Optional[str]:
@@ -160,20 +156,12 @@ def handle_post_modification_choice(user_text: str, persisted: Dict[str, Any]) -
 
     tl = (user_text or "").lower().strip()
 
-    proceed_phrases = [
-        "proceed", "continue", "receipt", "total", "total bill", "bill", "show",
-        "final", "summary", "confirm", "no", "see", "go ahead", "next", "done", "yes",
-    ]
-    modify_phrases = [
-        "modify", "change", "edit", "update", "adjust", "more", "another", "again",
-    ]
-
-    if tl.strip() == "yes" or any(p in tl for p in proceed_phrases):
+    if tl.strip() == "yes" or any(p in tl for p in PROCEED_PHRASES):
         persisted.pop("awaiting_post_mod_choice", None)
         persisted.pop("awaiting_post_cancel_choice", None)
         return _try_show_receipt(persisted)
 
-    if any(p in tl for p in modify_phrases):
+    if any(p in tl for p in MODIFY_PHRASES):
         persisted.pop("awaiting_post_mod_choice", None)
         persisted.pop("awaiting_post_cancel_choice", None)
         persisted["awaiting_field"] = "modification_choice"
