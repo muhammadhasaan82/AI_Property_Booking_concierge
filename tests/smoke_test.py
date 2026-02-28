@@ -1,6 +1,9 @@
 """Quick smoke test for TOON module and NLP engine imports."""
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(TESTS_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 # === Test TOON ===
 from services.toon import toon_encode, toon_decode

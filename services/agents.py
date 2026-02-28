@@ -41,6 +41,84 @@ OPENAI_PRESENCE_PENALTY = os.getenv("OPENAI_PRESENCE_PENALTY")
 OPENAI_MAX_TOKENS = os.getenv("OPENAI_MAX_TOKENS")
 LLM_STRUCTURED = os.getenv("LLM_STRUCTURED", "1") not in ("0", "false", "False")
 
+SOFT_INTENT_ROUTER = os.getenv("SOFT_INTENT_ROUTER", "1") not in ("0", "false", "False")
+
+_ALLOWED_INTENTS = {
+    "greeting", "faq", "confirmation", "property_search", "booking",
+    "status_update", "payment_link", "handoff", "availability", "end",
+}
+
+
+def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Use LLM structured output to classify intent with minimal hardcoded rules."""
+    if not (OPENAI_API_KEY and LLM_STRUCTURED and SOFT_INTENT_ROUTER):
+        return None
+
+    text = (user_text or "").strip()
+    if not text:
+        return None
+
+    context = {
+        "has_selected_property": bool((filters or {}).get("selected_property")),
+        "has_booking_progress": any((filters or {}).get(k) for k in ["name", "phone", "email", "check_in", "check_out", "guests"]),
+        "awaiting_field": (filters or {}).get("awaiting_field"),
+        "receipt_shown": bool((filters or {}).get("receipt_shown")),
+    }
+
+    payload: Dict[str, Any] = {
+        "model": OPENAI_CHAT_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Classify the latest user message into one chatbot intent. "
+                    "Return strict JSON with keys: intent, confidence, brief_reason. "
+                    "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
+                    "status_update, payment_link, handoff, availability, end."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps({"message": text, "context": context}, ensure_ascii=False),
+            },
+        ],
+    }
+
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            r = client.post("https://api.openai.com/v1/chat/completions", headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            }, json=payload)
+        if r.status_code != 200:
+            return None
+        body = r.json()
+        content = (((body or {}).get("choices") or [{}])[0] or {}).get("message", {}).get("content", "")
+        if not content:
+            return None
+        parsed = json.loads(content)
+        intent = str(parsed.get("intent", "")).strip()
+        confidence = float(parsed.get("confidence", 0.0) or 0.0)
+        if intent in _ALLOWED_INTENTS and confidence >= 0.45:
+            return intent
+    except Exception:
+        return None
+    return None
+
+
+def _slot_prompt(field: str) -> str:
+    slot_prompts = {
+        "name": "Please share your full name.",
+        "phone": "Please share your phone number.",
+        "email": "Please share your email address.",
+        "check_in": "What is your check-in date (YYYY-MM-DD)?",
+        "check_out": "What is your check-out date (YYYY-MM-DD)?",
+        "guests": "How many guests?",
+    }
+    return slot_prompts.get(field, "Please share that detail.")
+
 # -----------------------
 # Intent helpers — NLP-powered (delegates to nlp_engine)
 # -----------------------
@@ -122,56 +200,58 @@ def _wants_modification(t: str) -> bool:
 def _detect_requested_fields(t: str) -> List[str]:
     return nlp_engine.detect_requested_fields(t or "")
 
-def triage_intent(user_text: str) -> str:
+def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> str:
     t = user_text or ""
 
-    # IMPORTANT: Check greetings FIRST, before any other intent
-    if _is_greeting(t): return "greeting"
+    # Keep strict deterministic guards for critical intents.
+    if _is_greeting(t):
+        return "greeting"
+    if _is_end(t):
+        return "end"
+    if _is_status_query(t):
+        return "status_update"
 
-    # Check for FAQ/Policy questions EARLY in the flow
+    # Soft-coded LLM intent router (falls back safely when unavailable).
+    llm_intent = _llm_route_intent(t, filters)
+    if llm_intent:
+        return llm_intent
+
+    # NLP-driven and keyword fallback routing.
     try:
         if nlp_engine.detect_faq_intent(t):
             return "faq"
     except Exception:
         tl = t.lower()
-        if any(w in tl for w in ["wifi", "faq", "policy", "check-in time",
-                                  "rules", "password", "refund", "cancel", "terms"]):
+        if any(w in tl for w in ["wifi", "faq", "policy", "check-in time", "rules", "password", "refund", "cancel", "terms"]):
             return "faq"
 
-    # Check for booking status queries BEFORE property search
-    if _is_status_query(t): return "status_update"
+    if _looks_like_property_search(t):
+        return "property_search"
+    if _is_handoff_request(t):
+        return "handoff"
+    if _is_availability_query(t):
+        return "availability"
 
-    # Check for explicit end requests BEFORE other intents
-    if _is_end(t): return "end"
-
-    # Check for property search BEFORE confirmation intents
-    if _looks_like_property_search(t): return "property_search"
-
-    # Then check for other specific intents
-    if _is_handoff_request(t): return "handoff"
-    if _is_availability_query(t): return "availability"
-
-    # If user mentions specific fields to change, treat as confirmation
     try:
         if _detect_requested_fields(t):
             return "confirmation"
     except Exception:
         pass
 
-    # If user wants to modify, keep them in confirmation flow
-    if _wants_modification(t): return "confirmation"
+    if _wants_modification(t):
+        return "confirmation"
 
-    # If user is giving selection/booking info, go to confirmation
     if (_EMAIL_PAT.search(t) or _DATE_PAT.search(t) or _parse_phone(t) is not None or
         _parse_name(t) is not None or _is_yes(t) or _is_no(t) or
         _parse_guests(t) is not None or _parse_selection_index(t) is not None):
         return "confirmation"
 
-    if _is_ack(t): return "confirmation"
+    if _is_ack(t):
+        return "confirmation"
 
-    # Booking triggers — semantic agent routing
     _BOOKING_TRIGGERS = [" book ", "reserve", "hold", "lock it", "go ahead", "confirm it"]
-    if any(w in t.lower() for w in _BOOKING_TRIGGERS): return "booking"
+    if any(w in t.lower() for w in _BOOKING_TRIGGERS):
+        return "booking"
     if any(w in t.lower() for w in ["check in", "check-in", "check out", "check-out", "status"]):
         return "status_update"
     if any(w in t.lower() for w in ["pay", "payment", "link", "invoice"]):
@@ -568,18 +648,10 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             persisted.pop("awaiting_post_cancel_choice", None)
             # Ensure all required fields are present before rendering receipt; otherwise ask for the next missing field
             required=["name","phone","email","check_in","check_out","guests","selected_property"]
-            prompts={
-                "name":"Please share your full name.",
-                "phone":"Please share your phone number.",
-                "email":"Please share your email address.",
-                "check_in":"What is your check-in date (YYYY-MM-DD)?",
-                "check_out":"What is your check-out date (YYYY-MM-DD)?",
-                "guests":"How many guests?",
-            }
             for rk in ["name","phone","email","check_in","check_out","guests"]:
                 if not persisted.get(rk):
                     persisted["awaiting_field"]=rk
-                    return {"reply":prompts[rk], "filters": persisted, "tool_result": {"ok": False, "need": [rk]}}
+                    return {"reply": _slot_prompt(rk), "filters": persisted, "tool_result": {"ok": False, "need": [rk]}}
             # Render the updated receipt
             selected_property = persisted.get("selected_property") or {}
             title = selected_property.get("title","Property")
@@ -633,16 +705,8 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             # Ensure required fields, else ask for next missing
             for rk in ["name","phone","email","check_in","check_out","guests"]:
                 if not persisted.get(rk):
-                    prompts={
-                        "name":"Please share your full name.",
-                        "phone":"Please share your phone number.",
-                        "email":"Please share your email address.",
-                        "check_in":"What is your check-in date (YYYY-MM-DD)?",
-                        "check_out":"What is your check-out date (YYYY-MM-DD)?",
-                        "guests":"How many guests?",
-                    }
                     persisted["awaiting_field"]=rk
-                    return {"reply":prompts[rk], "filters": persisted, "tool_result": {"ok": False, "need": [rk]}}
+                    return {"reply": _slot_prompt(rk), "filters": persisted, "tool_result": {"ok": False, "need": [rk]}}
             # Render receipt
             selected_property = persisted.get("selected_property") or {}
             title = selected_property.get("title","Property")

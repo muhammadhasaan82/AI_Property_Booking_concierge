@@ -186,9 +186,11 @@ def _get_st_model():
             from sentence_transformers import SentenceTransformer
             _st_model = SentenceTransformer("all-MiniLM-L6-v2")
             logger.info("[nlp_engine] sentence-transformers all-MiniLM-L6-v2 loaded")
-        except (ImportError, OSError):
-            logger.warning("[nlp_engine] sentence-transformers not available, "
-                           "falling back to keyword matching")
+        except Exception as exc:  # noqa: BLE001 - degrade gracefully in restricted envs
+            logger.warning(
+                "[nlp_engine] sentence-transformers unavailable (%s), falling back to keyword matching",
+                exc,
+            )
             _st_model = False
     return _st_model if _st_model is not False else None
 
@@ -201,14 +203,23 @@ def _get_intent_embeddings() -> Optional[Dict[str, Any]]:
     model = _get_st_model()
     if model is None:
         return None
-    import numpy as np
-    _intent_embeddings = {}
-    for intent, phrases in _INTENT_PROTOTYPES.items():
-        vecs = model.encode(phrases, convert_to_numpy=True)
-        _intent_embeddings[intent] = np.mean(vecs, axis=0)
-    logger.info("[nlp_engine] Intent embeddings pre-computed for %d intents",
-                len(_intent_embeddings))
-    return _intent_embeddings
+    try:
+        import numpy as np
+
+        _intent_embeddings = {}
+        for intent, phrases in _INTENT_PROTOTYPES.items():
+            vecs = model.encode(phrases, convert_to_numpy=True)
+            _intent_embeddings[intent] = np.mean(vecs, axis=0)
+        logger.info("[nlp_engine] Intent embeddings pre-computed for %d intents",
+                    len(_intent_embeddings))
+        return _intent_embeddings
+    except Exception as exc:  # noqa: BLE001 - degrade gracefully in restricted envs
+        logger.warning(
+            "[nlp_engine] could not precompute intent embeddings (%s); using keyword fallback",
+            exc,
+        )
+        _intent_embeddings = None
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────
