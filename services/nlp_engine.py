@@ -75,6 +75,22 @@ _INTENT_PROTOTYPES: Dict[str, List[str]] = {
         "Go ahead and confirm the booking",
         "Lock it in for those dates",
     ],
+    "confirmation": [
+        "Sure I will go for option 9",
+        "I'll take option 3",
+        "Let me pick number 5",
+        "Go with the second one",
+        "I choose option 1",
+        "Select the first property",
+        "Yes go ahead",
+        "That looks good confirm it",
+        "I want to proceed with this one",
+        "Yes I would like to book that",
+        "My name is John",
+        "My email is john@example.com",
+        "2 guests",
+        "Check in 2025-06-01",
+    ],
     "handoff": [
         "I want to talk to a human",
         "Connect me with an agent",
@@ -542,21 +558,49 @@ def extract_person_name(text: str) -> Optional[str]:
                 if len(name) >= 2:
                     return name
 
-    # Regex fallback
-    _NAME_PATS = [
+    # Regex fallback — STRICT to prevent capturing conversational sentences
+    # Guard: reject text that contains common conversational/functional words
+    _CONVERSATIONAL_GUARDS = {
+        "go", "will", "want", "sure", "option", "select", "pick", "choose",
+        "book", "take", "would", "could", "should", "please", "thank",
+        "thanks", "okay", "yes", "no", "maybe", "let", "can", "show",
+        "find", "search", "look", "need", "like", "love", "hate",
+        "tell", "give", "help", "try", "also", "just", "really",
+        "very", "much", "more", "less", "about", "from", "into",
+        "with", "for", "but", "and", "the", "this", "that", "what",
+        "when", "where", "how", "why", "which", "who", "does", "did",
+    }
+    words = set(re.findall(r"[a-z]+", t_lower))
+    _has_conversational = bool(words & _CONVERSATIONAL_GUARDS)
+
+    # Explicit "my name is ..." / "I am ..." patterns — always safe
+    _NAME_EXPLICIT_PATS = [
         re.compile(r"\bmy name is\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
         re.compile(r"\bname is\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
         re.compile(r"\bi am\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
         re.compile(r"\bI'm\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-        re.compile(r"^([A-Za-z][A-Za-z .'-]{1,60})\b", re.I),
-        re.compile(r"^([A-Za-z]{2,60})$", re.I),
     ]
-    for pat in _NAME_PATS:
+    for pat in _NAME_EXPLICIT_PATS:
         m = pat.search(text)
         if m:
             cand = m.group(1).strip().rstrip('.').strip()
-            if len(cand) >= 2 and not _looks_like_email_username(cand):
+            # Limit explicit captures to 1-3 meaningful words
+            if len(cand.split()) <= 3 and len(cand) >= 2 and not _looks_like_email_username(cand):
                 return cand
+
+    # Full-string fallback — ONLY if no conversational words detected
+    # and text is very short (1-3 words, looks like a raw name)
+    if not _has_conversational:
+        stripped = text.strip()
+        word_count = len(stripped.split())
+        if 1 <= word_count <= 3:
+            _NAME_FULL_PAT = re.compile(r"^([A-Za-z][A-Za-z .'-]{1,60})$", re.I)
+            m = _NAME_FULL_PAT.match(stripped)
+            if m:
+                cand = m.group(1).strip().rstrip('.').strip()
+                if len(cand) >= 2 and not _looks_like_email_username(cand):
+                    return cand
+
     return None
 
 
