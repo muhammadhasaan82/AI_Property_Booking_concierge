@@ -10,7 +10,13 @@ except Exception:  # pragma: no cover - optional at import time
 
 
 def _client() -> Optional["Client"]:
-    url = os.getenv("SUPABASE_URL"); key = os.getenv("SUPABASE_KEY")
+    url = os.getenv("SUPABASE_URL")
+    # Prefer service-role key for server-side writes; fall back to project key/anon.
+    key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+    )
     if not (url and key) or not create_client:
         return None
     try:
@@ -42,6 +48,48 @@ def insert_booking_details(row: Dict[str, Any]) -> bool:
         return True
     except Exception:
         return False
+
+
+def insert_successful_booking(row: Dict[str, Any]) -> bool:
+    """
+    Persist only successful bookings for later status checks in chat.
+    Expected table: public.successful_bookings
+    """
+    c = _client()
+    if not c:
+        return False
+    try:
+        payload = dict(row or {})
+        if payload.get("booking_id") is not None:
+            payload["booking_id"] = str(payload["booking_id"])
+        c.table("successful_bookings").upsert(payload).execute()
+        return True
+    except Exception:
+        return False
+
+
+def get_successful_booking_status(booking_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch booking summary/status from successful_bookings table.
+    Returns None if not found or any error.
+    """
+    c = _client()
+    if not c or not booking_id:
+        return None
+    try:
+        r = (
+            c.table("successful_bookings")
+            .select("booking_id,status,check_in,check_out,user_email,user_name,property_title,city,payment_url")
+            .eq("booking_id", str(booking_id))
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(r, "data", None) or []
+        if rows:
+            return rows[0]
+    except Exception:
+        return None
+    return None
 
 
 def log_feedback(user_message: str, bot_response: str, rating: str, comment: Optional[str] = None) -> bool:

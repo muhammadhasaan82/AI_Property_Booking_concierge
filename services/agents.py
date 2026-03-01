@@ -23,7 +23,11 @@ from .faq_enhanced import enhanced_faq_agent, initialize_faq_system
 from .whatsapp import send_payment_link_async
 from .nlp_extractor import extract_filters, extract_property_type, KNOWN_CITIES, CITY_ALIASES
 from . import nlp_engine
-from .db_logging import insert_booking_details
+from .db_logging import (
+    insert_booking_details,
+    insert_successful_booking,
+    get_successful_booking_status,
+)
 from .config import (
     FIELD_PROMPTS as _CFG_FIELD_PROMPTS,
     FIELD_MODIFICATION_PROMPTS as _CFG_FIELD_MOD_PROMPTS,
@@ -2167,6 +2171,25 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
                 "payment": "TRUE",  # mark paid on success; adjust if you add real payments
             }
             insert_booking_details(row)
+            # Persist successful bookings in a dedicated table for status checks via chat.
+            successful_row = {
+                "booking_id": booking_code if booking_code else str(r.get("booking_id") or ""),
+                "status": str(r.get("status") or "confirmed"),
+                "check_in": args.get("check_in"),
+                "check_out": args.get("check_out"),
+                "user_name": args.get("name"),
+                "user_email": args.get("email"),
+                "user_phone": args.get("phone"),
+                "property_title": prop_title,
+                "property_type": ptype,
+                "city": city,
+                "guests": int(args.get("guests", 1)),
+                "nights": int(nights),
+                "total_amount": total,
+                "payment_url": r.get("payment_url"),
+                "source": str(r.get("note") or "db"),
+            }
+            insert_successful_booking(successful_row)
         except Exception:
             pass
     else:
@@ -2236,8 +2259,19 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
             ci = r.get("check_in") or "?"
             co = r.get("check_out") or "?"
             return {"tool_result": r, "reply": f"Booking {booking_id}: **{s_human}**\n- Check-in: {ci}\n- Check-out: {co}\n\nWould you like to ask anything else or end this chat session? (say 'end' to close)"}
-        return {"tool_result": r, "reply": f"Sorry—{r.get('error','unable to find that booking')}."}
 
+        db_row = get_successful_booking_status(str(booking_id))
+        if db_row:
+            s = str(db_row.get("status") or "confirmed")
+            s_human = s.replace("_", " ")
+            ci = db_row.get("check_in") or "?"
+            co = db_row.get("check_out") or "?"
+            return {
+                "tool_result": {"ok": True, "source": "successful_bookings", "booking_id": booking_id, **db_row},
+                "reply": f"Booking {booking_id}: **{s_human}**\n- Check-in: {ci}\n- Check-out: {co}\n\nWould you like to ask anything else or end this chat session? (say 'end' to close)",
+            }
+
+        return {"tool_result": r, "reply": f"Sorry—{r.get('error','unable to find that booking')}."}
     # Update flow (explicit request)
     if action in ("check_in","check-in"): new_status="checked_in"
     elif action in ("check_out","check-out"): new_status="checked_out"
@@ -2454,3 +2488,4 @@ def handoff_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     return {"reply": f"Okay — I'll connect you with a human specialist{f' about {city.title()}' if city else ''}. "
                      "Please share your email or phone number and a preferred time.",
             "tool_result":{"handoff":True}}
+

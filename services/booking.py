@@ -14,7 +14,12 @@ from .config import MOCK_MODE, PAYMENT_BASE_URL
 logger = logging.getLogger(__name__)
 
 _SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-_SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+# Prefer service-role key for server-side writes; fall back to project key/anon.
+_SUPABASE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    or os.getenv("SUPABASE_KEY", "").strip()
+    or os.getenv("SUPABASE_ANON_KEY", "").strip()
+)
 
 # Rust DB Gateway (port 3002 by default)
 _DB_GATEWAY_URL = os.getenv("DB_GATEWAY_URL", "http://localhost:3002").rstrip("/")

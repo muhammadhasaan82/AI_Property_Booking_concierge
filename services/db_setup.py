@@ -67,11 +67,33 @@ create table if not exists public.booking_details (
   created_at timestamptz not null default now()
 );
 
+-- Successful bookings table (for chat status lookups)
+create table if not exists public.successful_bookings (
+  booking_id text primary key,
+  status text not null default 'confirmed',
+  check_in date,
+  check_out date,
+  user_name text,
+  user_email text,
+  user_phone text,
+  property_title text,
+  property_type text,
+  city text,
+  guests int,
+  nights int,
+  total_amount numeric(12,2),
+  payment_url text,
+  source text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- RLS and permissive policies for local dev (optional)
 alter table public.users enable row level security;
 alter table public.bookings enable row level security;
 alter table public.chat_history enable row level security;
 alter table public.booking_details enable row level security;
+alter table public.successful_bookings enable row level security;
 
 do $$
 begin
@@ -101,6 +123,13 @@ begin
     where policyname = 'allow_all_booking_details_dev' and schemaname = 'public' and tablename = 'booking_details'
   ) then
     create policy "allow_all_booking_details_dev" on public.booking_details
+      for all using (true) with check (true);
+  end if;
+  if not exists (
+    select 1 from pg_policies
+    where policyname = 'allow_all_successful_bookings_dev' and schemaname = 'public' and tablename = 'successful_bookings'
+  ) then
+    create policy "allow_all_successful_bookings_dev" on public.successful_bookings
       for all using (true) with check (true);
   end if;
 end$$;
@@ -153,6 +182,7 @@ def verify(conninfo: Optional[str] = None) -> dict:
             # Optional tables (may not exist if older schema); guard each
             chat = None
             details = None
+            successful = None
             try:
                 cur.execute("select count(*) from public.chat_history;")
                 chat = cur.fetchone()[0]
@@ -163,7 +193,18 @@ def verify(conninfo: Optional[str] = None) -> dict:
                 details = cur.fetchone()[0]
             except Exception:
                 details = None
-            out.update({"users": users, "bookings": bookings, "chat_history": chat, "booking_details": details})
+            try:
+                cur.execute("select count(*) from public.successful_bookings;")
+                successful = cur.fetchone()[0]
+            except Exception:
+                successful = None
+            out.update({
+                "users": users,
+                "bookings": bookings,
+                "chat_history": chat,
+                "booking_details": details,
+                "successful_bookings": successful,
+            })
     return out
 
 
