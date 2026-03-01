@@ -31,15 +31,23 @@ def _maybe_auto_supabase() -> None:
             if line.startswith("API_URL="):
                 os.environ["SUPABASE_URL"] = line.split("=", 1)[1].strip()
             elif line.startswith("SERVICE_ROLE_KEY="):
-                os.environ["SUPABASE_KEY"] = line.split("=", 1)[1].strip()
+                key = line.split("=", 1)[1].strip()
+                os.environ["SUPABASE_KEY"] = key
+                os.environ["SUPABASE_SERVICE_ROLE_KEY"] = key
+            elif line.startswith("ANON_KEY="):
+                os.environ["SUPABASE_ANON_KEY"] = line.split("=", 1)[1].strip()
         print("[Supabase] Studio: http://localhost:54323", flush=True)
-        print("[Supabase] Tables: public.chat_history, public.booking_details", flush=True)
+        print("[Supabase] Tables: public.chat_history, public.successful_bookings", flush=True)
         # Auto-init schema to ensure tables exist
         try:
             from services import db_setup as _db
             _db.init_schema(None)
             snap = _db.verify(None)
-            print(f"[Supabase] Verify: users={snap.get('users')} bookings={snap.get('bookings')} chat_history={snap.get('chat_history')} booking_details={snap.get('booking_details')}", flush=True)
+            print(
+                f"[Supabase] Verify: users={snap.get('users')} bookings={snap.get('bookings')} "
+                f"chat_history={snap.get('chat_history')} successful_bookings={snap.get('successful_bookings')}",
+                flush=True,
+            )
         except Exception as _e:
             print(f"[Supabase] Schema init skipped: {_e}", flush=True)
     except Exception:
