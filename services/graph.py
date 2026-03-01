@@ -271,7 +271,7 @@ def build_chat_graph():
         g.add_edge(node, END)
     g.add_edge("end", END)
 
-    return g.compile(recursion_limit=25)
+    return g.compile()
 
 APP = build_chat_graph()
 
@@ -298,7 +298,7 @@ async def run_chat_graph(
         "status_args": status_args or {},
         "payment_args": payment_args or {},
     }
-    result = await APP.ainvoke(state)
+    result = await APP.ainvoke(state, config={"recursion_limit": 25})
     # --- Guardrails: sanitize output ---
     if result.get("reply"):
         result["reply"] = sanitize_output(result["reply"])
