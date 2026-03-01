@@ -5,7 +5,7 @@ mod toon;
 
 use crate::tools::Tool;
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{StatusCode, HeaderMap},
     routing::{get, post},
     Json, Router,
@@ -222,6 +222,7 @@ async fn main() {
         .route("/tools/pricing", post(tool_pricing))
         .route("/tools/sentiment", post(tool_sentiment))
         .route("/tools/fraud", post(tool_fraud))
+        .layer(DefaultBodyLimit::disable())
         .layer(cors)
         .with_state(state);
 
