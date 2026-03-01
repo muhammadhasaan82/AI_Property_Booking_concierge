@@ -129,7 +129,7 @@ def _load_from_dataset() -> None:
             if k not in CITY_ALIASES:
                 CITY_ALIASES[k] = v
 
-        print(f"[nlp_extractor] ✅ loaded {len(KNOWN_CITIES)} cities, {len(DATASET_AMENITIES)} amenities from {DATASET_PATH}")
+        print(f"[nlp_extractor] loaded {len(KNOWN_CITIES)} cities, {len(DATASET_AMENITIES)} amenities from {DATASET_PATH}")
     except Exception as e:
         print(f"[nlp_extractor] WARN: could not load vocab from dataset: {e}")
 
