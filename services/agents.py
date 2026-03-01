@@ -90,6 +90,9 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
                     "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
                     "status_update, payment_link, handoff, availability, end.\n\n"
                     "CRITICAL RULES:\n"
+                    "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, smoking, check-in time, "
+                    "wifi password, security deposit, amenities, or any property/platform question. "
+                    "Classify as 'faq' EVEN IF the user is mid-booking. A policy question always overrides booking context.\n"
                     "- 'confirmation' = user is selecting a numbered option (e.g. 'option 3', 'go for number 5', "
                     "'I will take the second one'), providing booking details (name, phone, email, dates, guests), "
                     "or affirming/declining a booking step (yes/no in booking context).\n"
@@ -310,20 +313,28 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if _parse_selection_index(t) is not None:
         return "confirmation"
 
+    # ── FAQ detection BEFORE LLM — policy/rule questions must ALWAYS break out
+    # of any flow (confirmation, booking, etc). Run this first, it's fast & free.
+    try:
+        faq_hit = nlp_engine.detect_faq_intent(t)
+    except Exception:
+        _FAQ_KEYWORDS_EXTENDED = [
+            "policy", "refund", "cancel", "rule", "rules", "pet", "smoking",
+            "wifi", "password", "internet", "check-in time", "check-out time",
+            "deposit", "security deposit", "terms", "condition", "guideline",
+            "return policy", "return",
+        ]
+        faq_hit = any(w in t.lower() for w in _FAQ_KEYWORDS_EXTENDED)
+
+    if faq_hit:
+        return "faq"
+
     # Soft-coded LLM intent router (falls back safely when unavailable).
     llm_intent = _llm_route_intent(t, filters)
     if llm_intent:
         return llm_intent
 
-    # NLP-driven and keyword fallback routing.
-    try:
-        if nlp_engine.detect_faq_intent(t):
-            return "faq"
-    except Exception:
-        tl = t.lower()
-        if any(w in tl for w in FAQ_FALLBACK_KEYWORDS):
-            return "faq"
-
+    # NLP-driven and keyword fallback routing (secondary pass — catches LLM misses).
     if _looks_like_property_search(t):
         return "property_search"
     if _is_handoff_request(t):
