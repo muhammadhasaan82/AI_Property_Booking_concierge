@@ -84,10 +84,17 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
             {
                 "role": "system",
                 "content": (
-                    "Classify the latest user message into one chatbot intent. "
-                    "Return strict JSON with keys: intent, confidence, brief_reason. "
+                    "You are an intent classifier for a hotel booking chatbot. "
+                    "Classify the user's message into ONE intent. Return strict JSON: {intent, confidence, brief_reason}. "
                     "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
-                    "status_update, payment_link, handoff, availability, end."
+                    "status_update, payment_link, handoff, availability, end.\n\n"
+                    "CRITICAL RULES:\n"
+                    "- 'confirmation' = user is selecting a numbered option (e.g. 'option 3', 'go for number 5', "
+                    "'I will take the second one'), providing booking details (name, phone, email, dates, guests), "
+                    "or affirming/declining a booking step (yes/no in booking context).\n"
+                    "- 'greeting' = ONLY pure greetings like 'hi', 'hello', 'hey', 'good morning' with NO other intent.\n"
+                    "- If the message contains ANY reference to selecting an option number, it is 'confirmation', NOT 'greeting'.\n"
+                    "- Words like 'sure', 'ok', 'go ahead' combined with option/number references = 'confirmation'.\n"
                 ),
             },
             {
@@ -234,6 +241,11 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         return "end"
     if _is_status_query(t):
         return "status_update"
+
+    # Dynamic safety guard: if a valid selection index is detected, it's a confirmation
+    # This runs BEFORE the LLM call to prevent misclassification of e.g. "sure i will go for option 9"
+    if _parse_selection_index(t) is not None:
+        return "confirmation"
 
     # Soft-coded LLM intent router (falls back safely when unavailable).
     llm_intent = _llm_route_intent(t, filters)
