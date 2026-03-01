@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional, Callable
 import httpx
 from dotenv import load_dotenv
 from .tracing import span
+from functools import lru_cache
 
 from .search import property_search
 from .booking import (
@@ -186,23 +187,84 @@ def _is_end(t: str) -> bool:
 # Selection & slot helpers — NLP-powered
 # -----------------------
 
+@lru_cache(maxsize=16)
+def _llm_extract_booking_fields(text: str) -> dict:
+    """Soft-coded fallback to extract all booking fields using the LLM in one pass."""
+    if not (OPENAI_API_KEY and LLM_STRUCTURED) or not text.strip() or len(text.strip()) < 3:
+        return {}
+        
+    payload = {
+        "model": OPENAI_CHAT_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Extract booking details from the user's text. Return strict JSON with keys: "
+                    "'name', 'email', 'phone', 'guests' (integer), 'dates' (list of YYYY-MM-DD strings), "
+                    "'location' (string). If a field is not found, omit it or set to null."
+                )
+            },
+            {"role": "user", "content": text}
+        ]
+    }
+    
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            r = client.post("https://api.openai.com/v1/chat/completions", headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            }, json=payload)
+        if r.status_code == 200:
+            content = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            if content:
+                parsed = json.loads(content)
+                return parsed
+    except Exception:
+        pass
+    return {}
+
+
 def _parse_selection_index(t: str) -> int | None:
     return nlp_engine.extract_cardinal(t or "")
 
 def _parse_email(t: str) -> str | None:
-    return nlp_engine.extract_email(t or "")
+    text = t or ""
+    res = nlp_engine.extract_email(text)
+    if res: return res
+    return _llm_extract_booking_fields(text).get("email")
 
 def _parse_dates(t: str) -> list[str]:
-    return nlp_engine.extract_dates(t or "")
+    text = t or ""
+    res = nlp_engine.extract_dates(text)
+    if res: return res
+    return _llm_extract_booking_fields(text).get("dates") or []
 
 def _parse_guests(t: str) -> int | None:
-    return nlp_engine.extract_guests(t or "")
+    text = t or ""
+    res = nlp_engine.extract_guests(text)
+    if res is not None: return res
+    try:
+        val = _llm_extract_booking_fields(text).get("guests")
+        return int(val) if val else None
+    except Exception:
+        return None
 
 def _parse_name(t: str) -> str | None:
-    return nlp_engine.extract_person_name(t or "")
+    text = t or ""
+    # Try fast NLP / regex first
+    name = nlp_engine.extract_person_name(text)
+    if name: return name
+    # Fallback to soft-coded LLM extraction
+    extracted = _llm_extract_booking_fields(text).get("name")
+    return extracted.title() if isinstance(extracted, str) and len(extracted) >= 2 else None
 
 def _parse_phone(t: str) -> str | None:
-    return nlp_engine.extract_phone(t or "")
+    text = t or ""
+    res = nlp_engine.extract_phone(text)
+    if res: return res
+    return _llm_extract_booking_fields(text).get("phone")
 
 def _parse_booking_id(t: str) -> str | None:
     return nlp_engine.extract_booking_id(t or "")
@@ -321,8 +383,14 @@ async def llm_reply_from_results(
 
     if not OPENAI_API_KEY:
         if results:
-            # Use actual count of results shown
-            return f"Yes—found {len(numbered)} options.\n\n" + "\n".join(numbered) + "\n\nReply with a number (e.g., 1 or 2) to choose."
+            total_count = len(results)
+            shown_count = len(numbered)
+            header = f"Yes—found {total_count} options"
+            if total_count > shown_count:
+                header += f", here are the top {shown_count}:"
+            else:
+                header += ":"
+            return f"{header}\n\n" + "\n".join(numbered) + "\n\nReply with a number (e.g., 1 or 2) to choose."
         kf = known_filters or {}
         if not (kf.get("location") or kf.get("city")): 
             return "No match yet—what city should I search in (and a nightly budget)?"
@@ -330,11 +398,18 @@ async def llm_reply_from_results(
             return "No match yet—what's your target nightly budget (approx)?"
         return "No match yet—any preferred dates or must-have amenities?"
 
-    # Rest of the OpenAI logic...
+    total_count = len(results)
+    shown_count = len(numbered)
+    
     system = ("You are a warm, concise vacation-rental concierge. Use ONLY provided JSON results and the provided numbered list. "
             "Think step by step: First identify which properties match the user's needs, then present them clearly. "
             f"Keep replies very short. Language: {locale}")
-    style = ("If results:\n- Start: 'Yes—found X options.' where X is the EXACT number of items in the numbered list.\n"
+            
+    header_instruction = f"Start: 'Yes—found {total_count} options.'"
+    if total_count > shown_count:
+        header_instruction = f"Start: 'Yes—found {total_count} options, here are the top {shown_count}.'"
+            
+    style = (f"If results:\n- {header_instruction}\n"
            "- Show ONLY the provided numbered list.\n- End: 'Reply with a number (e.g., 1 or 2) to choose.'\n"
            "If no results: ask ONE follow-up from {city,budget,dates,beds,amenities}.")
     
@@ -345,7 +420,7 @@ async def llm_reply_from_results(
         {"role": "user", "content": json.dumps(safe_results, ensure_ascii=False)},
         {"role": "user", "content": "Numbered list:"},
         {"role": "user", "content": "\n".join(numbered) if numbered else "(no items)"},
-        {"role": "user", "content": f"IMPORTANT: You found exactly {len(numbered)} options. Use this exact number."},
+        {"role": "user", "content": f"IMPORTANT: You received {total_count} results, but you are only showing the top {shown_count} options in the list above. Acknowledge this."},
         {"role": "user", "content": "Known filters:"},
         {"role": "user", "content": json.dumps(known_filters or {}, ensure_ascii=False)},
         {"role": "user", "content": style},
@@ -451,7 +526,14 @@ async def llm_reply_from_results(
     
     # At the end of the function, update the fallback:
     if results:
-        return f"Yes—found {len(numbered)} options.\n\n" + "\n".join(numbered) + "\n\nReply with a number (e.g., 1 or 2) to choose."
+        total_count = len(results)
+        shown_count = len(numbered)
+        header = f"Yes—found {total_count} options"
+        if total_count > shown_count:
+            header += f", here are the top {shown_count}:"
+        else:
+            header += ":"
+        return f"{header}\n\n" + "\n".join(numbered) + "\n\nReply with a number (e.g., 1 or 2) to choose."
     
     kf = known_filters or {}
     if not (kf.get("location") or kf.get("city")): 
