@@ -1,31 +1,4 @@
-You: yes please
-[TRACE] > span=node_triage id=7 user_text_len=10
-[TRACE] < span=node_triage id=7 duration_ms=1773.7 ok
-[TRACE] > span=node_confirmation id=8
-[TRACE] < span=node_confirmation id=8 duration_ms=0.3 ok
-
-[BOT] (confirmation): Please share your phone number.
-
-You: first can you tell return policy ??
-[TRACE] > span=node_triage id=9 user_text_len=35
-[TRACE] < span=node_triage id=9 duration_ms=28.9 ok
-[TRACE] > span=node_confirmation id=10
-[TRACE] < span=node_confirmation id=10 duration_ms=0.2 ok
-
-[BOT] (confirmation): 🏠 Selected:
-
-**Studio in San Diego** — San Diego
-- Type: Studio
-- Bedrooms: 0
-- Bathrooms: 1
-- Price: $80/night
-- Rating: 4.57
-- Amenities: fireplace;garden;heating;kitchen;pool;wifi
-- About: High-rise unit with expansive city views and balcony.
-
-Would you like to book this one? (yes/no)
-
-You:// database/rust_db_gateway/src/main.rs
+// database/rust_db_gateway/src/main.rs
 // ─────────────────────────────────────────────────────────────────────────────
 // Rust DB Gateway — lightweight async HTTP microservice that wraps all
 // Supabase PostgreSQL operations (users + bookings CRUD).

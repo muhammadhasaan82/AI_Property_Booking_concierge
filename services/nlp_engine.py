@@ -510,9 +510,12 @@ def detect_faq_intent(text: str) -> bool:
         if conf > 0.45:
             return True
 
-    # Strong trigger keywords (policy/terms are always FAQ)
-    _STRONG = {"policy", "refund", "cancel", "cancellation", "terms",
-               "conditions", "dispute"}
+    # Strong trigger keywords (policy/terms are always FAQ — regardless of booking context)
+    _STRONG = {
+        "policy", "refund", "cancel", "cancellation", "terms",
+        "conditions", "dispute", "return policy", "return",
+        "fee", "penalty", "complaint", "charge", "surcharge",
+    }
     if any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in _STRONG):
         return True
 
