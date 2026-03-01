@@ -93,6 +93,7 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
                     "- 'confirmation' = user is selecting a numbered option (e.g. 'option 3', 'go for number 5', "
                     "'I will take the second one'), providing booking details (name, phone, email, dates, guests), "
                     "or affirming/declining a booking step (yes/no in booking context).\n"
+                    "- 'property_search' = user is looking for a place or asking about properties. If they say 'hello I need a loft in NYC', it is 'property_search', NOT 'greeting'.\n"
                     "- 'greeting' = ONLY pure greetings like 'hi', 'hello', 'hey', 'good morning' with NO other intent.\n"
                     "- If the message contains ANY reference to selecting an option number, it is 'confirmation', NOT 'greeting'.\n"
                     "- Words like 'sure', 'ok', 'go ahead' combined with option/number references = 'confirmation'.\n"

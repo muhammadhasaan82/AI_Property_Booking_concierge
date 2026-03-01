@@ -87,9 +87,12 @@ def node_triage(state: ChatState) -> ChatState:
                 intent = "confirmation"
                 
         # Guard: Orphaned affirmations (e.g. user says "ok" after a greeting) shouldn't trigger the booking loop 
-        # unless they have actually selected a property or are explicitly awaiting a booking field
+        # unless they have actually selected a property, are explicitly awaiting a booking field, 
+        # or are actively selecting an option from a previous search.
         if intent == "confirmation" and not filters.get("selected_property") and not filters.get("awaiting_field"):
-            intent = "greeting"
+            from services.agents import _parse_selection_index
+            if _parse_selection_index(user_text) is None:
+                intent = "greeting"
 
         # If status intent, opportunistically extract booking_id from the user's text
         if intent == "status_update":
