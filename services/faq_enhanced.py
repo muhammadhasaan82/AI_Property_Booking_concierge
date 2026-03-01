@@ -162,9 +162,9 @@ class FAQService:
             # Fallback to plain vector search
             hybrid_results = self._vector_store.similarity_search_with_score(rewritten, k=k)
 
-        relevant_docs = [(doc, score) for doc, score in hybrid_results if score >= score_threshold]
-        if not relevant_docs:
-            relevant_docs = [hybrid_results[0]] if hybrid_results else []
+        # Keep top candidates by rank. Raw scores differ by retriever type
+        # (RRF, cosine distance, etc.), so rank is more stable than absolute thresholds.
+        relevant_docs = list(hybrid_results[: max(k, 1)])
         if not relevant_docs:
             return "I couldn't find specific information about that in our policies. Would you like to speak with a human agent?", []
 
@@ -175,13 +175,25 @@ class FAQService:
         # --- Build sources from reranked docs ---
         sources: List[Dict[str, Any]] = []
         raw_chunks: List[str] = []
+        total_docs = max(len(relevant_docs), 1)
         for doc in reranked:
             content = doc.page_content.strip()
             page = doc.metadata.get("page", "Unknown")
-            # Find original score
-            orig_score = next((s for d, s in relevant_docs if d.page_content == doc.page_content), 0.0)
+            # Convert rank to a normalized relevance score in [0,1].
+            orig_rank = next(
+                (idx for idx, (d, _) in enumerate(relevant_docs) if d.page_content == doc.page_content),
+                total_docs - 1,
+            )
+            normalized_score = max(0.0, 1.0 - (orig_rank / total_docs))
             raw_chunks.append(content)
-            sources.append({"content": content, "page": page, "score": orig_score, "metadata": doc.metadata})
+            sources.append(
+                {
+                    "content": content,
+                    "page": page,
+                    "score": normalized_score,
+                    "metadata": doc.metadata,
+                }
+            )
 
         # --- Context compression ---
         compressed = compress_context(rewritten, raw_chunks)
@@ -280,7 +292,8 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         answer, sources = semantic_faq_search(user_text)
         
         # Check if we found a good answer
-        if sources and sources[0]["score"] >= 0.6:
+        top_score = float((sources[0] or {}).get("score", 0.0)) if sources else 0.0
+        if sources and answer and top_score >= 0.7:
             # High confidence answer
             result = {
                 "reply": answer,
@@ -290,7 +303,7 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
                     "confidence": "high"
                 }
             }
-        elif sources and sources[0]["score"] >= 0.4:
+        elif sources and answer and top_score >= 0.4:
             # Medium confidence - add disclaimer
             result = {
                 "reply": f"{answer}\n\n[Note: If this doesn't fully answer your question, I can connect you with our support team.]",
@@ -298,6 +311,16 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
                     "ok": True,
                     "sources": sources,
                     "confidence": "medium"
+                }
+            }
+        elif sources and answer:
+            # Still provide best effort answer when retrieval returned evidence.
+            result = {
+                "reply": f"{answer}\n\n[Note: If you want, I can also connect you with support for confirmation.]",
+                "tool_result": {
+                    "ok": True,
+                    "sources": sources,
+                    "confidence": "low"
                 }
             }
         else:
@@ -315,9 +338,10 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         if context and context.get("in_booking_flow"):
             result["preserve_context"] = True
             result["return_to"] = context.get("return_to", "booking")
-            # Add continuation prompt
-            if result["tool_result"].get("ok"):
-                result["reply"] += "\n\nWould you like to know something else about our policies, or shall we continue with your booking?"
+            result["reply"] += (
+                "\n\nWould you like to continue your booking now, or ask another FAQ? "
+                "Feel free to ask more policy questions."
+            )
         
         return result
         
