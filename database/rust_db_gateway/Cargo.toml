@@ -1,0 +1,18 @@
+[package]
+name = "rust_db_gateway"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance Rust microservice — handles all database operations for the hotel booking platform via Supabase PostgreSQL"
+
+[dependencies]
+axum          = "0.7"
+tokio         = { version = "1", features = ["full"] }
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+sqlx          = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+uuid          = { version = "1", features = ["v4", "serde"] }
+chrono        = { version = "0.4", features = ["serde"] }
+tower-http    = { version = "0.5", features = ["cors"] }
+tracing       = "0.1"
+tracing-subscriber = "0.3"
+dotenvy       = "0.15"
