@@ -259,10 +259,23 @@ def _parse_name(t: str) -> str | None:
     text = t or ""
     # Try fast NLP / regex first
     name = nlp_engine.extract_person_name(text)
-    if name: return name
+    if name:
+        n = name.strip().lower()
+        # Prevent greetings/ack words from being stored as a person's name.
+        if n in {
+            "hi", "hello", "hey", "hey there", "hello there",
+            "thanks", "thank you", "ok", "okay", "sure",
+        }:
+            return None
+        return name
     # Fallback to soft-coded LLM extraction
     extracted = _llm_extract_booking_fields(text).get("name")
-    return extracted.title() if isinstance(extracted, str) and len(extracted) >= 2 else None
+    if isinstance(extracted, str) and len(extracted) >= 2:
+        n = extracted.strip().lower()
+        if n in {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay", "sure"}:
+            return None
+        return extracted.title()
+    return None
 
 def _parse_phone(t: str) -> str | None:
     text = t or ""
@@ -305,13 +318,6 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         return "greeting"
     if _is_end(t):
         return "end"
-    if _is_status_query(t):
-        return "status_update"
-
-    # Dynamic safety guard: if a valid selection index is detected, it's a confirmation
-    # This runs BEFORE the LLM call to prevent misclassification of e.g. "sure i will go for option 9"
-    if _parse_selection_index(t) is not None:
-        return "confirmation"
 
     # ── FAQ detection BEFORE LLM — policy/rule questions must ALWAYS break out
     # of any flow (confirmation, booking, etc). Run this first, it's fast & free.
@@ -328,6 +334,19 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
 
     if faq_hit:
         return "faq"
+
+    # Status checks come after FAQ so policy questions like "refund/check-in policy"
+    # are not hijacked by status routing.
+    if _is_status_query(t):
+        tl = t.lower()
+        if not any(p in tl for p in ["continue booking", "continue the booking", "resume booking"]):
+            return "status_update"
+
+    # Selection indices should not hijack FAQ sentences containing ordinals.
+    if _parse_selection_index(t) is not None and "?" not in t and not any(
+        k in t.lower() for k in ["policy", "refund", "cancel", "rules", "faq"]
+    ):
+        return "confirmation"
 
     # Soft-coded LLM intent router (falls back safely when unavailable).
     llm_intent = _llm_route_intent(t, filters)
@@ -622,7 +641,10 @@ def greeting_agent(filters: Dict[str, Any], user_text: str = "") -> Dict[str, An
     if budget: parts.append(f"budget ${budget}")
     hint=f" (noted: {', '.join(parts)})" if parts else ""
 
-    name = _parse_name(user_text) or clean_filters.get("name")
+    name = clean_filters.get("name")
+    # Do not parse greetings like "hello" as names.
+    if user_text and not _is_greeting(user_text):
+        name = _parse_name(user_text) or name
     if name:
         clean_filters["name"] = name
         return {"reply": f"Hi {name.title()}! 👋 I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
@@ -894,7 +916,14 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
 
     # Handle numeric selection (but not if we're collecting guest numbers)
     sel = _parse_selection_index(user_text)
-    awaiting_guests = persisted.get("awaiting_field") == "guests"
+    awaiting_field = (persisted.get("awaiting_field") or "").strip()
+    awaiting_guests = awaiting_field == "guests"
+    # If we are actively collecting any booking field, never treat numbers/ordinals
+    # as property selection in this turn.
+    if awaiting_field and awaiting_field not in {"modification", "modification_choice"}:
+        sel = None
+    if persisted.get("awaiting_selection_confirm"):
+        sel = None
     
     # If we're waiting for guests and got a number, treat it as guest count, not selection
     if awaiting_guests and re.match(r"^\s*\d+\s*$", user_text.strip()):
@@ -1387,9 +1416,16 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
         # Be lenient for names when explicitly awaiting
         cand = parsed_name or user_text.strip()
         if cand and len(cand) >= 2 and not any(ch in cand for ch in ['@','#','$','%','^','&','*']):
-            persisted["name"] = cand
-            persisted["awaiting_field"] = None
-            just_applied_field_update = True
+            words = re.findall(r"[a-zA-Z][a-zA-Z'-]*", cand)
+            disallowed = {
+                "continue", "booking", "proceed", "resume", "policy", "refund",
+                "search", "property", "properties", "option", "phone", "email",
+                "check", "status", "yes", "no",
+            }
+            if 1 <= len(words) <= 3 and not any(w.lower() in disallowed for w in words):
+                persisted["name"] = cand
+                persisted["awaiting_field"] = None
+                just_applied_field_update = True
     elif awaited == "guests" and parsed_guests is not None:
         try:
             persisted["guests"] = int(parsed_guests)
@@ -1466,9 +1502,19 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
         # Accept any reasonable text as a name when explicitly asked
         t_clean = user_text.strip()
         if t_clean and len(t_clean) >= 2 and not any(char in t_clean for char in ['@', '#', '$', '%', '^', '&', '*']):
-            # Check it's not a question or command
+            disallowed = {
+                "show", "available", "dates", "what", "when", "how", "?",
+                "continue", "booking", "proceed", "resume", "policy", "refund",
+                "search", "property", "properties", "option", "phone", "email",
+                "check", "status", "yes", "no",
+            }
+            words = re.findall(r"[a-zA-Z][a-zA-Z'-]*", t_clean)
             t_lower = t_clean.lower()
-            if not any(word in t_lower for word in ["show", "available", "dates", "what", "when", "how", "?"]):
+            if (
+                1 <= len(words) <= 3
+                and not any(w.lower() in disallowed for w in words)
+                and not any(word in t_lower for word in ["my booking id", "booking id", "status"])
+            ):
                 parsed_name = t_clean
 
     if parsed_name and not persisted.get("name"): persisted["name"]=parsed_name
@@ -2026,7 +2072,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
     
     # Try to create user and booking
     try:
-        user_id=get_or_create_user(name=args["name"], email=args["email"], phone=args.get("phone"))
+        user_id = await get_or_create_user(name=args["name"], email=args["email"], phone=args.get("phone"))
     except Exception as e:
         # If database is not configured, use mock mode for testing
         import os
@@ -2048,7 +2094,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
     
     # Try to create booking
     try:
-        r=create_booking(payload)
+        r = await create_booking(payload)
     except Exception as e:
         # If database is not configured, use mock mode
         import os
@@ -2163,7 +2209,7 @@ def availability_agent(filters: Dict[str, Any]) -> Dict[str, Any]:
                "3. Then provide your check-in and check-out dates (YYYY-MM-DD format)")
     return {"reply": reply}
 
-def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
+async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Answer booking status questions given a booking_id.
     Behaviors:
       - If booking_id missing → ask only for booking ID
@@ -2183,7 +2229,7 @@ def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
     # Query current status / dates
     if action in ("query","status","check","info","details","date","dates") or not action:
-        r=get_booking_status(booking_id)
+        r = await get_booking_status(booking_id)
         if r.get("ok"):
             s=str(r.get("status",""))
             s_human = s.replace("_"," ") if s else "unknown"
@@ -2199,7 +2245,7 @@ def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if not new_status:
         return {"reply":"Do you want to check in or check out? If you only want to know status, say 'status'."}
     current=(args.get("current_status") or "pending")
-    r=update_booking_status(booking_id=booking_id, current_status=current, new_status=new_status)
+    r = await update_booking_status(booking_id=booking_id, current_status=current, new_status=new_status)
     msg="Status updated successfully." if r.get("ok") else f"Sorry, that didn't work: {r.get('error')}"
     return {"tool_result": r, "reply": msg}
 
@@ -2214,22 +2260,133 @@ async def payment_agent(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     clean_filters = {k: v for k, v in filters.items() if not callable(v)}
-    
     extracted = extract_filters(user_text, clean_filters)
     prop_type = extract_property_type(user_text)
+    user_tl = (user_text or "").lower().strip()
+
+    def _city_list_text(limit: int = 24) -> str:
+        cities = get_available_cities()
+        return ", ".join(cities[:limit]) if cities else "San Diego, New York, Miami"
+
+    def _unavailable_city_reply() -> str:
+        return (
+            "Unfortunately, there's no availability for that city or location right now. "
+            "Would you like to see which cities are available? (yes/no)"
+        )
+
+    # Step 1: follow-up after unavailable city prompt
+    if clean_filters.get("awaiting_unavailable_city_choice"):
+        if _is_yes(user_text):
+            extracted["awaiting_unavailable_city_choice"] = False
+            extracted["awaiting_city_selection"] = True
+            return {
+                "results": [],
+                "filters": extracted,
+                "reply": (
+                    "Here are some US cities where properties are available:\n\n"
+                    f"{_city_list_text()}\n\n"
+                    "Please pick one city from this list."
+                ),
+            }
+        if _is_no(user_text):
+            extracted.pop("awaiting_unavailable_city_choice", None)
+            extracted.pop("awaiting_city_selection", None)
+            extracted.pop("awaiting_property_type_choice", None)
+            return {
+                "results": [],
+                "filters": extracted,
+                "reply": "Bye! Thanks for visiting. Have a nice day.",
+                "tool_result": {"ok": True, "end": True},
+            }
+        return {
+            "results": [],
+            "filters": extracted,
+            "reply": "Please reply with yes or no. Would you like to see available cities?",
+        }
+
+    # Step 2: user is selecting a city from shown list
+    if clean_filters.get("awaiting_city_selection"):
+        if _is_no(user_text) or any(
+            p in user_tl for p in ["couldn't find", "could not find", "can't find", "sorry i couldnt find"]
+        ):
+            extracted.pop("awaiting_city_selection", None)
+            extracted.pop("awaiting_property_type_choice", None)
+            return {
+                "results": [],
+                "filters": extracted,
+                "reply": "Bye! Thanks for visiting. We will try to reach your city soon.",
+                "tool_result": {"ok": True, "end": True},
+            }
+        city_pick = extracted.get("location") or extracted.get("city")
+        if not city_pick:
+            return {
+                "results": [],
+                "filters": extracted,
+                "reply": (
+                    "I couldn't match that city. Please choose one city from this list:\n\n"
+                    f"{_city_list_text()}"
+                ),
+            }
+        extracted["location"] = city_pick
+        extracted["city"] = city_pick
+        extracted["awaiting_city_selection"] = False
+        extracted["awaiting_property_type_choice"] = True
+        return {
+            "results": [],
+            "filters": extracted,
+            "reply": (
+                "Great choice. What property type would you like in that city "
+                "(loft, apartment, condo, house, studio, villa, townhouse, or any)?"
+            ),
+        }
+
+    # Step 3: ask property type after city selection, then search
+    if clean_filters.get("awaiting_property_type_choice"):
+        if not prop_type and not any(p in user_tl for p in ["any", "no preference", "doesn't matter", "doesnt matter"]):
+            return {
+                "results": [],
+                "filters": extracted,
+                "reply": (
+                    "Please share a property type (loft, apartment, condo, house, studio, villa, townhouse) "
+                    "or say 'any'."
+                ),
+            }
+        extracted["awaiting_property_type_choice"] = False
+        if prop_type:
+            extracted["property_type"] = prop_type
+
+    requested_city = extracted.get("location") or extracted.get("city")
+
+    # Detect unknown city mentions like "find apartment in lisbon" when city isn't in dataset.
+    if not requested_city:
+        from .nlp_extractor import KNOWN_CITIES, CITY_ALIASES
+        candidate = None
+        m = re.search(r"\b(?:in|at|near|around)\s+([a-z][a-z\s\-]{1,40})", user_tl)
+        if m:
+            raw = m.group(1).strip(" .,-")
+            raw = re.split(r"\b(?:with|under|for|from|and|but)\b", raw)[0].strip()
+            words = [w for w in raw.split() if w]
+            if 1 <= len(words) <= 3:
+                bad = {
+                    "property", "properties", "apartment", "apartments", "hotel", "hotels",
+                    "house", "houses", "villa", "villas", "condo", "condos",
+                    "loft", "lofts", "studio", "studios", "townhouse", "townhouses",
+                }
+                if not any(w in bad for w in words):
+                    cand = " ".join(words)
+                    if cand not in KNOWN_CITIES and cand not in CITY_ALIASES:
+                        candidate = cand
+
+        if candidate:
+            extracted["requested_unavailable_city"] = candidate
+            extracted["awaiting_unavailable_city_choice"] = True
+            extracted.pop("awaiting_city_selection", None)
+            extracted.pop("awaiting_property_type_choice", None)
+            return {"results": [], "reply": _unavailable_city_reply(), "filters": extracted}
+
     enhanced = f"{prop_type} {user_text}" if prop_type else user_text
 
-    # Check if a city was requested but not found in our dataset
-    requested_city = extracted.get("location") or extracted.get("city")
-    
-    # If user text mentions a city-like query but no valid city was extracted
-    city_keywords = ["in", "at", "near", "around", "located"]
-    might_be_city_request = any(keyword in user_text.lower() for keyword in city_keywords)
-    
-    # ──────────────────────────────────────────────────────────
-    # Try Rust gateway for property search (heavy computation)
-    # Falls back to Python property_search if gateway unavailable
-    # ──────────────────────────────────────────────────────────
+    # Try Rust gateway for property search and fall back to Python search.
     results = None
     try:
         from .rust_client import search_properties
@@ -2245,7 +2402,6 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         )
 
         if not rust_result.get("fallback"):
-            # Extract results from the Rust response
             inner = rust_result.get("result", rust_result)
             rust_results = inner.get("results", [])
             if isinstance(rust_results, list):
@@ -2253,8 +2409,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
                 print(f"[RUST] Property search returned {len(results)} results via gateway")
     except Exception as e:
         print(f"[RUST] Property search offload failed: {e}, using Python fallback")
-    
-    # Fallback: use local Python search
+
     if results is None:
         results = property_search(
             query_text=enhanced,
@@ -2264,38 +2419,25 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
             beds=extracted.get("beds"),
             property_type=prop_type,
         )
-    
-    # If no results and user seems to be asking for a specific location
-    if not results and might_be_city_request:
-        # Check if this might be an invalid city request
-        from .nlp_extractor import KNOWN_CITIES
-        
-        # If no valid city was found in the text
-        if not requested_city:
-            available_cities = get_available_cities()
-            city_list = ", ".join(available_cities[:10])  # Show first 10 cities
-            
-            reply = (
-                "Unfortunately, I couldn't find properties in that location. "
-                "I have properties available in these US cities:\n\n"
-                f"**{city_list}**, and more.\n\n"
-                "Would you like to search in one of these cities? Just tell me which city you prefer."
-            )
-            
-            extracted["awaiting_city_selection"] = True
-            return {"results": [], "reply": reply, "filters": extracted}
-    
-    # Regular flow with proper list counting - show all results up to a reasonable limit
-    max_display = min(len(results), 15)  # Show up to 15 results
-    index_map = {i+1: r.get("id") for i, r in enumerate(results[:max_display])}
+
+    # If city is known/requested but no listings, trigger unavailable-city flow.
+    if requested_city and not results:
+        extracted["awaiting_unavailable_city_choice"] = True
+        return {"results": [], "reply": _unavailable_city_reply(), "filters": extracted}
+
+    max_display = min(len(results), 15)
+    index_map = {i + 1: r.get("id") for i, r in enumerate(results[:max_display])}
     extracted.update({
-        "results_index_map": index_map, 
-        "last_results": results[:max_display]
+        "results_index_map": index_map,
+        "last_results": results[:max_display],
+        "awaiting_unavailable_city_choice": False,
+        "awaiting_city_selection": False,
+        "awaiting_property_type_choice": False,
     })
 
     stream = bool(filters.get("stream", False))
     stream_cb = filters.get("stream_callback") if callable(filters.get("stream_callback")) else None
-    
+
     reply = await llm_reply_from_results(
         user_text=user_text,
         results=results,
@@ -2304,7 +2446,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         stream=stream,
         stream_callback=stream_cb,
     )
-    
+
     return {"results": results, "reply": reply, "filters": extracted}
 
 def handoff_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
