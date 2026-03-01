@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import TypedDict, Optional, Dict, Any, List
 import re
+import inspect
 from langgraph.graph import StateGraph, END
 from .tracing import span
 from .db_logging import log_chat
@@ -33,8 +34,16 @@ def node_triage(state: ChatState) -> ChatState:
         user_text, is_safe = sanitize_input(user_text)
         if not is_safe:
             return {**state, "intent": "greeting", "reply": "I'm here to help with hotel bookings and policy questions. How can I assist you?"}
-
         intent = triage_intent(user_text, filters)
+
+        # Property flow follow-ups for unavailable-city handling should stay in
+        # property node regardless of generic yes/no intent classification.
+        if (
+            filters.get("awaiting_unavailable_city_choice")
+            or filters.get("awaiting_city_selection")
+            or filters.get("awaiting_property_type_choice")
+        ):
+            return {**state, "intent": "property_search"}
         
         # IMPORTANT: Greetings should always be handled as greetings, regardless of context
         # This prevents the bot from asking for booking details when user just says "hi"
@@ -47,18 +56,23 @@ def node_triage(state: ChatState) -> ChatState:
         if filters.get("awaiting_post_mod_choice"):
             return {**state, "intent": "confirmation"}
         
-        # If FAQ was just answered and we're in booking flow, check if user wants to continue
-        if state.get("faq_answered") and filters:
-            # Clear the FAQ flag
-            new_state = {**state}
-            new_state.pop("faq_answered", None)
-            
-            # If user is continuing with booking info or saying yes/no, route to confirmation
-            if intent in ["confirmation", "booking"] or user_text.lower() in ["yes", "no", "continue"]:
-                return {**new_state, "intent": "confirmation"}
-            # If another FAQ question, keep in FAQ mode
-            elif intent == "faq":
-                return {**new_state, "intent": "faq"}
+        # FAQ return guard: keep this in filters so it survives turns in CLI/web sessions.
+        if filters.get("faq_answered"):
+            resume_intent = filters.get("faq_resume_intent", "confirmation")
+            tl = user_text.lower().strip()
+            new_filters = {**filters}
+            new_filters.pop("faq_answered", None)
+            new_filters.pop("faq_resume_intent", None)
+            if intent == "faq":
+                return {**state, "intent": "faq", "filters": new_filters}
+            if (
+                intent in ["confirmation", "booking"]
+                or tl in {"yes", "no", "continue", "continue booking", "resume", "resume booking"}
+                or "continue" in tl
+                or "resume" in tl
+            ):
+                return {**state, "intent": resume_intent, "filters": new_filters}
+            return {**state, "filters": new_filters}
         
         # booking-context override (only check this AFTER greeting check)
         booking_context = (
@@ -85,11 +99,27 @@ def node_triage(state: ChatState) -> ChatState:
             elif awaiting_field in ["name", "phone", "email", "check_in", "check_out", "guests", "modification", "modification_choice", "location"]:
                 # User is providing data for a requested field, keep in confirmation flow
                 intent = "confirmation"
+
+        # In active booking context, avoid accidental status routing for phrases
+        # like "continue booking" that are not actual status checks.
+        if booking_context and intent == "status_update":
+            tl = user_text.lower()
+            explicit_status = any(
+                k in tl for k in ["booking id", "status", "track", "tracking", "check status"]
+            )
+            if not explicit_status:
+                intent = "confirmation"
                 
         # Guard: Orphaned affirmations (e.g. user says "ok" after a greeting) shouldn't trigger the booking loop 
         # unless they have actually selected a property, are explicitly awaiting a booking field, 
         # or are actively selecting an option from a previous search.
         if intent == "confirmation" and not filters.get("selected_property") and not filters.get("awaiting_field"):
+            if (
+                filters.get("awaiting_unavailable_city_choice")
+                or filters.get("awaiting_city_selection")
+                or filters.get("awaiting_property_type_choice")
+            ):
+                return {**state, "intent": "property_search"}
             from services.agents import _parse_selection_index
             if _parse_selection_index(user_text) is None:
                 intent = "greeting"
@@ -114,22 +144,26 @@ def node_faq(state: ChatState) -> ChatState:
         # Prepare context for FAQ agent
         context = {}
         
-        # Check if we're in the middle of a booking flow
+        # Check if we're in the middle of a booking/property flow
         filters = state.get("filters", {})
         if filters and any(filters.get(k) for k in ["selected_property", "name", "phone", "email", "check_in", "check_out"]):
             context["in_booking_flow"] = True
             context["return_to"] = "confirmation"
             context["booking_state"] = filters
+        elif filters and any(filters.get(k) for k in ["last_results", "results_index_map", "location", "city"]):
+            context["in_booking_flow"] = True
+            context["return_to"] = "property_search"
+            context["booking_state"] = filters
         
         # Call FAQ agent with context
         out = faq_agent(state.get("user_text", ""), context)
         
-        # Preserve booking state if FAQ was asked during booking
+        # Preserve state if FAQ was asked during booking/search.
         if out.get("preserve_context") and context.get("booking_state"):
-            # Keep the filters/booking state intact
-            out["filters"] = context["booking_state"]
-            # Add a flag to indicate we should return to booking after FAQ
-            out["faq_answered"] = True
+            kept = {**context["booking_state"]}
+            kept["faq_answered"] = True
+            kept["faq_resume_intent"] = context.get("return_to", "confirmation")
+            out["filters"] = kept
         
         return {**state, **out}
 
@@ -176,8 +210,8 @@ async def node_booking(state: ChatState) -> ChatState:
             
         return result
 
-def node_status(state: ChatState) -> ChatState:
-    with span("node_status"):
+async def node_status(state: ChatState) -> ChatState:
+    async with span("node_status"):
         # Merge booking_id parsed from text if not provided in status_args
         args = {**(state.get("status_args", {}) or {})}
         user_text = state.get("user_text", "")
@@ -185,7 +219,7 @@ def node_status(state: ChatState) -> ChatState:
             m = re.search(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", user_text or "")
             if m:
                 args["booking_id"] = m.group(0)
-        out = status_agent(user_text, args)
+        out = await status_agent(user_text, args)
         return {**state, **out}
 
 async def node_payment(state: ChatState) -> ChatState:
@@ -274,7 +308,15 @@ def build_chat_graph():
         g.add_edge(node, END)
     g.add_edge("end", END)
 
-    return g.compile()
+    compile_kwargs: Dict[str, Any] = {}
+    try:
+        if "recursion_limit" in inspect.signature(g.compile).parameters:
+            compile_kwargs["recursion_limit"] = 25
+    except (TypeError, ValueError):
+        # Some LangGraph versions expose non-introspectable callables.
+        pass
+
+    return g.compile(**compile_kwargs)
 
 APP = build_chat_graph()
 
