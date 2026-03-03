@@ -303,7 +303,7 @@ def get_available_cities() -> List[str]:
         if city.lower() not in seen:
             seen.add(city.lower())
             unique_cities.append(city)
-    return unique_cities[:20]
+    return unique_cities
 
 def _wants_property_search_request(t: str) -> bool:
     return nlp_engine.wants_property_search_request(t or "")
@@ -2298,9 +2298,15 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     prop_type = extract_property_type(user_text)
     user_tl = (user_text or "").lower().strip()
 
-    def _city_list_text(limit: int = 24) -> str:
+    def _city_list_text() -> str:
         cities = get_available_cities()
-        return ", ".join(cities[:limit]) if cities else "San Diego, New York, Miami"
+        if not cities:
+            return "San Diego, New York, Miami"
+        # wrap into lines of 5 cities for readability
+        lines = []
+        for i in range(0, len(cities), 5):
+            lines.append(", ".join(cities[i:i + 5]))
+        return "\n".join(lines)
 
     def _unavailable_city_reply() -> str:
         return (
@@ -2317,7 +2323,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
                 "results": [],
                 "filters": extracted,
                 "reply": (
-                    "Here are some US cities where properties are available:\n\n"
+                    "Here are all available cities where properties are listed:\n\n"
                     f"{_city_list_text()}\n\n"
                     "Please pick one city from this list."
                 ),
