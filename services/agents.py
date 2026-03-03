@@ -323,6 +323,11 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if _is_end(t):
         return "end"
 
+    # Soft-coded LLM intent router (prioritized as requested by user to be super soft-coded).
+    llm_intent = _llm_route_intent(t, filters)
+    if llm_intent:
+        return llm_intent
+
     # ── FAQ detection BEFORE LLM — policy/rule questions must ALWAYS break out
     # of any flow (confirmation, booking, etc). Run this first, it's fast & free.
     try:
@@ -351,11 +356,6 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         k in t.lower() for k in ["policy", "refund", "cancel", "rules", "faq"]
     ):
         return "confirmation"
-
-    # Soft-coded LLM intent router (falls back safely when unavailable).
-    llm_intent = _llm_route_intent(t, filters)
-    if llm_intent:
-        return llm_intent
 
     # NLP-driven and keyword fallback routing (secondary pass — catches LLM misses).
     if _looks_like_property_search(t):
