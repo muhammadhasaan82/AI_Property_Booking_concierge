@@ -251,6 +251,7 @@ def _route_from_intent(state: ChatState) -> str:
         "payment_link": "payment",
         "handoff": "handoff",
         "availability": "availability",
+        "end": "end",
     }
     return mapping.get(intent, "property")
 
