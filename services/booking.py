@@ -111,7 +111,7 @@ async def get_or_create_user(name: str, email: str, phone: Optional[str] = None)
             async with httpx.AsyncClient(timeout=10.0) as client:
                 data = {"name": name, "email": email, "phone": phone}
                 r = await client.post(
-                    _rest_url("users"),
+                    f"{_rest_url('users')}?on_conflict=email",
                     headers={
                         **_supabase_headers(),
                         "Prefer": "return=representation,resolution=merge-duplicates",
