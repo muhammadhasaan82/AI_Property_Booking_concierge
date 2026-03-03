@@ -926,8 +926,8 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
     # as property selection in this turn.
     if awaiting_field and awaiting_field not in {"modification", "modification_choice"}:
         sel = None
-    if persisted.get("awaiting_selection_confirm"):
-        sel = None
+    # Note: do NOT suppress sel when awaiting_selection_confirm; user may re-select a different item.
+    # The awaiting_selection_confirm block below handles this case explicitly.
     
     # If we're waiting for guests and got a number, treat it as guest count, not selection
     if awaiting_guests and re.match(r"^\s*\d+\s*$", user_text.strip()):
@@ -1005,12 +1005,54 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
         tl=(user_text or "").strip().lower()
         if tl in {"yes please","yes pls","sure please","pls yes","yup please","yeah please"}:
             user_text = "yes"
-        if _is_no(user_text):
-            for k in ["recent_property_id","recent_selection_index","selected_property","awaiting_selection_confirm","awaiting_field"]:
+
+        # FIX B: If user types a new numeric selection (e.g. "6"), handle it here instead of
+        # asking "please reply yes or no". Clear stale selection state and fall through
+        # to the sel-handling block which will show the proper property card.
+        if sel is not None:
+            persisted.pop("awaiting_selection_confirm", None)
+            persisted.pop("selected_property", None)
+            persisted.pop("recent_property_id", None)
+            persisted.pop("recent_selection_index", None)
+            # Fall through — sel block below will handle showing the property card
+
+        # FIX A: "no, back to list" / "show other properties" — re-show last results, NOT end session
+        elif _is_no(user_text) or any(p in tl for p in [
+            "back to list", "back to the list", "back to results", "show list",
+            "other properties", "other options", "show me other", "different property",
+            "different properties", "go back", "previous list", "see list",
+            "return to list", "show properties", "show other properties",
+        ]):
+            last_results = persisted.get("last_results") or persisted.get("results") or []
+            idx_map = persisted.get("results_index_map") or {}
+            for k in ["recent_property_id", "recent_selection_index", "selected_property", "awaiting_selection_confirm", "awaiting_field"]:
                 persisted.pop(k, None)
-            # End the chat gracefully when user declines to book the selected property
-            return {"reply": "No worries — thanks for visiting! Have a lovely day ✨", "tool_result": {"ok": False, "end": True}, "filters": persisted}
-        if _is_yes(user_text) or (tl in {"yes sure","sure yes","yes please","yes pls","sure"}):
+            if last_results and idx_map:
+                # Re-display the previous search results
+                lines = []
+                for num in sorted(idx_map.keys()):
+                    pid = idx_map[num]
+                    prop = next((p for p in last_results if p.get("id") == pid), None)
+                    if prop:
+                        title = prop.get("title", "Property")
+                        city = (prop.get("city") or "").title()
+                        price = int(float(prop.get("price_per_night") or 0))
+                        lines.append(f"{num}. {title} — {city} — about ${price}/night")
+                if lines:
+                    listing = "\n".join(lines)
+                    return {
+                        "reply": f"Sure! Here are your previous results:\n\n{listing}\n\nReply with a number to choose.",
+                        "filters": persisted,
+                        "tool_result": {"ok": False, "need": ["property_selection"]},
+                    }
+            # No cached results — prompt a fresh search
+            return {
+                "reply": "No previous results found. What would you like to search for? (city, property type, budget)",
+                "filters": persisted,
+                "tool_result": {"ok": False, "need": ["restart"]},
+            }
+
+        if sel is None and (_is_yes(user_text) or (tl in {"yes sure","sure yes","yes please","yes pls","sure"})):
             persisted["awaiting_selection_confirm"] = False
             # If we already have required fields, show receipt directly; otherwise ask for next missing
             required=["name","phone","email","check_in","check_out","guests"]
@@ -1056,10 +1098,11 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             nxt=missing[0]
             persisted["awaiting_field"]=nxt
             return {"reply":_CFG_FIELD_PROMPTS.get(nxt, f"Please provide your {nxt}."), "tool_result": {"ok": False, "need": [nxt]}, "filters": persisted}
-        # If neither explicit yes nor no, keep asking for confirmation
-        return {"reply": "Please reply with yes or no to continue.",
-                "tool_result": {"ok": False, "need": ["booking_confirmation"]},
-                "filters": persisted}
+        # If neither explicit yes nor no (and not a new numeric selection), keep asking
+        if sel is None:
+            return {"reply": "Please reply with yes or no to continue.",
+                    "tool_result": {"ok": False, "need": ["booking_confirmation"]},
+                    "filters": persisted}
 
     # Handle user's choice after cancelling a receipt (search again vs modify)
     if persisted.get("awaiting_post_cancel_choice") and not persisted.get("awaiting_field"):
