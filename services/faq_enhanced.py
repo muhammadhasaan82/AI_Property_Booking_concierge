@@ -15,9 +15,15 @@ from PyPDF2 import PdfReader
 
 # LangChain imports
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+try:
+    from langchain_huggingface import HuggingFaceBgeEmbeddings
+except Exception:  # noqa: BLE001 - package may not be installed in all envs
+    try:
+        from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+    except Exception:  # noqa: BLE001 - degrade with explicit runtime error in initializer
+        HuggingFaceBgeEmbeddings = None  # type: ignore[assignment]
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -51,7 +57,7 @@ class FAQService:
         self._chroma_path = chroma_path or CHROMA_PATH
         self._chroma_path.mkdir(exist_ok=True)
         self._vector_store: Optional[Chroma] = None
-        self._embeddings: Optional[OpenAIEmbeddings] = None
+        self._embeddings = None
         self._healthy = False
 
     @property
@@ -76,13 +82,24 @@ class FAQService:
             return ""
 
     def process_policy_document(self, pdf_path: str, force_reload: bool = False) -> Chroma:
-        if not self._openai_api_key:
-            raise ValueError("OpenAI API key not found in environment variables")
-
         if self._embeddings is None:
-            self._embeddings = OpenAIEmbeddings(
-                openai_api_key=self._openai_api_key,
-                model="text-embedding-3-small",
+            if HuggingFaceBgeEmbeddings is None:
+                raise ImportError(
+                    "HuggingFaceBgeEmbeddings is unavailable. Install langchain-huggingface "
+                    "or langchain-community with sentence-transformers support."
+                )
+            device = "cpu"
+            try:
+                import torch  # type: ignore
+
+                if torch.cuda.is_available():
+                    device = "cuda"
+            except Exception:
+                device = "cpu"
+            self._embeddings = HuggingFaceBgeEmbeddings(
+                model_name="BAAI/bge-small-en-v1.5",
+                model_kwargs={"device": device},
+                encode_kwargs={"normalize_embeddings": True},
             )
 
         if self._vector_store is not None and not force_reload:

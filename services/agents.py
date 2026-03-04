@@ -2011,23 +2011,23 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             persisted["awaiting_selection_confirm"] = False  # Clear this flag when asking for fields
             return {"reply":_CFG_FIELD_PROMPTS.get(k, f"Please provide your {k}."), "tool_result":{"ok":False,"need":[k]}, "filters":persisted}
 
-    # Build receipt (only if not already shown)
+    # Build receipt only when it has not already been shown in this state.
     if not persisted.get("receipt_shown"):
         selected_property = persisted.get("selected_property") or {}
-    title = selected_property.get("title","Property")
-    city = (selected_property.get("city") or "").title()
-    price_per_night = float(selected_property.get("price_per_night") or 0)
+        title = selected_property.get("title","Property")
+        city = (selected_property.get("city") or "").title()
+        price_per_night = float(selected_property.get("price_per_night") or 0)
 
-    from datetime import datetime
-    try:
-        ci=datetime.strptime(persisted["check_in"], "%Y-%m-%d")
-        co=datetime.strptime(persisted["check_out"], "%Y-%m-%d")
-        nights=max(1, (co-ci).days)
-    except Exception:
-        nights=1
-    total=int(price_per_night*nights)
+        from datetime import datetime
+        try:
+            ci=datetime.strptime(persisted["check_in"], "%Y-%m-%d")
+            co=datetime.strptime(persisted["check_out"], "%Y-%m-%d")
+            nights=max(1, (co-ci).days)
+        except Exception:
+            nights=1
+        total=int(price_per_night*nights)
 
-    receipt=f"""📋 **BOOKING SUMMARY**
+        receipt=f"""📋 **BOOKING SUMMARY**
 
 **Guest Information**
 - Name: {persisted.get("name")}
@@ -2049,12 +2049,15 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
 
 ✅ **Would you like to confirm this booking?**
 Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
-    persisted["receipt_shown"]=True
-    persisted["awaiting_field"]=None
-    return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
+        persisted["receipt_shown"]=True
+        persisted["awaiting_field"]=None
+        return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
 
-    # Default return to ensure we always return a dictionary
-    return {"reply": "I'm sorry, I didn't understand that. Could you please clarify?", "filters": persisted}
+    # Receipt was already shown but message was not strongly classified.
+    return {
+        "reply": "I want to make sure I get this right. Please reply with a clear 'yes' to confirm and proceed with payment, or 'no' to cancel and modify.",
+        "filters": persisted,
+    }
 
 def faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """Enhanced FAQ agent that uses semantic search on policy documents"""

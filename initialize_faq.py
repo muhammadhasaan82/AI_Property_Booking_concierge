@@ -21,13 +21,6 @@ def main():
     print("FAQ System Initialization")
     print("="*60)
     
-    # Check for OpenAI API key
-    if not os.getenv("OPENAI_API_KEY"):
-        print("\n[ERROR] OPENAI_API_KEY not found in environment variables")
-        print("   Please set your OpenAI API key in the .env file:")
-        print("   OPENAI_API_KEY=your-api-key-here")
-        return
-    
     # Check if PDF exists
     pdf_path = Path(__file__).parent / "Company policy.pdf"
     
@@ -46,7 +39,7 @@ def main():
         print("\n[SUCCESS] FAQ system initialized with the following details:")
         print(f"   - PDF processed: Company policy.pdf")
         print(f"   - Vector store location: {Path(__file__).parent / 'chroma_faq'}")
-        print(f"   - Embeddings model: text-embedding-3-small")
+        print("   - Embeddings model: BAAI/bge-small-en-v1.5")
         
         # Test with a sample question
         print("\n[TEST] Testing with sample question...")
@@ -64,7 +57,7 @@ def main():
         
     except Exception as e:
         print(f"\n[ERROR] Error during initialization: {e}")
-        print("   Please check your OpenAI API key and internet connection")
+        print("   Please check your embedding dependencies and internet connection")
         return
     
     print("\n" + "="*60)
