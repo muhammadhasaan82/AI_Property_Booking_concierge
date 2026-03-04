@@ -497,6 +497,37 @@ def wants_property_search_request(text: str) -> bool:
             ("property" in tl or "properties" in tl or "options" in tl))
 
 
+def wants_previous_results_sync(text: str) -> bool:
+    """Semantic detection: does user want to return to previous search results?"""
+    if not text or not text.strip():
+        return False
+    
+    model = _get_st_model()
+    if model is None:
+        # Fallback keyword logic
+        tl = text.lower()
+        return any(p in tl for p in [
+            "back to list", "back to the list", "back to results", "show list",
+            "other properties", "other options", "show me other", "different property",
+            "different properties", "go back", "previous list", "see list",
+            "return to list", "show properties", "show other properties",
+        ])
+
+    import numpy as np
+    prototypes = [
+        "return to the previous search results",
+        "show me the list of properties again",
+        "go back to the other options"
+    ]
+    
+    text_vec = model.encode([text], convert_to_numpy=True)[0]
+    proto_vecs = model.encode(prototypes, convert_to_numpy=True)
+    
+    # Compute similarity against all prototypes
+    scores = np.dot(proto_vecs, text_vec) / (np.linalg.norm(proto_vecs, axis=1) * np.linalg.norm(text_vec) + 1e-8)
+    return float(np.max(scores)) > 0.55
+
+
 def detect_faq_intent(text: str) -> bool:
     """Detect FAQ/policy questions using semantic classification."""
     if not text or not text.strip():
@@ -931,3 +962,6 @@ async def is_property_search_async(text: str) -> bool:
 
 async def is_status_query_async(text: str) -> bool:
     return await asyncio.to_thread(is_status_query, text)
+
+async def wants_previous_results_async(text: str) -> bool:
+    return await asyncio.to_thread(wants_previous_results_sync, text)
