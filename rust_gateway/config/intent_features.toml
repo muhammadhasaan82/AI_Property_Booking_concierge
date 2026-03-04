@@ -1,0 +1,23 @@
+# rust_gateway/config/intent_features.toml
+# Gateway scoring rules for zero-shot intent inference
+
+[intents.search]
+keys = ["location", "city", "budget", "beds", "amenities", "property_type", "query_text"]
+weight = 0.2
+
+[intents.booking]
+keys = ["property_id", "check_in", "check_out", "user_id", "guests", "name", "email", "phone"]
+weight = 0.15
+
+[intents.status]
+keys = ["booking_id", "status", "tracking"]
+weight = 0.35
+
+[intents.payment]
+keys = ["amount", "currency", "payment_method", "payment_id"]
+weight = 0.25
+
+[intents.faq]
+keywords = ["policy", "refund", "cancel", "wifi", "rule", "check-in", "checkout", "terms"]
+weight = 0.3
+base_score = 0.2
