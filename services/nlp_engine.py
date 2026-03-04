@@ -197,6 +197,22 @@ _RESUME_REQUEST_PROTOTYPES: Tuple[str, ...] = (
     "continue the process",
 )
 
+_AFFIRM_YES_PROTOTYPES: Tuple[str, ...] = (
+    "yes continue to payment please",
+    "yes that sounds great proceed",
+    "please confirm and continue",
+    "go ahead and finalize the booking",
+    "i agree and want to proceed",
+)
+
+_AFFIRM_NO_PROTOTYPES: Tuple[str, ...] = (
+    "no cancel this booking",
+    "do not proceed",
+    "i want to stop this",
+    "cancel and let me modify details",
+    "no thanks not this one",
+)
+
 
 def _get_vader():
     """Lazy-init VADER sentiment analyzer."""
@@ -232,8 +248,8 @@ def _get_st_model():
     if _st_model is None:
         try:
             from sentence_transformers import SentenceTransformer
-            _st_model = SentenceTransformer("all-MiniLM-L6-v2")
-            logger.info("[nlp_engine] sentence-transformers all-MiniLM-L6-v2 loaded")
+            _st_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+            logger.info("[nlp_engine] sentence-transformers BAAI/bge-small-en-v1.5 loaded")
         except Exception as exc:  # noqa: BLE001 - degrade gracefully in restricted envs
             logger.warning(
                 "[nlp_engine] sentence-transformers unavailable (%s), falling back to keyword matching",
@@ -344,18 +360,18 @@ def classify_affirmation(text: str) -> str:
 
     tl = text.strip().lower()
 
-    # Fast-path: exact matches (common conversational tokens)
-    _YES_EXACT = {"yes", "yeah", "yep", "yup", "sure", "please", "ok",
-                  "okay", "alright", "oki", "yea", "absolutely", "definitely",
-                  "of course", "go ahead", "proceed", "confirm", "confirmed",
-                  "right", "correct", "affirmative", "y"}
-    _NO_EXACT = {"no", "nope", "nah", "not now", "later", "stop", "cancel",
-                 "negative", "n", "decline", "reject", "refuse", "denied",
-                 "never mind", "nevermind"}
-
-    if tl in _YES_EXACT:
+    # Semantic-first classification for extended confirmations.
+    yes_sim = _max_semantic_similarity(tl, _AFFIRM_YES_PROTOTYPES)
+    no_sim = _max_semantic_similarity(tl, _AFFIRM_NO_PROTOTYPES)
+    if yes_sim >= 0.50 and yes_sim >= (no_sim + 0.04):
         return "yes"
-    if tl in _NO_EXACT:
+    if no_sim >= 0.50 and no_sim >= (yes_sim + 0.04):
+        return "no"
+
+    # Minimal lexical fallback for explicit one-token confirmations.
+    if re.fullmatch(r"(yes|y|yeah|yep|yup|sure|ok|okay|alright|confirm(?:ed)?)", tl):
+        return "yes"
+    if re.fullmatch(r"(no|n|nope|nah|cancel|stop)", tl):
         return "no"
 
     # VADER compound score
@@ -363,10 +379,11 @@ def classify_affirmation(text: str) -> str:
     scores = vader.polarity_scores(tl)
     compound = scores["compound"]
 
-    # Positive compound + short text ≈ affirmation
-    if compound >= 0.3 and len(tl.split()) <= 4:
+    # Polarity fallback for short-to-medium confirmation utterances.
+    token_len = len(tl.split())
+    if compound >= 0.28 and token_len <= 10:
         return "yes"
-    if compound <= -0.3 and len(tl.split()) <= 4:
+    if compound <= -0.28 and token_len <= 10:
         return "no"
 
     return "neutral"

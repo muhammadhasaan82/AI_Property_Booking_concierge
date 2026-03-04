@@ -32,6 +32,8 @@ else:
         load_dotenv(env_path_svc)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+EMBED_NORMALIZE = True
 
 # ---------------------------------------------------------------------------
 # Lazy-loaded models (avoid import-time downloads)
@@ -39,6 +41,14 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 _cross_encoder = None
 _cross_encoder_lock = threading.Lock()
 _rerank_pool = ThreadPoolExecutor(max_workers=2)
+
+
+def get_embedding_backend_config() -> Dict[str, Any]:
+    """Return the baseline embedding backend expected by retrieval layers."""
+    return {
+        "model_name": EMBED_MODEL,
+        "normalize_embeddings": EMBED_NORMALIZE,
+    }
 
 
 def _get_cross_encoder():
@@ -138,6 +148,7 @@ def hybrid_retrieve(
     """Combine Chroma vector search with BM25 keyword search via RRF.
 
     Returns list of (Document, fused_score) tuples, highest score first.
+    This method is embedding-model agnostic and works with normalized BGE vectors.
     """
     # --- Vector search ---
     try:
