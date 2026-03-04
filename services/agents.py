@@ -314,28 +314,7 @@ def _wants_modification(t: str) -> bool:
 def _detect_requested_fields(t: str) -> List[str]:
     return nlp_engine.detect_requested_fields(t or "")
 
-def _wants_previous_results(t: str) -> bool:
-    tl = (t or "").lower().strip()
-    if not tl:
-        return False
 
-    explicit_phrases = {
-        "back to list", "back to the list", "back to results", "show list",
-        "other properties", "other options", "show me other", "different property",
-        "different properties", "go back", "previous list", "see list",
-        "return to list", "show properties", "show other properties",
-        "back me to the list", "back me to list", "take me back to the list",
-        "go back to list", "go back to the list", "return me to the list",
-    }
-    if any(p in tl for p in explicit_phrases):
-        return True
-
-    # Soft fallback for natural wording variants like "can you take me back to results?"
-    if ("back" in tl or "return" in tl) and any(k in tl for k in ["list", "results", "options", "properties"]):
-        return True
-    if "show" in tl and any(k in tl for k in ["list", "results", "options", "properties"]):
-        return True
-    return False
 
 def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> str:
     t = user_text or ""
@@ -354,7 +333,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
             _is_yes(t)
             or _is_no(t)
             or _parse_selection_index(t) is not None
-            or _wants_previous_results(tl)
+            or nlp_engine.wants_previous_results_sync(tl)
         ):
             return "confirmation"
 
@@ -1052,7 +1031,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             # Fall through — sel block below will handle showing the property card
 
         # FIX A: "no, back to list" / "show other properties" — re-show last results, NOT end session
-        elif _is_no(user_text) or _wants_previous_results(tl):
+        elif _is_no(user_text) or await nlp_engine.wants_previous_results_async(tl):
             last_results = persisted.get("last_results") or persisted.get("results") or []
             idx_map = persisted.get("results_index_map") or {}
             for k in ["recent_property_id", "recent_selection_index", "selected_property", "awaiting_selection_confirm", "awaiting_field"]:
