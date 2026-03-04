@@ -1,0 +1,347 @@
+# config/intent_catalog.yaml
+# All intent prototypes, field prototypes, and semantic matching thresholds.
+# Edit this file to tune intent classification without changing source code.
+
+version: "1.0"
+default_threshold: 0.55
+
+# ─── Intent prototypes for semantic classification ───
+intents:
+  property_search:
+    threshold: 0.50
+    prototypes:
+      - "I want to find an apartment in New York"
+      - "Show me available rentals under 200 dollars"
+      - "Looking for a villa with a pool"
+      - "Search for properties in Miami"
+      - "I need a place to stay near downtown"
+      - "Find me a 2 bedroom house"
+      - "What do you have available"
+      - "Browse listings with wifi and parking"
+
+  status_update:
+    threshold: 0.55
+    prototypes:
+      - "What is the status of my booking"
+      - "Check my booking status"
+      - "When is my check-in date"
+      - "I want to know my departure time"
+      - "Track my reservation"
+      - "Where is my booking confirmation"
+      - "My booking ID is abc-123"
+
+  faq:
+    threshold: 0.50
+    prototypes:
+      - "What is the refund policy"
+      - "Can I cancel my booking"
+      - "Are pets allowed in the property"
+      - "What are the check-in times"
+      - "Tell me about your cancellation terms"
+      - "Is there a security deposit"
+      - "What are the house rules"
+      - "How does the payment process work"
+      - "What WiFi password do I use"
+
+  greeting:
+    threshold: 0.60
+    prototypes:
+      - "Hi there"
+      - "Hello"
+      - "Hey how are you"
+      - "Good morning"
+      - "Good afternoon"
+
+  booking:
+    threshold: 0.55
+    prototypes:
+      - "I want to book this property"
+      - "Reserve this for me"
+      - "Go ahead and confirm the booking"
+      - "Lock it in for those dates"
+
+  confirmation:
+    threshold: 0.50
+    prototypes:
+      - "Sure I will go for option 9"
+      - "I'll take option 3"
+      - "Let me pick number 5"
+      - "Go with the second one"
+      - "I choose option 1"
+      - "Select the first property"
+      - "Yes go ahead"
+      - "That looks good confirm it"
+      - "I want to proceed with this one"
+      - "Yes I would like to book that"
+      - "My name is John"
+      - "My email is john@example.com"
+      - "2 guests"
+      - "Check in 2025-06-01"
+
+  handoff:
+    threshold: 0.55
+    prototypes:
+      - "I want to talk to a human"
+      - "Connect me with an agent"
+      - "Can I speak to a representative"
+      - "Live support please"
+      - "I need a real person"
+
+  end:
+    threshold: 0.60
+    prototypes:
+      - "Goodbye"
+      - "Bye bye"
+      - "That is all thank you"
+      - "I am done"
+      - "Close this chat"
+      - "Exit"
+
+  payment:
+    threshold: 0.55
+    prototypes:
+      - "Send me the payment link"
+      - "I want to pay now"
+      - "Process my payment"
+      - "Generate an invoice"
+
+  availability:
+    threshold: 0.55
+    prototypes:
+      - "What dates are available"
+      - "Show me the calendar"
+      - "Which dates are open"
+      - "Available dates for this property"
+
+  modification:
+    threshold: 0.55
+    prototypes:
+      - "I want to change my dates"
+      - "Modify my booking details"
+      - "Update my phone number"
+      - "Change the guest count"
+      - "Edit my name"
+
+# ─── Field detection prototypes ───
+field_prototypes:
+  property:
+    - "change property"
+    - "different property"
+    - "another property"
+    - "switch property"
+    - "browse more"
+    - "more options"
+  check_in:
+    - "change check-in date"
+    - "modify arrival"
+    - "new check-in"
+    - "update start date"
+  check_out:
+    - "change check-out date"
+    - "modify departure"
+    - "new check-out"
+    - "update end date"
+  dates:
+    - "change my dates"
+    - "modify dates"
+    - "update both dates"
+    - "new dates"
+    - "different dates"
+  name:
+    - "change my name"
+    - "update name"
+    - "modify name"
+  phone:
+    - "change phone number"
+    - "update my phone"
+    - "modify contact number"
+    - "new mobile number"
+  email:
+    - "change email address"
+    - "update my email"
+    - "modify email"
+  guests:
+    - "change number of guests"
+    - "update guests"
+    - "modify guest count"
+    - "change people count"
+  location:
+    - "change city"
+    - "different location"
+    - "modify city"
+    - "update location"
+
+# ─── Semantic prototype sets (for zero-shot similarity checks) ───
+modification_prototypes:
+  - "I want to modify my booking details"
+  - "change my reservation information"
+  - "update the booking details"
+  - "edit my check-in or guest details"
+  - "I need to correct my booking info"
+
+property_search_request_prototypes:
+  - "show me different property options"
+  - "search for another property"
+  - "I want to browse more listings"
+  - "go back and find a different property"
+  - "please show other properties"
+
+receipt_request_prototypes:
+  - "show me my total bill"
+  - "what is the final cost"
+  - "can you show the booking receipt"
+  - "how much do I need to pay in total"
+  - "display the total amount for this booking"
+
+resume_request_prototypes:
+  - "continue with my booking"
+  - "resume booking from where we left off"
+  - "let's proceed"
+  - "go ahead with the booking process"
+  - "continue the process"
+
+affirm_yes_prototypes:
+  - "yes continue to payment please"
+  - "yes that sounds great proceed"
+  - "please confirm and continue"
+  - "go ahead and finalize the booking"
+  - "i agree and want to proceed"
+
+affirm_no_prototypes:
+  - "no cancel this booking"
+  - "do not proceed"
+  - "i want to stop this"
+  - "cancel and let me modify details"
+  - "no thanks not this one"
+
+previous_results_prototypes:
+  threshold: 0.55
+  prototypes:
+    - "return to the previous search results"
+    - "show me the list of properties again"
+    - "go back to the other options"
+  fallback_keywords:
+    - "back to list"
+    - "back to the list"
+    - "back to results"
+    - "show list"
+    - "other properties"
+    - "other options"
+    - "show me other"
+    - "different property"
+    - "different properties"
+    - "go back"
+    - "previous list"
+    - "see list"
+    - "return to list"
+    - "show properties"
+    - "show other properties"
+
+# ─── Keyword fallback map (used when sentence-transformers unavailable) ───
+keyword_fallback_map:
+  property_search:
+    - apartment
+    - house
+    - villa
+    - rent
+    - stay
+    - find
+    - search
+    - looking
+    - property
+    - show
+  status_update:
+    - status
+    - booking
+    - check-in
+    - checkout
+    - track
+  faq:
+    - policy
+    - refund
+    - cancel
+    - terms
+    - rules
+    - wifi
+  greeting:
+    - hi
+    - hello
+    - hey
+    - morning
+    - afternoon
+    - evening
+  booking:
+    - book
+    - reserve
+    - confirm
+  handoff:
+    - human
+    - agent
+    - person
+    - support
+    - representative
+  end:
+    - bye
+    - goodbye
+    - exit
+    - quit
+    - done
+    - close
+  payment:
+    - pay
+    - payment
+    - invoice
+    - link
+  availability:
+    - available
+    - calendar
+    - dates
+  modification:
+    - modify
+    - change
+    - update
+    - edit
+
+# ─── Fallback VADER polarity words ───
+vader_fallback:
+  positive:
+    - "yes"
+    - "yeah"
+    - "yep"
+    - "yup"
+    - "sure"
+    - "please"
+    - "ok"
+    - "okay"
+    - "alright"
+    - "good"
+    - "great"
+    - "hi"
+    - "hello"
+    - "hey"
+    - "thanks"
+    - "thank"
+    - "love"
+    - "nice"
+    - "perfect"
+    - "wonderful"
+    - "excellent"
+    - "amazing"
+    - "awesome"
+    - "oki"
+    - "fine"
+  negative:
+    - "no"
+    - "nope"
+    - "nah"
+    - "not"
+    - "never"
+    - "bad"
+    - "terrible"
+    - "horrible"
+    - "stop"
+    - "cancel"
+    - "later"
+    - "awful"
+    - "hate"
+    - "ugly"

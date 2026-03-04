@@ -1,0 +1,56 @@
+# config/guardrails.yaml
+# Input/output guardrail patterns and settings.
+# Edit this file to add/remove guardrail rules without source changes.
+
+version: "1.0"
+max_input_length: 2000
+
+# ─── Prompt injection patterns ───
+injection_patterns:
+  - pattern: 'ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)'
+    severity: high
+    action: block
+  - pattern: '(disregard|forget)\s+(everything|all|your)\s+(above|previous|instructions?)'
+    severity: high
+    action: block
+  - pattern: 'you\s+are\s+now\s+(a|an|the)\b'
+    severity: high
+    action: block
+  - pattern: '^(system|assistant)\s*:'
+    severity: high
+    action: block
+  - pattern: 'pretend\s+(you\s+are|to\s+be)\b'
+    severity: high
+    action: block
+  - pattern: '(reveal|show|print|output)\s+(your|the)\s+(system\s+)?prompt'
+    severity: high
+    action: block
+  - pattern: 'jailbreak|DAN\s+mode|developer\s+mode'
+    severity: critical
+    action: block
+  - pattern: '\bact\s+as\s+(if\s+you\s+are|a)\b'
+    severity: medium
+    action: block
+
+# ─── Script injection patterns ───
+script_patterns:
+  - pattern: '<\s*script\b'
+    severity: critical
+    action: block
+  - pattern: 'javascript\s*:'
+    severity: critical
+    action: block
+  - pattern: 'on(load|error|click|mouseover)\s*='
+    severity: high
+    action: block
+
+# ─── Output leak patterns ───
+leak_patterns:
+  - pattern: '(system\s+prompt|internal\s+error|traceback|File\s+")'
+    action: redact
+  - pattern: "sk-[a-zA-Z0-9]{20,}"
+    action: redact
+    description: "OpenAI API key"
+  - pattern: 'eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,}'
+    action: redact
+    description: "JWT tokens"
