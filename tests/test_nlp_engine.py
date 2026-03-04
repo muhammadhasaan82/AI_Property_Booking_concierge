@@ -216,5 +216,19 @@ class TestDetectRequestedFields:
         assert "property" in fields
 
 
+class TestSoftIntentSignals:
+    def test_wants_modification(self):
+        assert nlp_engine.wants_modification("please modify my booking details") is True
+
+    def test_wants_property_search_request(self):
+        assert nlp_engine.wants_property_search_request("show me other properties") is True
+
+    def test_is_receipt_request(self):
+        assert nlp_engine.is_receipt_request("what is the final cost?") is True
+
+    def test_is_resume_request(self):
+        assert nlp_engine.is_resume_request("continue booking please") is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

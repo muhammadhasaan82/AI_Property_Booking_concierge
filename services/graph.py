@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph, END
 from .tracing import span
 from .db_logging import log_chat
 from .guardrails import sanitize_input, sanitize_output
+from . import nlp_engine
 
 from .agents import (
     triage_intent,
@@ -59,7 +60,6 @@ def node_triage(state: ChatState) -> ChatState:
         # FAQ return guard: keep this in filters so it survives turns in CLI/web sessions.
         if filters.get("faq_answered"):
             resume_intent = filters.get("faq_resume_intent", "confirmation")
-            tl = user_text.lower().strip()
             new_filters = {**filters}
             new_filters.pop("faq_answered", None)
             new_filters.pop("faq_resume_intent", None)
@@ -67,9 +67,7 @@ def node_triage(state: ChatState) -> ChatState:
                 return {**state, "intent": "faq", "filters": new_filters}
             if (
                 intent in ["confirmation", "booking"]
-                or tl in {"yes", "no", "continue", "continue booking", "resume", "resume booking"}
-                or "continue" in tl
-                or "resume" in tl
+                or nlp_engine.is_resume_request(user_text)
             ):
                 return {**state, "intent": resume_intent, "filters": new_filters}
             return {**state, "filters": new_filters}
