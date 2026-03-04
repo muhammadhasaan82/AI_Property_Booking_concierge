@@ -10,6 +10,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx
+import pytest
+
+pytestmark = pytest.mark.skip(reason="Requires the Rust gateway to be running on localhost:3001")
 
 
 RUST_URL = os.getenv("RUST_GATEWAY_URL", "http://localhost:3001")
