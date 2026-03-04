@@ -34,8 +34,20 @@ async def root():
         }
     }
 
+from services.dynamic_config import (
+    get_catalog, get_routing_policies, get_guardrails_config, get_vocabulary, is_legacy_mode
+)
 
-
+@app.get("/debug/config", tags=["debug"])
+async def debug_config():
+    """Inspect the internal state of all dynamically loaded rules and lexicons."""
+    return {
+        "legacy_mode": is_legacy_mode(),
+        "intent_catalog": get_catalog().model_dump(),
+        "routing_policies": get_routing_policies().model_dump(),
+        "guardrails": get_guardrails_config().model_dump(),
+        "vocabulary": get_vocabulary().model_dump()
+    }
 
 # POST example: echoes JSON payload
 @app.post("/echo")

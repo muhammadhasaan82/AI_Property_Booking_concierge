@@ -17,12 +17,7 @@ import difflib
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set, Tuple
 
-from .config import (
-    FALLBACK_CITIES as _CFG_FALLBACK_CITIES,
-    FALLBACK_CITY_ALIASES as _CFG_FALLBACK_ALIASES,
-    SEED_PROPERTY_TYPES as _CFG_SEED_PROPERTY_TYPES,
-    BASE_AMENITY_SYNONYMS as _CFG_BASE_AMENITY_SYNONYMS,
-)
+import services.config as config
 
 # ------------------------------- Utils -------------------------------
 
@@ -79,95 +74,87 @@ def _discover_dataset_path() -> Optional[str]:
 
 DATASET_PATH = _discover_dataset_path()
 
-# ----------------------- Dynamic vocabulary -------------------------
+# ----------------------- Dynamic vocabulary loading -----------------
 
 KNOWN_CITIES: Set[str] = set()        # canonical (normalized) city names
 CITY_ALIASES: Dict[str, str] = {}     # alias -> canonical city
 DATASET_AMENITIES: Set[str] = set()
+PROPERTY_TYPES: list[str] = []
+AMENITY_KEYWORDS: Dict[str, List[str]] = {}
+
+_vocab_loaded = False
+
 
 def _add_city_alias(alias: str, canonical: str) -> None:
     alias_n = _norm(alias)
     if alias_n and canonical:
         CITY_ALIASES[alias_n] = canonical
 
-def _load_from_dataset() -> None:
-    global KNOWN_CITIES, CITY_ALIASES, DATASET_AMENITIES
-    if not DATASET_PATH or not Path(DATASET_PATH).exists():
-        print(f"[nlp_extractor] WARN: dataset.csv not found. Set DATASET_PATH or place dataset.csv in services/.")
+
+def _ensure_vocab_loaded() -> None:
+    """Lazy-load dataset and config values to avoid import-time loops."""
+    global KNOWN_CITIES, CITY_ALIASES, DATASET_AMENITIES, PROPERTY_TYPES, AMENITY_KEYWORDS, _vocab_loaded
+    if _vocab_loaded:
         return
-    try:
-        with open(DATASET_PATH, "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                city_raw = (row.get("city") or "").strip()
-                if city_raw:
-                    KNOWN_CITIES.add(_norm(city_raw))
-                am_raw = (row.get("amenities") or "")
-                if am_raw:
-                    for a in _split_amenities(am_raw):
-                        a_n = _norm(a)
-                        if a_n:
-                            DATASET_AMENITIES.add(a_n)
 
-        # Aliases (from dataset cities)
-        for c in list(KNOWN_CITIES):
-            _add_city_alias(f"{c} city", c)   # e.g., "new york city"
-            init = _initials(c)
-            if init:
-                _add_city_alias(init, c)
+    # 1. Start with config defaults
+    KNOWN_CITIES = set(config.FALLBACK_CITIES)
+    CITY_ALIASES = dict(config.FALLBACK_CITY_ALIASES)
+    PROPERTY_TYPES = sorted(config.SEED_PROPERTY_TYPES)
+    AMENITY_KEYWORDS = {k: list(v) for k, v in config.BASE_AMENITY_SYNONYMS.items()}
+    dataset_property_types = set(PROPERTY_TYPES)
 
-        # ---- Fallback: add common cities even if dataset lacks them ----
-        # Merge fallback into vocab
-        KNOWN_CITIES.update(_CFG_FALLBACK_CITIES)
-        for c in _CFG_FALLBACK_CITIES:
-            _add_city_alias(f"{c} city", c)
-            init = _initials(c)
-            if init:
-                _add_city_alias(init, c)
-        for k, v in _CFG_FALLBACK_ALIASES.items():
-            # don't override explicit dataset-derived aliases
-            if k not in CITY_ALIASES:
-                CITY_ALIASES[k] = v
+    # 2. Add aliases for fallback cities
+    for c in config.FALLBACK_CITIES:
+        _add_city_alias(f"{c} city", c)
+        init = _initials(c)
+        if init:
+            _add_city_alias(init, c)
 
-        print(f"[nlp_extractor] loaded {len(KNOWN_CITIES)} cities, {len(DATASET_AMENITIES)} amenities from {DATASET_PATH}")
-    except Exception as e:
-        print(f"[nlp_extractor] WARN: could not load vocab from dataset: {e}")
+    # 3. Load from dataset if available
+    if DATASET_PATH and Path(DATASET_PATH).exists():
+        try:
+            with open(DATASET_PATH, "r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # City
+                    city_raw = (row.get("city") or "").strip()
+                    if city_raw:
+                        c_norm = _norm(city_raw)
+                        KNOWN_CITIES.add(c_norm)
+                        _add_city_alias(f"{c_norm} city", c_norm)
+                        init = _initials(c_norm)
+                        if init:
+                            _add_city_alias(init, c_norm)
 
-_load_from_dataset()
+                    # Amenities
+                    am_raw = (row.get("amenities") or "")
+                    if am_raw:
+                        for a in _split_amenities(am_raw):
+                            a_n = _norm(a)
+                            if a_n:
+                                DATASET_AMENITIES.add(a_n)
 
-# ----------------------- Amenity vocabulary -------------------------
+                    # Property Type
+                    pt = _norm(row.get("property_type", ""))
+                    if pt and len(pt) >= 3:
+                        dataset_property_types.add(pt)
 
-AMENITY_KEYWORDS: Dict[str, List[str]] = {k: list(v) for k, v in _CFG_BASE_AMENITY_SYNONYMS.items()}
-for a in sorted(DATASET_AMENITIES):
-    if a and not any(a in syns for syns in AMENITY_KEYWORDS.values()):
-        AMENITY_KEYWORDS.setdefault(a, [a])
+            PROPERTY_TYPES = sorted(dataset_property_types)
 
-# ----------------------- Property types (dataset-driven) ----------------
+            # Update amenity keywords with dataset amenities
+            for a in sorted(DATASET_AMENITIES):
+                if a and not any(a in syns for syns in AMENITY_KEYWORDS.values()):
+                    AMENITY_KEYWORDS.setdefault(a, [a])
 
-# Seed types that are always recognized (from central config)
-_SEED_PROPERTY_TYPES = _CFG_SEED_PROPERTY_TYPES
+            print(f"[nlp_extractor] loaded {len(KNOWN_CITIES)} cities, {len(DATASET_AMENITIES)} amenities from {DATASET_PATH}")
+        except Exception as e:
+            print(f"[nlp_extractor] WARN: could not load vocab from dataset: {e}")
 
-# Augment from dataset if available
-PROPERTY_TYPES: list[str] = sorted(_SEED_PROPERTY_TYPES)
+    _vocab_loaded = True
 
-def _load_property_types_from_dataset() -> None:
-    """Dynamically add property types discovered in the dataset."""
-    global PROPERTY_TYPES
-    if not DATASET_PATH or not Path(DATASET_PATH).exists():
-        return
-    try:
-        found: set[str] = set(_SEED_PROPERTY_TYPES)
-        with open(DATASET_PATH, "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                pt = _norm(row.get("property_type", ""))
-                if pt and len(pt) >= 3:
-                    found.add(pt)
-        PROPERTY_TYPES = sorted(found)
-    except Exception:
-        pass
 
-_load_property_types_from_dataset()
+# ----------------------- Helpers ------------------------------------
 
 def _fuzzy_property_type(text: str) -> Optional[str]:
     tokens = re.findall(r"[a-zA-Z]+", text)
@@ -183,8 +170,6 @@ def _fuzzy_property_type(text: str) -> Optional[str]:
         if match:
             return match[0]
     return None
-
-# ----------------------- City detection (NEW) -----------------------
 
 def _detect_city(user_text: str) -> Optional[str]:
     """
@@ -262,11 +247,11 @@ def extract_filters(user_text: str, existing_filters: Optional[Dict[str, Any]] =
     """
     Extract city, budget, beds, and amenities from user text.
     """
+    _ensure_vocab_loaded()
     txt_norm = _norm(user_text)
     filters = (existing_filters.copy() if existing_filters else {})
 
     # ---- City / Location (robust) ----
-    # If a city is mentioned in the current user text, use it (override stale session city)
     new_city = _detect_city(user_text)
     if new_city:
         filters["location"] = new_city
@@ -304,7 +289,6 @@ def extract_filters(user_text: str, existing_filters: Optional[Dict[str, Any]] =
 
     # ---- Amenities ----
     found_amenities: Set[str] = set()
-    # match with word boundaries for multiword tokens as well
     for key, keywords in AMENITY_KEYWORDS.items():
         for kw in keywords:
             if not kw:
@@ -323,6 +307,7 @@ def extract_property_type(user_text: str) -> Optional[str]:
     """
     Extract (with typo tolerance) a property type: condo, loft, apartment, house, studio, villa, townhouse.
     """
+    _ensure_vocab_loaded()
     t = _norm(user_text)
     for p in PROPERTY_TYPES:
         if p in t:
