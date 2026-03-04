@@ -86,13 +86,52 @@ impl ToolRegistry {
     }
 }
 
-/// Build the default registry with all built-in tools.
+use serde::Deserialize;
+use std::fs;
+
+#[derive(Debug, Deserialize)]
+struct ToolConfigEntry {
+    name: String,
+    description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolRegistryConfig {
+    tools: Vec<ToolConfigEntry>,
+}
+
+fn load_tool_names_from_config() -> std::collections::HashSet<String> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+    let config_path = format!("{}/config/tool_registry.toml", manifest_dir);
+    match fs::read_to_string(&config_path) {
+        Ok(s) => match toml::from_str::<ToolRegistryConfig>(&s) {
+            Ok(cfg) => cfg.tools.into_iter().map(|t| t.name).collect(),
+            Err(e) => {
+                tracing::warn!("Failed to parse tool_registry.toml: {}; fallback to all", e);
+                std::collections::HashSet::new()
+            }
+        },
+        Err(e) => {
+            tracing::warn!("Failed to read tool_registry.toml: {}; fallback to all", e);
+            std::collections::HashSet::new()
+        }
+    }
+}
+
+/// Build the default registry with only tools enabled in config/tool_registry.toml.
 pub fn build_default_registry() -> ToolRegistry {
     let mut reg = ToolRegistry::new();
-    reg.register(Box::new(search::PropertySearchTool));
-    reg.register(Box::new(booking_validator::BookingValidatorTool));
-    reg.register(Box::new(pricing::PricingTool));
-    reg.register(Box::new(sentiment::SentimentTool));
-    reg.register(Box::new(fraud_check::FraudCheckTool));
+    let enabled_tools = load_tool_names_from_config();
+    let is_enabled = |name: &str| -> bool { enabled_tools.is_empty() || enabled_tools.contains(name) };
+
+    if is_enabled("property_search") { reg.register(Box::new(search::PropertySearchTool)); }
+    if is_enabled("booking_validator") { reg.register(Box::new(booking_validator::BookingValidatorTool)); }
+    if is_enabled("calculate_payment") { reg.register(Box::new(pricing::PricingTool)); }
+    if is_enabled("analyze_sentiment") { reg.register(Box::new(sentiment::SentimentTool)); }
+    if is_enabled("fraud_check") { reg.register(Box::new(fraud_check::FraudCheckTool)); }
+    
+    // Fallback names mapping to tools if they differ from the class name:
+    if is_enabled("sentiment") && !enabled_tools.contains("analyze_sentiment") { reg.register(Box::new(sentiment::SentimentTool)); }
+    
     reg
 }
