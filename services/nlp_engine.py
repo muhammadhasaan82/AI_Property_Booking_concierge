@@ -33,7 +33,10 @@ _intent_embeddings: Optional[Dict[str, Any]] = None
 # ─────────────────────────────────────────────────────────────────────
 # Config-driven prototypes (loaded from config/intent_catalog.yaml)
 # ─────────────────────────────────────────────────────────────────────
-from services.dynamic_config import get_intent_catalog as _get_catalog
+from services.dynamic_config import (
+    get_intent_catalog as _get_catalog,
+    get_vocabulary as _get_vocabulary,
+)
 
 
 def _get_intent_prototypes() -> Dict[str, List[str]]:
@@ -69,6 +72,11 @@ def _get_affirm_yes_prototypes() -> Tuple[str, ...]:
 
 def _get_affirm_no_prototypes() -> Tuple[str, ...]:
     return tuple(_get_catalog().affirm_no_prototypes)
+
+
+def _get_vocab():
+    """Load lexical fallback vocabulary from config/vocabulary.yaml."""
+    return _get_vocabulary().nlp_fallback
 
 
 def _get_vader():
@@ -227,10 +235,11 @@ def classify_affirmation(text: str) -> str:
     if no_sim >= 0.65 and no_sim >= (yes_sim + 0.04):
         return "no"
 
-    # Minimal lexical fallback for explicit one-token confirmations.
-    if re.fullmatch(r"(yes|y|yeah|yep|yup|sure|ok|okay|alright|confirm(?:ed)?)", tl):
+    # Minimal lexical fallback for explicit confirmations.
+    vocab = _get_vocab()
+    if tl in set(vocab.affirm_yes_tokens):
         return "yes"
-    if re.fullmatch(r"(no|n|nope|nah|cancel|stop)", tl):
+    if tl in set(vocab.affirm_no_tokens):
         return "no"
 
     # VADER compound score
@@ -263,15 +272,10 @@ def is_greeting(text: str) -> bool:
     if len(tokens) > 6:
         return False
 
-    # Speech-act pattern matching via VADER + semantic cues
-    _GREETING_SEEDS = {"hi", "hello", "hey", "salam", "assalam", "assalamu",
-                       "hiya", "yo", "howdy", "greetings", "sup", "heya"}
-    _GREETING_PHRASES = {"good morning", "good afternoon", "good evening",
-                         "how are you", "what's up", "whats up"}
-
-    if tokens[0] in _GREETING_SEEDS:
+    vocab = _get_vocab()
+    if tokens[0] in set(vocab.greeting_seeds):
         return True
-    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in _GREETING_PHRASES):
+    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in vocab.greeting_phrases):
         return True
 
     # Semantic classification fallback
@@ -288,14 +292,10 @@ def is_acknowledgment(text: str) -> bool:
     if not text or not text.strip():
         return False
     tl = text.strip().lower()
-    _ACK = {"ok", "okay", "alright", "fine", "kk", "k", "oki", "sure thing",
-            "understood", "noted", "right"}
-    _ACK_PHRASES = {"sounds good", "got it", "thanks", "thank you",
-                    "i see", "i understand", "all good", "that works",
-                    "no problem", "np"}
-    if tl in _ACK:
+    vocab = _get_vocab()
+    if tl in set(vocab.acknowledgment_tokens):
         return True
-    return any(p in tl for p in _ACK_PHRASES)
+    return any(p in tl for p in vocab.acknowledgment_phrases)
 
 
 def is_handoff_request(text: str) -> bool:
@@ -303,13 +303,10 @@ def is_handoff_request(text: str) -> bool:
     if not text:
         return False
     tl = text.strip().lower()
-    _SEEDS = {"human", "person", "agent", "representative", "support",
-              "operator", "staff", "manager"}
-    _PHRASES = {"live chat", "talk to", "connect me", "speak to",
-                "real person", "human agent", "customer service"}
-    if any(s in tl for s in _SEEDS):
+    vocab = _get_vocab()
+    if any(s in tl for s in vocab.handoff_seeds):
         return True
-    return any(p in tl for p in _PHRASES)
+    return any(p in tl for p in vocab.handoff_phrases)
 
 
 def is_availability_query(text: str) -> bool:
@@ -317,10 +314,7 @@ def is_availability_query(text: str) -> bool:
     if not text:
         return False
     tl = text.strip().lower()
-    _PHRASES = {"available dates", "availability", "what dates", "which dates",
-                "show dates", "calendar", "date options", "open dates",
-                "dates available", "when available"}
-    return any(p in tl for p in _PHRASES)
+    return any(p in tl for p in _get_vocab().availability_phrases)
 
 
 def is_end_request(text: str) -> bool:
@@ -328,13 +322,10 @@ def is_end_request(text: str) -> bool:
     if not text:
         return False
     tl = text.strip().lower()
-    _EXACT = {"end", "bye", "goodbye", "exit", "quit", "done", "close",
-              "finish", "that's all", "that is all"}
-    _PHRASES = {"end chat", "close chat", "no thanks", "bye bye",
-                "good bye", "see you", "talk later"}
-    if tl in _EXACT:
+    vocab = _get_vocab()
+    if tl in set(vocab.end_exact):
         return True
-    return any(p in tl for p in _PHRASES)
+    return any(p in tl for p in vocab.end_phrases)
 
 
 def is_status_query(text: str) -> bool:
@@ -357,10 +348,7 @@ def is_status_query(text: str) -> bool:
             return True
 
     # Keyword fallback
-    _STATUS_SEEDS = {"status", "booking status", "check status",
-                     "booking id", "booking_id", "bookingid",
-                     "my booking", "track", "tracking"}
-    return any(s in tl for s in _STATUS_SEEDS)
+    return any(s in tl for s in _get_vocab().status_seeds)
 
 
 def is_property_search(text: str) -> bool:
@@ -372,8 +360,11 @@ def is_property_search(text: str) -> bool:
     # Exclude status queries
     if is_status_query(text):
         return False
+
     # Exclude booking ID mentions
-    if any(x in tl for x in ["booking id", "booking_id", "bookingid"]):
+    vocab = _get_vocab()
+    booking_id_markers = list(vocab.status_booking_id_markers)
+    if any(x in tl for x in booking_id_markers):
         return False
     if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", tl):
         return False
@@ -389,21 +380,13 @@ def is_property_search(text: str) -> bool:
 
     # Keyword + NER fallback
     from .nlp_extractor import KNOWN_CITIES, CITY_ALIASES, PROPERTY_TYPES
-    _MONEY_PAT = re.compile(
-        r"(\$|€|£)\s*\d+|\b(under|below|less than|max(?:imum)?|up to)\b\s*[\$€£]?\s*\d+", re.I
-    )
-    _SEARCH_SIGNALS = {
-        "want", "need", "looking", "search", "find", "place", "property",
-        "rent", "stay", "accommodation", "room", "suite", "home", "show",
-        "available", "options", "listings", "interested", "seeking",
-        "browse", "explore", "view", "lease", "hire",
-    }
-    _SEARCH_PHRASES = {
-        "i want", "i need", "i'm looking", "looking for", "searching for",
-        "find me", "show me", "what do you have", "what's available",
-        "do you have", "are there any", "i'd like", "interested in",
-        "want to rent", "find a", "get me",
-    }
+
+    money_pat = None
+    if vocab.money_intent_pattern:
+        try:
+            money_pat = re.compile(vocab.money_intent_pattern, re.I)
+        except re.error:
+            money_pat = None
 
     if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in PROPERTY_TYPES):
         return True
@@ -411,11 +394,11 @@ def is_property_search(text: str) -> bool:
         return True
     if any(re.search(r'\b' + re.escape(a) + r'\b', tl) for a in CITY_ALIASES):
         return True
-    if _MONEY_PAT.search(tl):
+    if money_pat and money_pat.search(tl):
         return True
-    if any(re.search(r'\b' + re.escape(w) + r'\b', tl) for w in _SEARCH_SIGNALS):
+    if any(re.search(r'\b' + re.escape(w) + r'\b', tl) for w in vocab.search_signals):
         return True
-    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in _SEARCH_PHRASES):
+    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in vocab.search_phrases):
         return True
 
     return False
@@ -430,9 +413,7 @@ def wants_modification(text: str) -> bool:
         return True
 
     # Keyword fallback when semantic model is unavailable or uncertain.
-    _SEEDS = {"modify", "modification", "change", "update", "edit",
-              "correct", "fix", "adjust", "tweak"}
-    return any(w in tl for w in _SEEDS)
+    return any(w in tl for w in _get_vocab().modification_seeds)
 
 
 def wants_property_search_request(text: str) -> bool:
@@ -444,14 +425,7 @@ def wants_property_search_request(text: str) -> bool:
         return True
 
     # Keyword fallback when semantic model is unavailable or uncertain.
-    _SEEDS = {"other propert", "different propert", "more propert",
-              "other option", "different option", "more option", "search different properties",
-        "show other options", "show more options", "more properties",
-        "different options", "other options", "browse more", "see more",
-        "change property", "another property", "different property",
-        "other property",
-    }
-    return any(p in tl for p in _SEEDS)
+    return any(p in tl for p in _get_vocab().property_search_request_seeds)
 
 
 def is_receipt_request(text: str) -> bool:
@@ -463,13 +437,15 @@ def is_receipt_request(text: str) -> bool:
         return True
     
     # Keyword fallback when semantic model is unavailable or uncertain.
-    _SEEDS = {"receipt", "total cost", "bill", "invoice", "final price"}
-    if any(p in tl for p in [
-        "total bill", "final cost", "total cost", "show total", "my total",
-        "receipt", "invoice", "total amount", "how much total", "amount due",
-    ]):
+    vocab = _get_vocab()
+    if any(seed in tl for seed in vocab.receipt_seeds):
         return True
-    return ("how much" in tl and ("cost" in tl or "total" in tl or "pay" in tl))
+    if any(p in tl for p in vocab.receipt_phrases):
+        return True
+    return (
+        any(q in tl for q in vocab.receipt_quantity_terms)
+        and any(term in tl for term in vocab.receipt_amount_terms)
+    )
 
 
 def is_resume_request(text: str) -> bool:
@@ -481,13 +457,9 @@ def is_resume_request(text: str) -> bool:
         return True
     
     # Keyword fallback when semantic model is unavailable or uncertain.
-    if re.fullmatch(r"(continue|resume|proceed|go ahead)", tl):
+    if tl in set(_get_vocab().resume_exact_phrases):
         return True
-    return any(p in tl for p in [
-        "continue", "resume", "continue booking", "resume booking",
-        "continue the booking", "go ahead", "proceed", "carry on",
-        "keep going",
-    ])
+    return any(p in tl for p in _get_vocab().resume_phrases)
 
 
 def wants_previous_results_sync(text: str) -> bool:
@@ -531,26 +503,17 @@ def detect_faq_intent(text: str) -> bool:
             return True
 
     # Strong trigger keywords (policy/terms are always FAQ — regardless of booking context)
-    _STRONG = {
-        "policy", "refund", "cancel", "cancellation", "terms",
-        "conditions", "dispute", "return policy", "return",
-        "fee", "penalty", "complaint", "charge", "surcharge",
-    }
-    if any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in _STRONG):
+    vocab = _get_vocab()
+    if any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in vocab.faq_strong_keywords):
         return True
 
     # Broader keyword + question pattern check
-    _FAQ_SEEDS = {
-        "rules", "regulations", "guidelines", "pet", "pets", "smoking",
-        "deposit", "security deposit", "damage", "liability", "insurance",
-        "wifi password", "check-in time", "checkout time", "late check",
-        "early check", "complaint", "grievance",
-    }
-    _QUESTION_STARTS = {"what", "how", "when", "where", "why", "can",
-                        "do", "does", "is", "are", "tell", "explain"}
-    has_faq_seed = any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in _FAQ_SEEDS)
-    has_question = ("?" in tl or any(tl.startswith(q) for q in _QUESTION_STARTS) or
-                    "tell me" in tl or "explain" in tl)
+    has_faq_seed = any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in vocab.faq_seeds)
+    has_question = (
+        "?" in tl
+        or any(tl.startswith(q) for q in vocab.faq_question_starts)
+        or any(cue in tl for cue in vocab.faq_question_cues)
+    )
     return has_faq_seed and has_question
 
 
@@ -565,11 +528,8 @@ def extract_person_name(text: str) -> Optional[str]:
 
     t_lower = text.lower().strip()
     # Guard: skip if text looks like a search query
-    _SEARCH_GUARDS = {"find", "show", "search", "look for", "looking for",
-                      "want", "need", "rent", "buy", "apartment", "house",
-                      "villa", "condo", "loft", "studio", "under $", "$",
-                      "per night", "available", "dates", "amenities"}
-    if any(term in t_lower for term in _SEARCH_GUARDS):
+    vocab = _get_vocab()
+    if any(term in t_lower for term in vocab.name_search_guards):
         return None
 
     nlp = _get_spacy()
@@ -583,28 +543,12 @@ def extract_person_name(text: str) -> Optional[str]:
 
     # Regex fallback — STRICT to prevent capturing conversational sentences
     # Guard: reject text that contains common conversational/functional words
-    _CONVERSATIONAL_GUARDS = {
-        "go", "will", "want", "sure", "option", "select", "pick", "choose",
-        "book", "take", "would", "could", "should", "please", "thank",
-        "thanks", "okay", "yes", "no", "maybe", "let", "can", "show",
-        "find", "search", "look", "need", "like", "love", "hate",
-        "tell", "give", "help", "try", "also", "just", "really",
-        "very", "much", "more", "less", "about", "from", "into",
-        "with", "for", "but", "and", "the", "this", "that", "what",
-        "when", "where", "how", "why", "which", "who", "does", "did",
-    }
     words = set(re.findall(r"[a-z]+", t_lower))
-    _has_conversational = bool(words & _CONVERSATIONAL_GUARDS)
+    _has_conversational = bool(words & set(vocab.name_conversational_guards))
 
     # Explicit "my name is ..." / "I am ..." patterns — always safe
-    _NAME_EXPLICIT_PATS = [
-        re.compile(r"\bmy name is\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-        re.compile(r"\bname is\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-        re.compile(r"\bi am\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-        re.compile(r"\bI'm\s+([A-Za-z][A-Za-z .'-]{1,60})", re.I),
-    ]
-    for pat in _NAME_EXPLICIT_PATS:
-        m = pat.search(text)
+    for pat_str in vocab.name_explicit_patterns:
+        m = re.search(pat_str, text, re.I)
         if m:
             cand = m.group(1).strip().rstrip('.').strip()
             # Limit explicit captures to 1-3 meaningful words
@@ -630,8 +574,7 @@ def extract_person_name(text: str) -> Optional[str]:
 def _looks_like_email_username(s: str) -> bool:
     if not s:
         return False
-    common = {'test', 'example', 'user', 'admin', 'john', 'jane',
-              'info', 'contact', 'support', 'help', 'demo'}
+    common = set(_get_vocab().email_username_common)
     return (len(s) <= 3 or s.lower() in common or
             bool(re.search(r'\d', s)) or
             bool(re.search(r"[^a-zA-Z\s\-.'']", s)))
@@ -666,64 +609,56 @@ def extract_cardinal(text: str) -> Optional[int]:
     if not text:
         return None
     tl = text.strip().lower()
-    has_selection_context = bool(
-        re.search(
-            r"\b(option|number|no\.?|#|pick|choose|select|book|take|go with|i(?:\s*'ll|\s*will)?\s*take)\b",
-            tl,
-        )
+    vocab = _get_vocab()
+    has_selection_context = any(
+        re.search(rx, tl) is not None for rx in vocab.selection_context_patterns
     )
 
     # Regex patterns for explicit selection
-    _SELECTION_PATS = [
-        r"\b(\d{1,2})(?:st|nd|rd|th)\b",
-        r"\b(?:option|number|no\.?|#)\s*(\d{1,2})\b",
-        r"\b(?:pick|choose|select|book|take)\s*(\d{1,2})\b",
-        r"^\s*(\d{1,2})\s*$",
-    ]
-    for rx in _SELECTION_PATS:
+    for rx in vocab.selection_patterns:
         m = re.search(rx, tl)
         if m:
             val = int(m.group(1))
             return val if val >= 1 else None
 
     # Ordinal words
-    _ORDINALS = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3,
-                 "3rd": 3, "fourth": 4, "4th": 4, "fifth": 5, "5th": 5}
-    for word, idx in _ORDINALS.items():
+    ordinals = {str(k).lower(): int(v) for k, v in vocab.selection_ordinals.items()}
+    for word, idx in ordinals.items():
+        rendered = [tpl.format(word=word) for tpl in vocab.selection_ordinal_templates]
         if (
-            tl in {word, f"the {word}", f"{word} one"}
+            tl in set(rendered)
             or (has_selection_context and re.search(rf"\b{re.escape(word)}\b", tl))
         ):
             return idx
 
     # Cardinal words
-    _CARDINALS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-                  "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+    cardinals = {str(k).lower(): int(v) for k, v in vocab.selection_cardinals.items()}
     # Standalone cardinal replies like "one" or "two" are valid.
-    if tl in _CARDINALS:
-        return _CARDINALS[tl]
+    if tl in cardinals:
+        return cardinals[tl]
     # Guard against referential phrases like "this one" / "that one".
-    if re.search(r"\b(this|that)\s+one\b", tl):
+    if any(re.search(rx, tl) for rx in vocab.selection_referential_patterns):
         return None
-    m = re.search(
-        r"\b(?:option|number|no\.?|#|pick|choose|select|book|take|go with)\s*(?:the\s+)?(one|two|three|four|five|six|seven|eight|nine|ten)\b",
-        tl
-    )
-    if m:
-        return _CARDINALS.get(m.group(1))
+    if vocab.selection_cardinal_context_pattern and cardinals:
+        cardinals_alt = "|".join(re.escape(w) for w in cardinals.keys())
+        rx = vocab.selection_cardinal_context_pattern.replace("{cardinals}", cardinals_alt)
+        m = re.search(rx, tl)
+        if m:
+            return cardinals.get(m.group(1))
 
     # spaCy ORDINAL/CARDINAL fallback
     nlp = _get_spacy()
     if nlp and has_selection_context:
         doc = nlp(text)
+        entity_labels = tuple(_get_vocab().selection_entity_labels)
         for ent in doc.ents:
-            if ent.label_ in ("ORDINAL", "CARDINAL"):
+            if ent.label_ in entity_labels:
                 try:
                     val = int(ent.text)
                     if val >= 1:
                         return val
                 except ValueError:
-                    mapped = _ORDINALS.get(ent.text.lower()) or _CARDINALS.get(ent.text.lower())
+                    mapped = ordinals.get(ent.text.lower()) or cardinals.get(ent.text.lower())
                     if mapped:
                         return mapped
 
@@ -735,8 +670,11 @@ def extract_guests(text: str) -> Optional[int]:
     if not text:
         return None
     tl = text.lower().strip()
-    m = (re.search(r"(\d{1,3})\s*(guest|guests|people|persons|pax)?\b", tl) or
-         re.search(r"^(\d{1,3})$", tl))
+    units_alt = "|".join(re.escape(u) for u in _get_vocab().guest_unit_terms)
+    if units_alt:
+        m = re.search(rf"(\d{{1,3}})\s*(?:{units_alt})?\b", tl) or re.search(r"^(\d{1,3})$", tl)
+    else:
+        m = re.search(r"(\d{1,3})\b", tl) or re.search(r"^(\d{1,3})$", tl)
     if m:
         try:
             n = int(m.group(1))
@@ -809,36 +747,21 @@ def detect_requested_fields(text: str) -> List[str]:
     if fields:
         return fields
 
-    # Keyword fallback (same semantics as original)
-    def add(f: str):
-        if f not in fields:
-            fields.append(f)
+    # Keyword fallback from config-driven field prototypes.
+    def _phrase_hit(phrase: str) -> bool:
+        p = (phrase or "").strip().lower()
+        if not p:
+            return False
+        if p in tl:
+            return True
+        # Soft lexical match: allow light filler words like "my".
+        filler = set(_get_vocab().phrase_fillers)
+        tokens = [t for t in re.findall(r"[a-z0-9_+-]+", p) if t not in filler]
+        return bool(tokens) and all(tok in tl for tok in tokens)
 
-    if any(p in tl for p in ["different property", "another property", "other property",
-                             "change property", "switch property", "new property",
-                             "browse more", "more options", "more listings"]):
-        add("property")
-    if any(p in tl for p in ["check out", "checkout", "check-out", "departure",
-                             "end date", "check_out"]):
-        add("check_out")
-    if any(p in tl for p in ["check in", "checkin", "check-in", "arrival",
-                             "start date", "check_in"]):
-        add("check_in")
-    if any(p in tl for p in ["dates", "both dates", "change dates",
-                             "update dates", "modify dates"]):
-        add("dates")
-    if any(p in tl for p in ["city", "location", "change city",
-                             "change location"]):
-        add("location")
-    if any(p in tl for p in ["name", "my name", "change name"]):
-        add("name")
-    if any(p in tl for p in ["phone", "mobile", "number", "contact number",
-                             "phone number"]):
-        add("phone")
-    if any(p in tl for p in ["email", "e-mail", "mail", "email address"]):
-        add("email")
-    if any(p in tl for p in ["guest", "guests", "people", "persons", "pax"]):
-        add("guests")
+    for field, phrases in _get_field_prototypes().items():
+        if any(_phrase_hit(p) for p in phrases) and field not in fields:
+            fields.append(field)
     return fields
 
 
@@ -909,6 +832,10 @@ def _classify_intent_keyword_fallback(text: str, candidates: List[str]) -> str:
 # ─────────────────────────────────────────────────────────────────────
 # Async wrappers (for use in FastAPI handlers)
 # ─────────────────────────────────────────────────────────────────────
+
+def is_greeting_sync(text: str) -> bool:
+    """Sync alias for greeting detection (used by graph/session guards)."""
+    return is_greeting(text)
 
 async def classify_affirmation_async(text: str) -> str:
     return await asyncio.to_thread(classify_affirmation, text)

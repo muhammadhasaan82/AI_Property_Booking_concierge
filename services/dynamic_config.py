@@ -83,6 +83,68 @@ class SlotFillingConfig(BaseModel):
     modification_prompts: Dict[str, str] = Field(default_factory=dict)
 
 
+class NlpFallbackConfig(BaseModel):
+    """Fallback lexical configuration for NLP helpers."""
+    greeting_seeds: List[str] = Field(default_factory=list)
+    greeting_phrases: List[str] = Field(default_factory=list)
+    acknowledgment_tokens: List[str] = Field(default_factory=list)
+    acknowledgment_phrases: List[str] = Field(default_factory=list)
+    affirm_yes_tokens: List[str] = Field(default_factory=list)
+    affirm_no_tokens: List[str] = Field(default_factory=list)
+    handoff_seeds: List[str] = Field(default_factory=list)
+    handoff_phrases: List[str] = Field(default_factory=list)
+    availability_phrases: List[str] = Field(default_factory=list)
+    end_exact: List[str] = Field(default_factory=list)
+    end_phrases: List[str] = Field(default_factory=list)
+    status_seeds: List[str] = Field(default_factory=list)
+    status_explicit_keywords: List[str] = Field(default_factory=list)
+    status_resume_phrases: List[str] = Field(default_factory=list)
+    status_query_actions: List[str] = Field(default_factory=list)
+    status_check_in_actions: List[str] = Field(default_factory=list)
+    status_check_out_actions: List[str] = Field(default_factory=list)
+    status_booking_id_markers: List[str] = Field(default_factory=list)
+    search_signals: List[str] = Field(default_factory=list)
+    search_phrases: List[str] = Field(default_factory=list)
+    money_intent_pattern: str = ""
+    modification_seeds: List[str] = Field(default_factory=list)
+    property_search_request_seeds: List[str] = Field(default_factory=list)
+    receipt_seeds: List[str] = Field(default_factory=list)
+    receipt_phrases: List[str] = Field(default_factory=list)
+    receipt_quantity_terms: List[str] = Field(default_factory=list)
+    receipt_amount_terms: List[str] = Field(default_factory=list)
+    resume_exact_phrases: List[str] = Field(default_factory=list)
+    resume_phrases: List[str] = Field(default_factory=list)
+    faq_strong_keywords: List[str] = Field(default_factory=list)
+    faq_seeds: List[str] = Field(default_factory=list)
+    faq_question_starts: List[str] = Field(default_factory=list)
+    faq_question_cues: List[str] = Field(default_factory=list)
+    selection_faq_blocklist: List[str] = Field(default_factory=list)
+    name_search_guards: List[str] = Field(default_factory=list)
+    name_conversational_guards: List[str] = Field(default_factory=list)
+    name_explicit_patterns: List[str] = Field(default_factory=list)
+    email_username_common: List[str] = Field(default_factory=list)
+    parse_name_reject_exact: List[str] = Field(default_factory=list)
+    parse_name_invalid_chars: List[str] = Field(default_factory=list)
+    parse_name_disallowed_words: List[str] = Field(default_factory=list)
+    parse_name_disallowed_phrases: List[str] = Field(default_factory=list)
+    phrase_fillers: List[str] = Field(default_factory=list)
+    selection_patterns: List[str] = Field(default_factory=list)
+    selection_context_patterns: List[str] = Field(default_factory=list)
+    selection_ordinal_templates: List[str] = Field(default_factory=list)
+    selection_referential_patterns: List[str] = Field(default_factory=list)
+    selection_cardinal_context_pattern: str = ""
+    selection_entity_labels: List[str] = Field(default_factory=list)
+    selection_ordinals: Dict[str, int] = Field(default_factory=dict)
+    selection_cardinals: Dict[str, int] = Field(default_factory=dict)
+    guest_unit_terms: List[str] = Field(default_factory=list)
+    guest_context_terms: List[str] = Field(default_factory=list)
+    unavailable_city_decline_phrases: List[str] = Field(default_factory=list)
+    property_type_any_phrases: List[str] = Field(default_factory=list)
+    city_candidate_block_words: List[str] = Field(default_factory=list)
+    city_candidate_prefix_pattern: str = ""
+    city_candidate_split_pattern: str = ""
+
+
 class VocabularyConfig(BaseModel):
     """Vocabulary config loaded from vocabulary.yaml."""
     version: str = "1.0"
@@ -97,6 +159,7 @@ class VocabularyConfig(BaseModel):
     city_aliases: Dict[str, str] = Field(default_factory=dict)
     seed_property_types: List[str] = Field(default_factory=list)
     amenity_synonyms: Dict[str, List[str]] = Field(default_factory=dict)
+    nlp_fallback: NlpFallbackConfig = Field(default_factory=NlpFallbackConfig)
 
     # Convenience properties
     @property

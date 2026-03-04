@@ -29,6 +29,7 @@ from .db_logging import (
     get_successful_booking_status,
 )
 import services.config as config
+from .dynamic_config import get_vocabulary
 
 # -----------------------
 # Load env
@@ -127,6 +128,12 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
 def _slot_prompt(field: str) -> str:
     return config.FIELD_PROMPTS.get(field, "Please share that detail.")
 
+def _vocab():
+    return get_vocabulary()
+
+def _nlp_fallback():
+    return _vocab().nlp_fallback
+
 
 def _classify_proceed_or_modify(user_text: str) -> str | None:
     """Return 'proceed', 'modify', or None based on user intent.
@@ -142,9 +149,10 @@ def _classify_proceed_or_modify(user_text: str) -> str | None:
     if tl == "yes":
         return "proceed"
 
-    if any(p in tl for p in config.PROCEED_PHRASES):
+    vocab = _vocab()
+    if any(p in tl for p in vocab.proceed_phrases):
         return "proceed"
-    if any(p in tl for p in config.MODIFY_PHRASES):
+    if any(p in tl for p in vocab.modify_phrases):
         return "modify"
     return None
 
@@ -252,20 +260,18 @@ def _parse_name(t: str) -> str | None:
     text = t or ""
     # Try fast NLP / regex first
     name = nlp_engine.extract_person_name(text)
+    name_rejects = set(_nlp_fallback().parse_name_reject_exact)
     if name:
         n = name.strip().lower()
         # Prevent greetings/ack words from being stored as a person's name.
-        if n in {
-            "hi", "hello", "hey", "hey there", "hello there",
-            "thanks", "thank you", "ok", "okay", "sure",
-        }:
+        if n in name_rejects:
             return None
         return name
     # Fallback to soft-coded LLM extraction
     extracted = _llm_extract_booking_fields(text).get("name")
     if isinstance(extracted, str) and len(extracted) >= 2:
         n = extracted.strip().lower()
-        if n in {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay", "sure"}:
+        if n in name_rejects:
             return None
         return extracted.title()
     return None
@@ -307,6 +313,8 @@ def _detect_requested_fields(t: str) -> List[str]:
 
 def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> str:
     t = user_text or ""
+    active_filters = filters or {}
+    tl = t.lower().strip()
 
     # Keep strict deterministic guards for critical intents.
     if _is_greeting(t):
@@ -314,10 +322,15 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if _is_end(t):
         return "end"
 
+    # Deterministic guardrail: if search results were shown, a numeric/option reply
+    # must route to confirmation, not semantic property_search classification.
+    if active_filters.get("last_results"):
+        if nlp_engine.extract_cardinal(t) is not None or re.search(r"\boption\b", tl):
+            return "confirmation"
+
     # If user is currently deciding on a selected property, keep follow-up
     # turns in confirmation for yes/no, reselection, or "back to list" requests.
-    if (filters or {}).get("awaiting_selection_confirm"):
-        tl = t.lower().strip()
+    if active_filters.get("awaiting_selection_confirm"):
         if (
             _is_yes(t)
             or _is_no(t)
@@ -340,13 +353,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     try:
         faq_hit = nlp_engine.detect_faq_intent(t)
     except Exception:
-        _FAQ_KEYWORDS_EXTENDED = [
-            "policy", "refund", "cancel", "rule", "rules", "pet", "smoking",
-            "wifi", "password", "internet", "check-in time", "check-out time",
-            "deposit", "security deposit", "terms", "condition", "guideline",
-            "return policy", "return",
-        ]
-        faq_hit = any(w in t.lower() for w in _FAQ_KEYWORDS_EXTENDED)
+        faq_hit = any(w in t.lower() for w in _vocab().faq_fallback_keywords)
 
     if faq_hit:
         return "faq"
@@ -355,12 +362,12 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     # are not hijacked by status routing.
     if _is_status_query(t):
         tl = t.lower()
-        if not any(p in tl for p in ["continue booking", "continue the booking", "resume booking"]):
+        if not any(p in tl for p in _nlp_fallback().status_resume_phrases):
             return "status_update"
 
     # Selection indices should not hijack FAQ sentences containing ordinals.
     if _parse_selection_index(t) is not None and "?" not in t and not any(
-        k in t.lower() for k in ["policy", "refund", "cancel", "rules", "faq"]
+        k in t.lower() for k in _nlp_fallback().selection_faq_blocklist
     ):
         return "confirmation"
 
@@ -386,13 +393,12 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         _parse_guests(t) is not None or _parse_selection_index(t) is not None):
         return "confirmation"
 
-
-    _config.BOOKING_TRIGGERS = config.BOOKING_TRIGGERS
-    if any(w in t.lower() for w in _config.BOOKING_TRIGGERS):
+    vocab = _vocab()
+    if any(w in t.lower() for w in vocab.booking_triggers):
         return "booking"
-    if any(w in t.lower() for w in config.STATUS_KEYWORDS):
+    if any(w in t.lower() for w in vocab.status_keywords):
         return "status_update"
-    if any(w in t.lower() for w in config.PAYMENT_KEYWORDS):
+    if any(w in t.lower() for w in vocab.payment_keywords):
         return "payment_link"
     return "property_search"
 
@@ -752,8 +758,8 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
     # High-priority: After a modification, the user may say 'no' to proceed to receipt or 'yes' to modify more
     if persisted.get("awaiting_post_mod_choice"):
         tl = (user_text or "").lower().strip()
-        proceed_phrases = config.PROCEED_PHRASES
-        modify_phrases = config.MODIFY_PHRASES
+        proceed_phrases = _vocab().proceed_phrases
+        modify_phrases = _vocab().modify_phrases
         # Check for simple "yes" first - this should proceed to receipt
         if tl.strip() == "yes":
             persisted.pop("awaiting_post_mod_choice", None)
@@ -1121,9 +1127,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             }
 
         # User wants to modify requirements (and may have already specified which one)
-        if any(phrase in tl for phrase in [
-            "modify", "modification", "change", "edit", "update", "correct", "fix", "adjust", "tweak"
-        ]):
+        if _wants_modification(user_text):
             requested = _detect_requested_fields(user_text)
             persisted.pop("awaiting_post_cancel_choice", None)
             persisted.pop("awaiting_post_mod_choice", None)
@@ -1222,8 +1226,8 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
         # After a modification was applied, ask whether to proceed or modify more
         if persisted.get("awaiting_post_mod_choice"):
             tl = (user_text or "").lower().strip()
-            proceed_phrases = config.PROCEED_PHRASES
-            modify_phrases = config.MODIFY_PHRASES
+            proceed_phrases = _vocab().proceed_phrases
+            modify_phrases = _vocab().modify_phrases
             if any(p in tl for p in proceed_phrases):
                 # Skip rendering confirmation receipt; proceed directly to booking/payment
                 persisted.pop("awaiting_post_mod_choice", None)
@@ -1454,13 +1458,10 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
     elif awaited == "name" and (parsed_name or user_text.strip()):
         # Be lenient for names when explicitly awaiting
         cand = parsed_name or user_text.strip()
-        if cand and len(cand) >= 2 and not any(ch in cand for ch in ['@','#','$','%','^','&','*']):
+        name_invalid_chars = set(_nlp_fallback().parse_name_invalid_chars)
+        if cand and len(cand) >= 2 and not any(ch in cand for ch in name_invalid_chars):
             words = re.findall(r"[a-zA-Z][a-zA-Z'-]*", cand)
-            disallowed = {
-                "continue", "booking", "proceed", "resume", "policy", "refund",
-                "search", "property", "properties", "option", "phone", "email",
-                "check", "status", "yes", "no",
-            }
+            disallowed = set(_nlp_fallback().parse_name_disallowed_words)
             if 1 <= len(words) <= 3 and not any(w.lower() in disallowed for w in words):
                 persisted["name"] = cand
                 persisted["awaiting_field"] = None
@@ -1540,19 +1541,15 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
     if persisted.get("awaiting_field") == "name" and not parsed_name:
         # Accept any reasonable text as a name when explicitly asked
         t_clean = user_text.strip()
-        if t_clean and len(t_clean) >= 2 and not any(char in t_clean for char in ['@', '#', '$', '%', '^', '&', '*']):
-            disallowed = {
-                "show", "available", "dates", "what", "when", "how", "?",
-                "continue", "booking", "proceed", "resume", "policy", "refund",
-                "search", "property", "properties", "option", "phone", "email",
-                "check", "status", "yes", "no",
-            }
+        name_invalid_chars = set(_nlp_fallback().parse_name_invalid_chars)
+        if t_clean and len(t_clean) >= 2 and not any(char in t_clean for char in name_invalid_chars):
+            disallowed = set(_nlp_fallback().parse_name_disallowed_words)
             words = re.findall(r"[a-zA-Z][a-zA-Z'-]*", t_clean)
             t_lower = t_clean.lower()
             if (
                 1 <= len(words) <= 3
                 and not any(w.lower() in disallowed for w in words)
-                and not any(word in t_lower for word in ["my booking id", "booking id", "status"])
+                and not any(phrase in t_lower for phrase in _nlp_fallback().parse_name_disallowed_phrases)
             ):
                 parsed_name = t_clean
 
@@ -1563,7 +1560,11 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
     # Handle guest parsing - only set if we're awaiting guests or if it's clearly a guest number
     if parsed_guests and not persisted.get("guests"):
         # Only set guests if we're explicitly awaiting it or if the text clearly mentions guests
-        if persisted.get("awaiting_field") == "guests" or "guest" in user_text.lower() or "people" in user_text.lower():
+        guest_context_terms = _nlp_fallback().guest_context_terms
+        if (
+            persisted.get("awaiting_field") == "guests"
+            or any(term in user_text.lower() for term in guest_context_terms)
+        ):
             try: persisted["guests"]=int(parsed_guests)
             except: persisted["guests"]=parsed_guests
 
@@ -2278,6 +2279,7 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
       - If user asks to update to check-in/checkout → perform update
     """
     action=(args.get("action") or "").lower()
+    nlp_fb = _nlp_fallback()
     booking_id=args.get("booking_id") or _parse_booking_id(user_text)
 
     # If we don't have an id yet, request it clearly
@@ -2289,7 +2291,7 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"reply": "You're welcome! Would you like to ask anything else or end this chat session? Say 'end' to close."}
 
     # Query current status / dates
-    if action in ("query","status","check","info","details","date","dates") or not action:
+    if action in set(nlp_fb.status_query_actions) or not action:
         r = await get_booking_status(booking_id)
         if r.get("ok"):
             s=str(r.get("status",""))
@@ -2311,8 +2313,10 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
         return {"tool_result": r, "reply": f"Sorry—{r.get('error','unable to find that booking')}."}
     # Update flow (explicit request)
-    if action in ("check_in","check-in"): new_status="checked_in"
-    elif action in ("check_out","check-out"): new_status="checked_out"
+    if action in set(nlp_fb.status_check_in_actions):
+        new_status = "checked_in"
+    elif action in set(nlp_fb.status_check_out_actions):
+        new_status = "checked_out"
     else: new_status=args.get("new_status")
     if not new_status:
         return {"reply":"Do you want to check in or check out? If you only want to know status, say 'status'."}
@@ -2385,7 +2389,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     # Step 2: user is selecting a city from shown list
     if clean_filters.get("awaiting_city_selection"):
         if _is_no(user_text) or any(
-            p in user_tl for p in ["couldn't find", "could not find", "can't find", "sorry i couldnt find"]
+            p in user_tl for p in _nlp_fallback().unavailable_city_decline_phrases
         ):
             extracted.pop("awaiting_city_selection", None)
             extracted.pop("awaiting_property_type_choice", None)
@@ -2420,7 +2424,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
 
     # Step 3: ask property type after city selection, then search
     if clean_filters.get("awaiting_property_type_choice"):
-        if not prop_type and not any(p in user_tl for p in ["any", "no preference", "doesn't matter", "doesnt matter"]):
+        if not prop_type and not any(p in user_tl for p in _nlp_fallback().property_type_any_phrases):
             return {
                 "results": [],
                 "filters": extracted,
@@ -2439,17 +2443,15 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     if not requested_city:
         from .nlp_extractor import KNOWN_CITIES, CITY_ALIASES
         candidate = None
-        m = re.search(r"\b(?:in|at|near|around)\s+([a-z][a-z\s\-]{1,40})", user_tl)
+        nlp_fb = _nlp_fallback()
+        m = re.search(nlp_fb.city_candidate_prefix_pattern, user_tl) if nlp_fb.city_candidate_prefix_pattern else None
         if m:
             raw = m.group(1).strip(" .,-")
-            raw = re.split(r"\b(?:with|under|for|from|and|but)\b", raw)[0].strip()
+            if nlp_fb.city_candidate_split_pattern:
+                raw = re.split(nlp_fb.city_candidate_split_pattern, raw)[0].strip()
             words = [w for w in raw.split() if w]
             if 1 <= len(words) <= 3:
-                bad = {
-                    "property", "properties", "apartment", "apartments", "hotel", "hotels",
-                    "house", "houses", "villa", "villas", "condo", "condos",
-                    "loft", "lofts", "studio", "studios", "townhouse", "townhouses",
-                }
+                bad = set(nlp_fb.city_candidate_block_words)
                 if not any(w in bad for w in words):
                     cand = " ".join(words)
                     if cand not in KNOWN_CITIES and cand not in CITY_ALIASES:
