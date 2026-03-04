@@ -95,12 +95,21 @@ class TestExtractCardinal:
         ("1st", 1), ("2nd", 2), ("3rd", 3),
         ("first", 1), ("second", 2), ("third", 3),
         ("option 2", 2), ("pick 5", 5),
+        ("choose one", 1), ("take three", 3),
     ])
     def test_cardinals(self, text, expected):
         assert nlp_engine.extract_cardinal(text) == expected
 
     def test_none(self):
         assert nlp_engine.extract_cardinal("hello world") is None
+
+    @pytest.mark.parametrize("text", [
+        "no not this one",
+        "this one",
+        "that one",
+    ])
+    def test_no_false_selection_for_referential_one(self, text):
+        assert nlp_engine.extract_cardinal(text) is None
 
 
 # ────────────── Name Extraction ──────────────

@@ -646,6 +646,12 @@ def extract_cardinal(text: str) -> Optional[int]:
     if not text:
         return None
     tl = text.strip().lower()
+    has_selection_context = bool(
+        re.search(
+            r"\b(option|number|no\.?|#|pick|choose|select|book|take|go with|i(?:\s*'ll|\s*will)?\s*take)\b",
+            tl,
+        )
+    )
 
     # Regex patterns for explicit selection
     _SELECTION_PATS = [
@@ -664,14 +670,23 @@ def extract_cardinal(text: str) -> Optional[int]:
     _ORDINALS = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3,
                  "3rd": 3, "fourth": 4, "4th": 4, "fifth": 5, "5th": 5}
     for word, idx in _ORDINALS.items():
-        if word in tl or f"the {word}" in tl or f"{word} one" in tl:
+        if (
+            tl in {word, f"the {word}", f"{word} one"}
+            or (has_selection_context and re.search(rf"\b{re.escape(word)}\b", tl))
+        ):
             return idx
 
     # Cardinal words
     _CARDINALS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
                   "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+    # Standalone cardinal replies like "one" or "two" are valid.
+    if tl in _CARDINALS:
+        return _CARDINALS[tl]
+    # Guard against referential phrases like "this one" / "that one".
+    if re.search(r"\b(this|that)\s+one\b", tl):
+        return None
     m = re.search(
-        r"\b(?:option|number|no\.?|#)?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b",
+        r"\b(?:option|number|no\.?|#|pick|choose|select|book|take|go with)\s*(?:the\s+)?(one|two|three|four|five|six|seven|eight|nine|ten)\b",
         tl
     )
     if m:
@@ -679,7 +694,7 @@ def extract_cardinal(text: str) -> Optional[int]:
 
     # spaCy ORDINAL/CARDINAL fallback
     nlp = _get_spacy()
-    if nlp:
+    if nlp and has_selection_context:
         doc = nlp(text)
         for ent in doc.ents:
             if ent.label_ in ("ORDINAL", "CARDINAL"):
