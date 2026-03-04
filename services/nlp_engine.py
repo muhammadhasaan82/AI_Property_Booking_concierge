@@ -165,6 +165,38 @@ _FIELD_PROTOTYPES: Dict[str, List[str]] = {
     ],
 }
 
+_MODIFICATION_PROTOTYPES: Tuple[str, ...] = (
+    "I want to modify my booking details",
+    "change my reservation information",
+    "update the booking details",
+    "edit my check-in or guest details",
+    "I need to correct my booking info",
+)
+
+_PROPERTY_SEARCH_REQUEST_PROTOTYPES: Tuple[str, ...] = (
+    "show me different property options",
+    "search for another property",
+    "I want to browse more listings",
+    "go back and find a different property",
+    "please show other properties",
+)
+
+_RECEIPT_REQUEST_PROTOTYPES: Tuple[str, ...] = (
+    "show me my total bill",
+    "what is the final cost",
+    "can you show the booking receipt",
+    "how much do I need to pay in total",
+    "display the total amount for this booking",
+)
+
+_RESUME_REQUEST_PROTOTYPES: Tuple[str, ...] = (
+    "continue with my booking",
+    "resume booking from where we left off",
+    "let's proceed",
+    "go ahead with the booking process",
+    "continue the process",
+)
+
 
 def _get_vader():
     """Lazy-init VADER sentiment analyzer."""
@@ -241,6 +273,39 @@ def _get_intent_embeddings() -> Optional[Dict[str, Any]]:
 # ─────────────────────────────────────────────────────────────────────
 # Fallback VADER (when vaderSentiment is not installed)
 # ─────────────────────────────────────────────────────────────────────
+
+@lru_cache(maxsize=32)
+def _encode_prototypes_cached(prototypes: Tuple[str, ...]):
+    """Encode prototype sentences once per process for semantic matching."""
+    model = _get_st_model()
+    if model is None:
+        return None
+    try:
+        return model.encode(list(prototypes), convert_to_numpy=True)
+    except Exception:  # noqa: BLE001 - degrade gracefully in restricted envs
+        return None
+
+
+def _max_semantic_similarity(text: str, prototypes: Tuple[str, ...]) -> float:
+    """Return max cosine similarity of text to a prototype set."""
+    if not text or not prototypes:
+        return 0.0
+    model = _get_st_model()
+    if model is None:
+        return 0.0
+    proto_vecs = _encode_prototypes_cached(prototypes)
+    if proto_vecs is None:
+        return 0.0
+    try:
+        import numpy as np
+
+        text_vec = model.encode([text], convert_to_numpy=True)[0]
+        denom = (np.linalg.norm(proto_vecs, axis=1) * np.linalg.norm(text_vec) + 1e-8)
+        sims = np.dot(proto_vecs, text_vec) / denom
+        return float(np.max(sims))
+    except Exception:  # noqa: BLE001 - degrade gracefully in restricted envs
+        return 0.0
+
 
 class _FallbackVader:
     """Minimal polarity scorer used when vaderSentiment is not installed."""
@@ -471,9 +536,13 @@ def is_property_search(text: str) -> bool:
 
 def wants_modification(text: str) -> bool:
     """Detect intent to modify booking details."""
-    if not text:
+    if not text or not text.strip():
         return False
     tl = text.strip().lower()
+    if _max_semantic_similarity(tl, _MODIFICATION_PROTOTYPES) > 0.50:
+        return True
+
+    # Keyword fallback when semantic model is unavailable or uncertain.
     _SEEDS = {"modify", "modification", "change", "update", "edit",
               "correct", "fix", "adjust", "tweak"}
     return any(w in tl for w in _SEEDS)
@@ -481,9 +550,13 @@ def wants_modification(text: str) -> bool:
 
 def wants_property_search_request(text: str) -> bool:
     """Detect intent to search for different/more properties."""
-    if not text:
+    if not text or not text.strip():
         return False
     tl = text.strip().lower()
+    if _max_semantic_similarity(tl, _PROPERTY_SEARCH_REQUEST_PROTOTYPES) > 0.50:
+        return True
+
+    # Keyword fallback when semantic model is unavailable or uncertain.
     _PHRASES = {
         "search for different properties", "search different properties",
         "show other options", "show more options", "more properties",
@@ -495,6 +568,39 @@ def wants_property_search_request(text: str) -> bool:
         return True
     return (("search" in tl or "browse" in tl or "show" in tl) and
             ("property" in tl or "properties" in tl or "options" in tl))
+
+
+def is_receipt_request(text: str) -> bool:
+    """Detect requests to view booking total/receipt."""
+    if not text or not text.strip():
+        return False
+    tl = text.strip().lower()
+    if _max_semantic_similarity(tl, _RECEIPT_REQUEST_PROTOTYPES) > 0.50:
+        return True
+
+    # Keyword fallback when semantic model is unavailable or uncertain.
+    if any(p in tl for p in [
+        "total bill", "final cost", "total cost", "show total", "my total",
+        "receipt", "invoice", "total amount", "how much total", "amount due",
+    ]):
+        return True
+    return ("how much" in tl and ("cost" in tl or "total" in tl or "pay" in tl))
+
+
+def is_resume_request(text: str) -> bool:
+    """Detect whether user wants to resume/continue the previous flow."""
+    if not text or not text.strip():
+        return False
+    tl = text.strip().lower()
+    if _max_semantic_similarity(tl, _RESUME_REQUEST_PROTOTYPES) > 0.50:
+        return True
+
+    # Keyword fallback when semantic model is unavailable or uncertain.
+    return any(p in tl for p in [
+        "continue", "resume", "continue booking", "resume booking",
+        "continue the booking", "go ahead", "proceed", "carry on",
+        "keep going",
+    ])
 
 
 def wants_previous_results_sync(text: str) -> bool:
@@ -962,6 +1068,12 @@ async def is_property_search_async(text: str) -> bool:
 
 async def is_status_query_async(text: str) -> bool:
     return await asyncio.to_thread(is_status_query, text)
+
+async def is_receipt_request_async(text: str) -> bool:
+    return await asyncio.to_thread(is_receipt_request, text)
+
+async def is_resume_request_async(text: str) -> bool:
+    return await asyncio.to_thread(is_resume_request, text)
 
 async def wants_previous_results_async(text: str) -> bool:
     return await asyncio.to_thread(wants_previous_results_sync, text)

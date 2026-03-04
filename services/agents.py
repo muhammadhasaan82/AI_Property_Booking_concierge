@@ -716,8 +716,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
             }
         
         # If user asks for total bill or receipt again
-        tl = (user_text or "").lower().strip()
-        if any(phrase in tl for phrase in ["total bill", "total", "bill", "receipt", "show total", "my total", "please show me my total", "Yes please show me my total", "Yes please proceed me to my total"]):
+        if nlp_engine.is_receipt_request(user_text):
             # Re-render the receipt without changing any data
             selected_property = persisted.get("selected_property") or {}
             title = selected_property.get("title","Property")
@@ -1015,10 +1014,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
     # If user answered yes/no to selection
     if persisted.get("awaiting_selection_confirm"):
         # While awaiting selection confirm, do NOT parse name/phone/email/dates/guests
-        # Treat common affirmations like "yes please" as yes
         tl=(user_text or "").strip().lower()
-        if tl in {"yes please","yes pls","sure please","pls yes","yup please","yeah please"}:
-            user_text = "yes"
 
         # FIX B: If user types a new numeric selection (e.g. "6"), handle it here instead of
         # asking "please reply yes or no". Clear stale selection state and fall through
@@ -1061,7 +1057,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
                 "tool_result": {"ok": False, "need": ["restart"]},
             }
 
-        if sel is None and (_is_yes(user_text) or (tl in {"yes sure","sure yes","yes please","yes pls","sure"})):
+        if sel is None and _is_yes(user_text):
             persisted["awaiting_selection_confirm"] = False
             # If we already have required fields, show receipt directly; otherwise ask for next missing
             required=["name","phone","email","check_in","check_out","guests"]
@@ -1118,11 +1114,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
         tl = (user_text or "").lower().strip()
 
         # User wants to search for different properties
-        if any(phrase in tl for phrase in [
-            "search", "different properties", "different property", "other properties", "other property", "browse",
-            "show", "more options", "yes", "find", "look", "search different properties", "find different property",
-            "i want to search for different properties", "i would like to search for different properties"
-        ]):
+        if _wants_property_search_request(user_text):
             persisted.pop("awaiting_post_cancel_choice", None)
             persisted.pop("awaiting_post_mod_choice", None)
             # Keep user info but clear property selection
