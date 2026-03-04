@@ -33,105 +33,110 @@ def node_triage(state: ChatState) -> ChatState:
 
         # --- Guardrails: sanitize input before any routing ---
         user_text, is_safe = sanitize_input(user_text)
-        if not is_safe:
-            return {**state, "intent": "greeting", "reply": "I'm here to help with hotel bookings and policy questions. How can I assist you?"}
         intent = triage_intent(user_text, filters)
 
-        # Property flow follow-ups for unavailable-city handling should stay in
-        # property node regardless of generic yes/no intent classification.
-        if (
-            filters.get("awaiting_unavailable_city_choice")
-            or filters.get("awaiting_city_selection")
-            or filters.get("awaiting_property_type_choice")
-        ):
-            return {**state, "intent": "property_search"}
-        
-        # IMPORTANT: Greetings should always be handled as greetings, regardless of context
-        # This prevents the bot from asking for booking details when user just says "hi"
-        if intent == "greeting":
-            # Always route greetings to greeting handler, no matter what context exists
-            return {**state, "intent": "greeting"}
+        # Build execution context for policy evaluation
+        ctx = {
+            "intent": intent,
+            "is_safe": is_safe,
+            "filter_keys": set(filters.keys()),
+            "has_booking_context": bool(
+                filters.get("recent_property_id") or
+                filters.get("name") or filters.get("phone") or filters.get("email") or
+                filters.get("check_in") or filters.get("check_out") or filters.get("receipt_shown")
+            ),
+            "awaiting_field": filters.get("awaiting_field"),
+            "has_field_data": False,
+            "lacks_explicit_status_keywords": False,
+            "no_selected_property": not filters.get("selected_property"),
+            "no_awaiting_field": not filters.get("awaiting_field"),
+            "no_active_selection": not any(filters.get(k) for k in [
+                "awaiting_unavailable_city_choice", "awaiting_city_selection", "awaiting_property_type_choice"
+            ]),
+        }
 
-        # If we just modified something and asked whether to proceed or modify more,
-        # force the next turn to be handled by the confirmation node (not property search)
-        if filters.get("awaiting_post_mod_choice"):
-            return {**state, "intent": "confirmation"}
-        
-        # FAQ return guard: keep this in filters so it survives turns in CLI/web sessions.
-        if filters.get("faq_answered"):
-            resume_intent = filters.get("faq_resume_intent", "confirmation")
-            new_filters = {**filters}
-            new_filters.pop("faq_answered", None)
-            new_filters.pop("faq_resume_intent", None)
-            if intent == "faq":
-                return {**state, "intent": "faq", "filters": new_filters}
-            if (
-                intent in ["confirmation", "booking"]
-                or nlp_engine.is_resume_request(user_text)
-            ):
-                return {**state, "intent": resume_intent, "filters": new_filters}
-            return {**state, "filters": new_filters}
-        
-        # booking-context override (only check this AFTER greeting check)
-        booking_context = (
-            filters.get("recent_property_id") or
-            filters.get("name") or
-            filters.get("phone") or
-            filters.get("email") or
-            filters.get("check_in") or
-            filters.get("check_out") or
-            filters.get("receipt_shown")
-        )
-        
-        # Check if we're actively waiting for a specific field
-        awaiting_field = filters.get("awaiting_field")
-        
-        if (booking_context and intent == "property_search"):
-            from services.agents import _parse_name, _parse_phone, _parse_email, _parse_dates, _parse_guests
-            # If the user mentions modifiable fields (like "dates"), keep them in confirmation flow
-            from services.agents import _detect_requested_fields
-            if (_parse_name(user_text) or _parse_phone(user_text) or
-                _parse_email(user_text) or _parse_dates(user_text) or _parse_guests(user_text) or _detect_requested_fields(user_text)):
-                intent = "confirmation"
-            # If we're awaiting a specific field and got any text, route to confirmation
-            elif awaiting_field in ["name", "phone", "email", "check_in", "check_out", "guests", "modification", "modification_choice", "location"]:
-                # User is providing data for a requested field, keep in confirmation flow
-                intent = "confirmation"
-
-        # In active booking context, avoid accidental status routing for phrases
-        # like "continue booking" that are not actual status checks.
-        if booking_context and intent == "status_update":
-            tl = user_text.lower()
-            explicit_status = any(
-                k in tl for k in ["booking id", "status", "track", "tracking", "check status"]
+        # Lazy context enrichments (only evaluated if needed by policy)
+        if ctx["has_booking_context"] and intent == "property_search":
+            from services.agents import _parse_name, _parse_phone, _parse_email, _parse_dates, _parse_guests, _detect_requested_fields
+            ctx["has_field_data"] = bool(
+                _parse_name(user_text) or _parse_phone(user_text) or _parse_email(user_text) or
+                _parse_dates(user_text) or _parse_guests(user_text) or _detect_requested_fields(user_text)
             )
-            if not explicit_status:
-                intent = "confirmation"
-                
-        # Guard: Orphaned affirmations (e.g. user says "ok" after a greeting) shouldn't trigger the booking loop 
-        # unless they have actually selected a property, are explicitly awaiting a booking field, 
-        # or are actively selecting an option from a previous search.
-        if intent == "confirmation" and not filters.get("selected_property") and not filters.get("awaiting_field"):
-            if (
-                filters.get("awaiting_unavailable_city_choice")
-                or filters.get("awaiting_city_selection")
-                or filters.get("awaiting_property_type_choice")
-            ):
-                return {**state, "intent": "property_search"}
-            from services.agents import _parse_selection_index
-            if _parse_selection_index(user_text) is None:
-                intent = "greeting"
 
-        # If status intent, opportunistically extract booking_id from the user's text
-        if intent == "status_update":
+        if ctx["has_booking_context"] and intent == "status_update":
+            tl = user_text.lower()
+            explicit = any(k in tl for k in ["booking id", "status", "track", "tracking", "check status"])
+            ctx["lacks_explicit_status_keywords"] = not explicit
+
+        if intent == "confirmation" and ctx["no_selected_property"] and ctx["no_awaiting_field"] and ctx["no_active_selection"]:
+            from services.agents import _parse_selection_index
+            ctx["no_active_selection"] = _parse_selection_index(user_text) is None
+
+        # --- Evaluate policies from dynamic_config ---
+        from services.dynamic_config import get_routing_policies
+        rp_config = get_routing_policies()
+        
+        target_route = "_from_intent"  # fallback
+        reply_override = None
+        extract_action = None
+
+        for policy in rp_config.sorted_policies:
+            cond = policy.condition
+            match = True
+
+            if cond.always:
+                target_route = policy.route
+                break
+
+            if cond.is_safe is not None and cond.is_safe != ctx["is_safe"]: match = False
+            if cond.intent is not None and cond.intent != ctx["intent"]: match = False
+            if cond.intent_in is not None and ctx["intent"] not in cond.intent_in: match = False
+            if cond.filter_key is not None and cond.filter_key not in ctx["filter_keys"]: match = False
+            if cond.any_filter_key is not None and not any(k in ctx["filter_keys"] for k in cond.any_filter_key): match = False
+            if cond.has_booking_context is not None and cond.has_booking_context != ctx["has_booking_context"]: match = False
+            if cond.has_field_data is not None and cond.has_field_data != ctx["has_field_data"]: match = False
+            if cond.awaiting_field_in is not None and ctx["awaiting_field"] not in cond.awaiting_field_in: match = False
+            if cond.lacks_explicit_status_keywords is not None and cond.lacks_explicit_status_keywords != ctx["lacks_explicit_status_keywords"]: match = False
+            if cond.no_selected_property is not None and cond.no_selected_property != ctx["no_selected_property"]: match = False
+            if cond.no_awaiting_field is not None and cond.no_awaiting_field != ctx["no_awaiting_field"]: match = False
+            if cond.no_active_selection is not None and cond.no_active_selection != ctx["no_active_selection"]: match = False
+
+            if match:
+                target_route = policy.route
+                reply_override = policy.reply
+                extract_action = policy.extract
+                if policy.id == "faq_return_guard":
+                    # Special inline action for FAQ return
+                    resume_intent = filters.get("faq_resume_intent", "confirmation")
+                    filters.pop("faq_answered", None)
+                    filters.pop("faq_resume_intent", None)
+                    if intent == "faq":
+                        target_route = "faq"
+                    elif intent in ["confirmation", "booking"] or nlp_engine.is_resume_request(user_text):
+                        target_route = resume_intent
+                    else:
+                        target_route = "_from_intent"  # Let it fall through normally
+                break
+
+        # --- Apply target route ---
+        final_intent = intent if target_route == "_from_intent" else target_route
+        out_state: ChatState = {**state, "intent": final_intent}
+        
+        if reply_override:
+            out_state["reply"] = reply_override
+
+        # Apply specific extractions requested by policy
+        if extract_action == "booking_id":
             status_args = {**(state.get("status_args", {}) or {})}
             m = re.search(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", user_text or "")
             if m and not status_args.get("booking_id"):
                 status_args["booking_id"] = m.group(0)
-            return {**state, "intent": intent, "status_args": status_args}
+            out_state["status_args"] = status_args
 
-        return {**state, "intent": intent}
+        if out_state.get("filters") != filters or "filters" not in out_state:
+            out_state["filters"] = filters
 
+        return out_state
 def node_greeting(state: ChatState) -> ChatState:
     with span("node_greeting"):
         out = greeting_agent(state.get("filters", {}) or {}, state.get("user_text", ""))

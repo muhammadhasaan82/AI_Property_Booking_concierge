@@ -28,18 +28,7 @@ from .db_logging import (
     insert_successful_booking,
     get_successful_booking_status,
 )
-from .config import (
-    FIELD_PROMPTS as _CFG_FIELD_PROMPTS,
-    FIELD_MODIFICATION_PROMPTS as _CFG_FIELD_MOD_PROMPTS,
-    PROCEED_PHRASES as _CFG_PROCEED_PHRASES,
-    MODIFY_PHRASES as _CFG_MODIFY_PHRASES,
-    FAQ_FALLBACK_KEYWORDS,
-    BOOKING_TRIGGERS,
-    STATUS_KEYWORDS,
-    PAYMENT_KEYWORDS,
-    SEED_PROPERTY_TYPES,
-    PAYMENT_BASE_URL,
-)
+import services.config as config
 
 # -----------------------
 # Load env
@@ -136,7 +125,7 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
 
 
 def _slot_prompt(field: str) -> str:
-    return _CFG_FIELD_PROMPTS.get(field, "Please share that detail.")
+    return config.FIELD_PROMPTS.get(field, "Please share that detail.")
 
 
 def _classify_proceed_or_modify(user_text: str) -> str | None:
@@ -153,9 +142,9 @@ def _classify_proceed_or_modify(user_text: str) -> str | None:
     if tl == "yes":
         return "proceed"
 
-    if any(p in tl for p in _CFG_PROCEED_PHRASES):
+    if any(p in tl for p in config.PROCEED_PHRASES):
         return "proceed"
-    if any(p in tl for p in _CFG_MODIFY_PHRASES):
+    if any(p in tl for p in config.MODIFY_PHRASES):
         return "modify"
     return None
 
@@ -337,6 +326,10 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         ):
             return "confirmation"
 
+    if _is_ack(t):
+        return "confirmation"
+
+
     # Soft-coded LLM intent router (prioritized as requested by user to be super soft-coded).
     llm_intent = _llm_route_intent(t, filters)
     if llm_intent:
@@ -393,15 +386,13 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         _parse_guests(t) is not None or _parse_selection_index(t) is not None):
         return "confirmation"
 
-    if _is_ack(t):
-        return "confirmation"
 
-    _BOOKING_TRIGGERS = BOOKING_TRIGGERS
-    if any(w in t.lower() for w in _BOOKING_TRIGGERS):
+    _config.BOOKING_TRIGGERS = config.BOOKING_TRIGGERS
+    if any(w in t.lower() for w in _config.BOOKING_TRIGGERS):
         return "booking"
-    if any(w in t.lower() for w in STATUS_KEYWORDS):
+    if any(w in t.lower() for w in config.STATUS_KEYWORDS):
         return "status_update"
-    if any(w in t.lower() for w in PAYMENT_KEYWORDS):
+    if any(w in t.lower() for w in config.PAYMENT_KEYWORDS):
         return "payment_link"
     return "property_search"
 
@@ -761,8 +752,8 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
     # High-priority: After a modification, the user may say 'no' to proceed to receipt or 'yes' to modify more
     if persisted.get("awaiting_post_mod_choice"):
         tl = (user_text or "").lower().strip()
-        proceed_phrases = _CFG_PROCEED_PHRASES
-        modify_phrases = _CFG_MODIFY_PHRASES
+        proceed_phrases = config.PROCEED_PHRASES
+        modify_phrases = config.MODIFY_PHRASES
         # Check for simple "yes" first - this should proceed to receipt
         if tl.strip() == "yes":
             persisted.pop("awaiting_post_mod_choice", None)
@@ -1102,7 +1093,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             # Ask for the next missing field
             nxt=missing[0]
             persisted["awaiting_field"]=nxt
-            return {"reply":_CFG_FIELD_PROMPTS.get(nxt, f"Please provide your {nxt}."), "tool_result": {"ok": False, "need": [nxt]}, "filters": persisted}
+            return {"reply":config.FIELD_PROMPTS.get(nxt, f"Please provide your {nxt}."), "tool_result": {"ok": False, "need": [nxt]}, "filters": persisted}
         # If neither explicit yes nor no (and not a new numeric selection), keep asking
         if sel is None:
             return {"reply": "Please reply with yes or no to continue.",
@@ -1231,8 +1222,8 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
         # After a modification was applied, ask whether to proceed or modify more
         if persisted.get("awaiting_post_mod_choice"):
             tl = (user_text or "").lower().strip()
-            proceed_phrases = _CFG_PROCEED_PHRASES
-            modify_phrases = _CFG_MODIFY_PHRASES
+            proceed_phrases = config.PROCEED_PHRASES
+            modify_phrases = config.MODIFY_PHRASES
             if any(p in tl for p in proceed_phrases):
                 # Skip rendering confirmation receipt; proceed directly to booking/payment
                 persisted.pop("awaiting_post_mod_choice", None)
@@ -1851,7 +1842,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             # If something still needed, set the next required field and prompt
             if need_next:
                 persisted["awaiting_field"] = need_next
-                return {"reply":_CFG_FIELD_MOD_PROMPTS.get(need_next, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need_next]}}
+                return {"reply":config.FIELD_MODIFICATION_PROMPTS.get(need_next, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need_next]}}
 
             # All requested updates applied; if both dates present, proceed to ask next action
             persisted["awaiting_field"] = None
@@ -1869,7 +1860,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
             if missing:
                 need = missing[0]
                 persisted["awaiting_field"] = need
-                return {"reply":_CFG_FIELD_MOD_PROMPTS.get(need, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need]}}
+                return {"reply":config.FIELD_MODIFICATION_PROMPTS.get(need, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need]}}
             # Fallback to proceed prompt
             persisted["awaiting_post_mod_choice"] = True
             return {
@@ -2009,7 +2000,7 @@ Reply **yes** to confirm and proceed with payment, or **no** to cancel."""
         if not persisted.get(k):
             persisted["awaiting_field"]=k
             persisted["awaiting_selection_confirm"] = False  # Clear this flag when asking for fields
-            return {"reply":_CFG_FIELD_PROMPTS.get(k, f"Please provide your {k}."), "tool_result":{"ok":False,"need":[k]}, "filters":persisted}
+            return {"reply":config.FIELD_PROMPTS.get(k, f"Please provide your {k}."), "tool_result":{"ok":False,"need":[k]}, "filters":persisted}
 
     # Build receipt only when it has not already been shown in this state.
     if not persisted.get("receipt_shown"):
@@ -2156,7 +2147,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
                 "ok": True,
                 "booking_id": str(uuid.uuid4())[:8],
                 "status": "confirmed",
-                "payment_url": f"{PAYMENT_BASE_URL}/mock"
+                "payment_url": f"{config.PAYMENT_BASE_URL}/mock"
             }
             print("[INFO] Mock booking created successfully")
         else:
@@ -2164,7 +2155,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
 
     prop_title=(args.get("selected_property") or {}).get("title","")
     ptype="apartment"
-    for t in sorted(SEED_PROPERTY_TYPES):
+    for t in sorted(config.SEED_PROPERTY_TYPES):
         if t in prop_title.lower(): ptype=t; break
 
     if r.get("ok"):

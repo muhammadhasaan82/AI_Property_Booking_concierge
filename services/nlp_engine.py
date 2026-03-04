@@ -30,188 +30,45 @@ _spacy_nlp = None
 _st_model = None
 _intent_embeddings: Optional[Dict[str, Any]] = None
 
-# Baseline intent prototypes for semantic classification
-_INTENT_PROTOTYPES: Dict[str, List[str]] = {
-    "property_search": [
-        "I want to find an apartment in New York",
-        "Show me available rentals under 200 dollars",
-        "Looking for a villa with a pool",
-        "Search for properties in Miami",
-        "I need a place to stay near downtown",
-        "Find me a 2 bedroom house",
-        "What do you have available",
-        "Browse listings with wifi and parking",
-    ],
-    "status_update": [
-        "What is the status of my booking",
-        "Check my booking status",
-        "When is my check-in date",
-        "I want to know my departure time",
-        "Track my reservation",
-        "Where is my booking confirmation",
-        "My booking ID is abc-123",
-    ],
-    "faq": [
-        "What is the refund policy",
-        "Can I cancel my booking",
-        "Are pets allowed in the property",
-        "What are the check-in times",
-        "Tell me about your cancellation terms",
-        "Is there a security deposit",
-        "What are the house rules",
-        "How does the payment process work",
-        "What WiFi password do I use",
-    ],
-    "greeting": [
-        "Hi there",
-        "Hello",
-        "Hey how are you",
-        "Good morning",
-        "Good afternoon",
-    ],
-    "booking": [
-        "I want to book this property",
-        "Reserve this for me",
-        "Go ahead and confirm the booking",
-        "Lock it in for those dates",
-    ],
-    "confirmation": [
-        "Sure I will go for option 9",
-        "I'll take option 3",
-        "Let me pick number 5",
-        "Go with the second one",
-        "I choose option 1",
-        "Select the first property",
-        "Yes go ahead",
-        "That looks good confirm it",
-        "I want to proceed with this one",
-        "Yes I would like to book that",
-        "My name is John",
-        "My email is john@example.com",
-        "2 guests",
-        "Check in 2025-06-01",
-    ],
-    "handoff": [
-        "I want to talk to a human",
-        "Connect me with an agent",
-        "Can I speak to a representative",
-        "Live support please",
-        "I need a real person",
-    ],
-    "end": [
-        "Goodbye",
-        "Bye bye",
-        "That is all thank you",
-        "I am done",
-        "Close this chat",
-        "Exit",
-    ],
-    "payment": [
-        "Send me the payment link",
-        "I want to pay now",
-        "Process my payment",
-        "Generate an invoice",
-    ],
-    "availability": [
-        "What dates are available",
-        "Show me the calendar",
-        "Which dates are open",
-        "Available dates for this property",
-    ],
-    "modification": [
-        "I want to change my dates",
-        "Modify my booking details",
-        "Update my phone number",
-        "Change the guest count",
-        "Edit my name",
-    ],
-}
+# ─────────────────────────────────────────────────────────────────────
+# Config-driven prototypes (loaded from config/intent_catalog.yaml)
+# ─────────────────────────────────────────────────────────────────────
+from services.dynamic_config import get_intent_catalog as _get_catalog
 
-# ─── Field detection prototypes ───
-_FIELD_PROTOTYPES: Dict[str, List[str]] = {
-    "property": [
-        "change property", "different property", "another property",
-        "switch property", "browse more", "more options",
-    ],
-    "check_in": [
-        "change check-in date", "modify arrival", "new check-in",
-        "update start date",
-    ],
-    "check_out": [
-        "change check-out date", "modify departure", "new check-out",
-        "update end date",
-    ],
-    "dates": [
-        "change my dates", "modify dates", "update both dates",
-        "new dates", "different dates",
-    ],
-    "name": [
-        "change my name", "update name", "modify name",
-    ],
-    "phone": [
-        "change phone number", "update my phone", "modify contact number",
-        "new mobile number",
-    ],
-    "email": [
-        "change email address", "update my email", "modify email",
-    ],
-    "guests": [
-        "change number of guests", "update guests", "modify guest count",
-        "change people count",
-    ],
-    "location": [
-        "change city", "different location", "modify city",
-        "update location",
-    ],
-}
 
-_MODIFICATION_PROTOTYPES: Tuple[str, ...] = (
-    "I want to modify my booking details",
-    "change my reservation information",
-    "update the booking details",
-    "edit my check-in or guest details",
-    "I need to correct my booking info",
-)
+def _get_intent_prototypes() -> Dict[str, List[str]]:
+    """Load intent prototypes from config."""
+    cat = _get_catalog()
+    return {k: v.prototypes for k, v in cat.intents.items()}
 
-_PROPERTY_SEARCH_REQUEST_PROTOTYPES: Tuple[str, ...] = (
-    "show me different property options",
-    "search for another property",
-    "I want to browse more listings",
-    "go back and find a different property",
-    "please show other properties",
-)
 
-_RECEIPT_REQUEST_PROTOTYPES: Tuple[str, ...] = (
-    "show me my total bill",
-    "what is the final cost",
-    "can you show the booking receipt",
-    "how much do I need to pay in total",
-    "display the total amount for this booking",
-)
+def _get_field_prototypes() -> Dict[str, List[str]]:
+    """Load field detection prototypes from config."""
+    return _get_catalog().field_prototypes
 
-_RESUME_REQUEST_PROTOTYPES: Tuple[str, ...] = (
-    "continue with my booking",
-    "resume booking from where we left off",
-    "let's proceed",
-    "go ahead with the booking process",
-    "continue the process",
-)
 
-_AFFIRM_YES_PROTOTYPES: Tuple[str, ...] = (
-    "yes continue to payment please",
-    "yes that sounds great proceed",
-    "please confirm and continue",
-    "go ahead and finalize the booking",
-    "i agree and want to proceed",
-)
+def _get_modification_prototypes() -> Tuple[str, ...]:
+    return tuple(_get_catalog().modification_prototypes)
 
-_AFFIRM_NO_PROTOTYPES: Tuple[str, ...] = (
-    "no cancel this booking",
-    "do not proceed",
-    "i want to stop this",
-    "cancel and let me modify details",
-    "no thanks not this one",
-)
+
+def _get_property_search_request_prototypes() -> Tuple[str, ...]:
+    return tuple(_get_catalog().property_search_request_prototypes)
+
+
+def _get_receipt_request_prototypes() -> Tuple[str, ...]:
+    return tuple(_get_catalog().receipt_request_prototypes)
+
+
+def _get_resume_request_prototypes() -> Tuple[str, ...]:
+    return tuple(_get_catalog().resume_request_prototypes)
+
+
+def _get_affirm_yes_prototypes() -> Tuple[str, ...]:
+    return tuple(_get_catalog().affirm_yes_prototypes)
+
+
+def _get_affirm_no_prototypes() -> Tuple[str, ...]:
+    return tuple(_get_catalog().affirm_no_prototypes)
 
 
 def _get_vader():
@@ -271,7 +128,7 @@ def _get_intent_embeddings() -> Optional[Dict[str, Any]]:
         import numpy as np
 
         _intent_embeddings = {}
-        for intent, phrases in _INTENT_PROTOTYPES.items():
+        for intent, phrases in _get_intent_prototypes().items():
             vecs = model.encode(phrases, convert_to_numpy=True)
             _intent_embeddings[intent] = np.mean(vecs, axis=0)
         logger.info("[nlp_engine] Intent embeddings pre-computed for %d intents",
@@ -326,12 +183,14 @@ def _max_semantic_similarity(text: str, prototypes: Tuple[str, ...]) -> float:
 class _FallbackVader:
     """Minimal polarity scorer used when vaderSentiment is not installed."""
 
-    _POS = {"yes", "yeah", "yep", "yup", "sure", "please", "ok", "okay",
-            "alright", "good", "great", "hi", "hello", "hey", "thanks",
-            "thank", "love", "nice", "perfect", "wonderful", "excellent",
-            "amazing", "awesome", "oki", "fine"}
-    _NEG = {"no", "nope", "nah", "not", "never", "bad", "terrible",
-            "horrible", "stop", "cancel", "later", "awful", "hate", "ugly"}
+    @property
+    def _POS(self):
+        cat = _get_catalog()
+        return set(cat.vader_fallback.get("positive", []))
+    @property
+    def _NEG(self):
+        cat = _get_catalog()
+        return set(cat.vader_fallback.get("negative", []))
 
     def polarity_scores(self, text: str) -> Dict[str, float]:
         tokens = re.findall(r"[a-z']+", text.lower())
@@ -361,11 +220,11 @@ def classify_affirmation(text: str) -> str:
     tl = text.strip().lower()
 
     # Semantic-first classification for extended confirmations.
-    yes_sim = _max_semantic_similarity(tl, _AFFIRM_YES_PROTOTYPES)
-    no_sim = _max_semantic_similarity(tl, _AFFIRM_NO_PROTOTYPES)
-    if yes_sim >= 0.50 and yes_sim >= (no_sim + 0.04):
+    yes_sim = _max_semantic_similarity(tl, _get_affirm_yes_prototypes())
+    no_sim = _max_semantic_similarity(tl, _get_affirm_no_prototypes())
+    if yes_sim >= 0.65 and yes_sim >= (no_sim + 0.04):
         return "yes"
-    if no_sim >= 0.50 and no_sim >= (yes_sim + 0.04):
+    if no_sim >= 0.65 and no_sim >= (yes_sim + 0.04):
         return "no"
 
     # Minimal lexical fallback for explicit one-token confirmations.
@@ -395,6 +254,9 @@ def is_greeting(text: str) -> bool:
         return False
 
     tl = text.strip().lower()
+    if is_acknowledgment(text):
+        return False
+    
     tokens = tl.split()
 
     # Short utterance check (greetings are usually 1-4 words)
@@ -413,8 +275,12 @@ def is_greeting(text: str) -> bool:
         return True
 
     # Semantic classification fallback
-    intent = classify_intent_sync(tl, ["greeting", "other"])
-    return intent == "greeting" and _semantic_confidence(tl, "greeting") > 0.55
+    all_intents = list(_get_catalog().intents.keys())
+    intent = classify_intent_sync(tl, all_intents)
+    if intent != "greeting":
+        return False
+    threshold = _get_catalog().intents["greeting"].threshold if "greeting" in _get_catalog().intents else 0.60
+    return _semantic_confidence(tl, "greeting") >= threshold
 
 
 def is_acknowledgment(text: str) -> bool:
@@ -482,10 +348,12 @@ def is_status_query(text: str) -> bool:
         return True
 
     # Semantic classification
-    intent = classify_intent_sync(tl, ["status_update", "property_search", "other"])
+    all_intents = list(_get_catalog().intents.keys())
+    intent = classify_intent_sync(tl, all_intents)
     if intent == "status_update":
+        threshold = _get_catalog().intents["status_update"].threshold if "status_update" in _get_catalog().intents else 0.55
         conf = _semantic_confidence(tl, "status_update")
-        if conf > 0.45:
+        if conf >= threshold:
             return True
 
     # Keyword fallback
@@ -511,11 +379,13 @@ def is_property_search(text: str) -> bool:
         return False
 
     # Semantic classification
-    intent = classify_intent_sync(
-        tl, ["property_search", "status_update", "faq", "greeting", "other"]
-    )
+    all_intents = list(_get_catalog().intents.keys())
+    intent = classify_intent_sync(tl, all_intents)
     if intent == "property_search":
-        return True
+        threshold = _get_catalog().intents["property_search"].threshold if "property_search" in _get_catalog().intents else 0.50
+        conf = _semantic_confidence(tl, "property_search")
+        if conf >= threshold:
+            return True
 
     # Keyword + NER fallback
     from .nlp_extractor import KNOWN_CITIES, CITY_ALIASES, PROPERTY_TYPES
@@ -556,7 +426,7 @@ def wants_modification(text: str) -> bool:
     if not text or not text.strip():
         return False
     tl = text.strip().lower()
-    if _max_semantic_similarity(tl, _MODIFICATION_PROTOTYPES) > 0.50:
+    if _max_semantic_similarity(tl, _get_modification_prototypes()) >= 0.70:
         return True
 
     # Keyword fallback when semantic model is unavailable or uncertain.
@@ -570,21 +440,18 @@ def wants_property_search_request(text: str) -> bool:
     if not text or not text.strip():
         return False
     tl = text.strip().lower()
-    if _max_semantic_similarity(tl, _PROPERTY_SEARCH_REQUEST_PROTOTYPES) > 0.50:
+    if _max_semantic_similarity(tl, _get_property_search_request_prototypes()) >= 0.70:
         return True
 
     # Keyword fallback when semantic model is unavailable or uncertain.
-    _PHRASES = {
-        "search for different properties", "search different properties",
+    _SEEDS = {"other propert", "different propert", "more propert",
+              "other option", "different option", "more option", "search different properties",
         "show other options", "show more options", "more properties",
         "different options", "other options", "browse more", "see more",
         "change property", "another property", "different property",
         "other property",
     }
-    if any(p in tl for p in _PHRASES):
-        return True
-    return (("search" in tl or "browse" in tl or "show" in tl) and
-            ("property" in tl or "properties" in tl or "options" in tl))
+    return any(p in tl for p in _SEEDS)
 
 
 def is_receipt_request(text: str) -> bool:
@@ -592,10 +459,11 @@ def is_receipt_request(text: str) -> bool:
     if not text or not text.strip():
         return False
     tl = text.strip().lower()
-    if _max_semantic_similarity(tl, _RECEIPT_REQUEST_PROTOTYPES) > 0.50:
+    if _max_semantic_similarity(tl, _get_receipt_request_prototypes()) >= 0.65:
         return True
-
+    
     # Keyword fallback when semantic model is unavailable or uncertain.
+    _SEEDS = {"receipt", "total cost", "bill", "invoice", "final price"}
     if any(p in tl for p in [
         "total bill", "final cost", "total cost", "show total", "my total",
         "receipt", "invoice", "total amount", "how much total", "amount due",
@@ -609,10 +477,12 @@ def is_resume_request(text: str) -> bool:
     if not text or not text.strip():
         return False
     tl = text.strip().lower()
-    if _max_semantic_similarity(tl, _RESUME_REQUEST_PROTOTYPES) > 0.50:
+    if _max_semantic_similarity(tl, _get_resume_request_prototypes()) >= 0.65:
         return True
-
+    
     # Keyword fallback when semantic model is unavailable or uncertain.
+    if re.fullmatch(r"(continue|resume|proceed|go ahead)", tl):
+        return True
     return any(p in tl for p in [
         "continue", "resume", "continue booking", "resume booking",
         "continue the booking", "go ahead", "proceed", "carry on",
@@ -629,26 +499,20 @@ def wants_previous_results_sync(text: str) -> bool:
     if model is None:
         # Fallback keyword logic
         tl = text.lower()
-        return any(p in tl for p in [
-            "back to list", "back to the list", "back to results", "show list",
-            "other properties", "other options", "show me other", "different property",
-            "different properties", "go back", "previous list", "see list",
-            "return to list", "show properties", "show other properties",
-        ])
+        _prev_cfg = _get_catalog().previous_results_prototypes
+        return any(p in tl for p in _prev_cfg.fallback_keywords)
 
     import numpy as np
-    prototypes = [
-        "return to the previous search results",
-        "show me the list of properties again",
-        "go back to the other options"
-    ]
+    _prev_cfg = _get_catalog().previous_results_prototypes
+    prototypes = _prev_cfg.prototypes
     
     text_vec = model.encode([text], convert_to_numpy=True)[0]
     proto_vecs = model.encode(prototypes, convert_to_numpy=True)
     
     # Compute similarity against all prototypes
     scores = np.dot(proto_vecs, text_vec) / (np.linalg.norm(proto_vecs, axis=1) * np.linalg.norm(text_vec) + 1e-8)
-    return float(np.max(scores)) > 0.55
+    threshold = _get_catalog().previous_results_prototypes.threshold
+    return float(np.max(scores)) > threshold
 
 
 def detect_faq_intent(text: str) -> bool:
@@ -658,10 +522,12 @@ def detect_faq_intent(text: str) -> bool:
     tl = text.strip().lower()
 
     # Semantic classification
-    intent = classify_intent_sync(tl, ["faq", "property_search", "greeting", "other"])
+    all_intents = list(_get_catalog().intents.keys())
+    intent = classify_intent_sync(tl, all_intents)
     if intent == "faq":
+        threshold = _get_catalog().intents["faq"].threshold if "faq" in _get_catalog().intents else 0.50
         conf = _semantic_confidence(tl, "faq")
-        if conf > 0.45:
+        if conf >= threshold:
             return True
 
     # Strong trigger keywords (policy/terms are always FAQ — regardless of booking context)
@@ -931,7 +797,7 @@ def detect_requested_fields(text: str) -> List[str]:
     if model:
         import numpy as np
         text_emb = model.encode([tl], convert_to_numpy=True)[0]
-        for field, phrases in _FIELD_PROTOTYPES.items():
+        for field, phrases in _get_field_prototypes().items():
             field_embs = model.encode(phrases, convert_to_numpy=True)
             mean_emb = np.mean(field_embs, axis=0)
             sim = float(np.dot(text_emb, mean_emb) /
@@ -1028,19 +894,7 @@ def classify_intent_sync(text: str, candidates: List[str]) -> str:
 def _classify_intent_keyword_fallback(text: str, candidates: List[str]) -> str:
     """Keyword-based intent classification fallback."""
     tl = text.lower()
-    _KEYWORD_MAP = {
-        "property_search": ["apartment", "house", "villa", "rent", "stay", "find",
-                            "search", "looking", "property", "show"],
-        "status_update": ["status", "booking", "check-in", "checkout", "track"],
-        "faq": ["policy", "refund", "cancel", "terms", "rules", "wifi"],
-        "greeting": ["hi", "hello", "hey", "morning", "afternoon", "evening"],
-        "booking": ["book", "reserve", "confirm"],
-        "handoff": ["human", "agent", "person", "support", "representative"],
-        "end": ["bye", "goodbye", "exit", "quit", "done", "close"],
-        "payment": ["pay", "payment", "invoice", "link"],
-        "availability": ["available", "calendar", "dates"],
-        "modification": ["modify", "change", "update", "edit"],
-    }
+    _KEYWORD_MAP = _get_catalog().keyword_fallback_map
     best = candidates[-1] if candidates else "other"
     best_count = 0
     for intent in candidates:
