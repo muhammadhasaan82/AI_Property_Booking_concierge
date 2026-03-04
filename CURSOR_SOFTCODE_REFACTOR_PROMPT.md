@@ -1,4 +1,4 @@
-# Cursor Prompt: Full Soft-Coding Refactor Plan for Hotel_Booking
+# Full Soft-Coding Refactor Plan for Hotel_Booking
 
 You are a senior AI systems refactoring engineer. Your task is to convert this entire repository into a **maximally soft-coded, schema-driven, dynamic logic system** with minimal hardcoded assumptions.
 
@@ -117,7 +117,7 @@ instead of fixed arrays, brittle keyword lists, and regex-heavy routing.
 5. Add compatibility adapter for legacy behavior.
 6. Run full test suite and provide migration notes.
 
-## Output format required from you (Cursor)
+## Output format required from you
 Return:
 1. A concise change summary.
 2. File-by-file diff rationale.
