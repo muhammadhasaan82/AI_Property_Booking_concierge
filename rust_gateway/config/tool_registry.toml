@@ -1,0 +1,18 @@
+# rust_gateway/config/tool_registry.toml
+# Available tools for the gateway to auto-execute
+
+[[tools]]
+name = "property_search"
+description = "Search for available properties"
+
+[[tools]]
+name = "check_status"
+description = "Check the status of a booking"
+
+[[tools]]
+name = "calculate_payment"
+description = "Calculate the amount due for a booking"
+
+[[tools]]
+name = "create_booking"
+description = "Create a new booking reservation"
