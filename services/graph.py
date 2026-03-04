@@ -65,7 +65,10 @@ def node_triage(state: ChatState) -> ChatState:
 
         if ctx["has_booking_context"] and intent == "status_update":
             tl = user_text.lower()
-            explicit = any(k in tl for k in ["booking id", "status", "track", "tracking", "check status"])
+            from services.dynamic_config import get_vocabulary
+            explicit = any(
+                k in tl for k in get_vocabulary().nlp_fallback.status_explicit_keywords
+            )
             ctx["lacks_explicit_status_keywords"] = not explicit
 
         if intent == "confirmation" and ctx["no_selected_property"] and ctx["no_awaiting_field"] and ctx["no_active_selection"]:
@@ -335,7 +338,7 @@ async def run_chat_graph(
     clean_filters = filters or {}
     
     # If this looks like a greeting and we have booking context, clear it
-    if message and message.lower().strip() in ["hi", "hello", "hey", "hi there", "hello there", "hey there"]:
+    if message and nlp_engine.is_greeting(message):
         # Remove any booking-related context that might interfere
         for key in ["awaiting_field", "awaiting_selection_confirm", "receipt_shown"]:
             clean_filters.pop(key, None)
