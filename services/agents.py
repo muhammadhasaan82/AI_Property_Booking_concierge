@@ -322,10 +322,9 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if _is_end(t):
         return "end"
 
-    # Deterministic guardrail: if search results were shown, a numeric/option reply
-    # must route to confirmation, not semantic property_search classification.
-    if active_filters.get("last_results"):
-        if nlp_engine.extract_cardinal(t) is not None or re.search(r"\boption\b", tl):
+    # --- STRICT LIST SELECTION GUARD (Must be BEFORE the LLM call!) ---
+    if (filters or {}).get("last_results"):
+        if _parse_selection_index(t) is not None and "?" not in t and not any(k in t.lower() for k in ["policy", "refund", "cancel", "rules", "faq"]):
             return "confirmation"
 
     # If user is currently deciding on a selected property, keep follow-up
@@ -364,12 +363,6 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         tl = t.lower()
         if not any(p in tl for p in _nlp_fallback().status_resume_phrases):
             return "status_update"
-
-    # Selection indices should not hijack FAQ sentences containing ordinals.
-    if _parse_selection_index(t) is not None and "?" not in t and not any(
-        k in t.lower() for k in _nlp_fallback().selection_faq_blocklist
-    ):
-        return "confirmation"
 
     # NLP-driven and keyword fallback routing (secondary pass — catches LLM misses).
     if _looks_like_property_search(t):
