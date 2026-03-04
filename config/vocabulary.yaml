@@ -1,0 +1,216 @@
+# config/vocabulary.yaml
+# Phrase lists, city fallbacks, amenity synonyms, and slot-filling schema.
+# Edit this file to tune booking flow behavior without changing source code.
+
+version: "1.0"
+
+# ─── Slot-filling schema ───
+slot_filling:
+  required_fields:
+    - name
+    - phone
+    - email
+    - check_in
+    - check_out
+    - guests
+  field_prompts:
+    name: "Please share your full name."
+    phone: "Please share your phone number."
+    email: "Please share your email address."
+    check_in: "What is your check-in date (YYYY-MM-DD)?"
+    check_out: "What is your check-out date (YYYY-MM-DD)?"
+    guests: "How many guests?"
+  modification_prompts:
+    name: "What's the correct full name?"
+    phone: "What's the correct phone number?"
+    email: "What's the correct email address?"
+    check_in: "What's the new check-in date (YYYY-MM-DD)?"
+    check_out: "Please share the new check-out date (YYYY-MM-DD)."
+    guests: "How many guests now?"
+
+# ─── Proceed / Modify phrase lists ───
+proceed_phrases:
+  - "proceed"
+  - "continue"
+  - "receipt"
+  - "total"
+  - "total bill"
+  - "bill"
+  - "show"
+  - "final"
+  - "summary"
+  - "confirm"
+  - "no"
+  - "see"
+  - "see receipt"
+  - "see total"
+  - "show total"
+  - "show receipt"
+  - "go ahead"
+  - "next"
+  - "done"
+  - "updated total"
+  - "yes i want to proceed"
+  - "yes proceed"
+  - "proceed to total"
+  - "proceed to payment"
+  - "show me total bill"
+  - "please show me my total bill"
+  - "i want to proceed"
+  - "i want total bill"
+  - "total bill for payment"
+  - "proceed to total bill"
+  - "payment"
+  - "pay"
+
+modify_phrases:
+  - "modify"
+  - "change"
+  - "edit"
+  - "update"
+  - "adjust"
+  - "more"
+  - "another"
+  - "again"
+  - "i want to make more changes"
+  - "i want make more changes"
+  - "make more changes"
+  - "want to change"
+  - "want to modify"
+  - "i want to change"
+  - "i want to modify"
+  - "tweak"
+  - "fix"
+  - "yes"
+
+# ─── Intent routing keyword lists ───
+faq_fallback_keywords:
+  - "wifi"
+  - "faq"
+  - "policy"
+  - "check-in time"
+  - "rules"
+  - "password"
+  - "refund"
+  - "cancel"
+  - "terms"
+  - "internet"
+
+booking_triggers:
+  - " book "
+  - "reserve"
+  - "hold"
+  - "lock it"
+  - "go ahead"
+  - "confirm it"
+
+status_keywords:
+  - "check in"
+  - "check-in"
+  - "check out"
+  - "check-out"
+  - "status"
+
+payment_keywords:
+  - "pay"
+  - "payment"
+  - "link"
+  - "invoice"
+
+# ─── Fallback cities & aliases ───
+fallback_cities:
+  - "new york"
+  - "los angeles"
+  - "san francisco"
+  - "miami"
+  - "boston"
+  - "chicago"
+  - "seattle"
+  - "austin"
+  - "dallas"
+  - "houston"
+  - "washington"
+  - "washington dc"
+  - "san diego"
+  - "san jose"
+  - "orlando"
+  - "las vegas"
+  - "philadelphia"
+  - "phoenix"
+  - "atlanta"
+
+city_aliases:
+  nyc: "new york"
+  ny: "new york"
+  newyork: "new york"
+  la: "los angeles"
+  losangeles: "los angeles"
+  sf: "san francisco"
+  sanfrancisco: "san francisco"
+  dc: "washington"
+  washingtondc: "washington"
+
+# ─── Property types ───
+seed_property_types:
+  - "condo"
+  - "loft"
+  - "apartment"
+  - "house"
+  - "studio"
+  - "villa"
+  - "townhouse"
+  - "flat"
+  - "cottage"
+  - "bungalow"
+  - "penthouse"
+  - "duplex"
+
+# ─── Amenity synonyms ───
+amenity_synonyms:
+  wifi:
+    - "wifi"
+    - "wi-fi"
+    - "internet"
+    - "wireless"
+  pool:
+    - "pool"
+    - "swimming"
+  parking:
+    - "parking"
+    - "garage"
+    - "car"
+  gym:
+    - "gym"
+    - "fitness"
+    - "workout"
+  kitchen:
+    - "kitchen"
+    - "cooking"
+  ac:
+    - "ac"
+    - "air conditioning"
+    - "air-conditioning"
+    - "cooling"
+  heating:
+    - "heating"
+    - "heater"
+    - "warm"
+  washer:
+    - "washer"
+    - "washing machine"
+    - "laundry"
+  dryer:
+    - "dryer"
+    - "drying"
+  dishwasher:
+    - "dishwasher"
+    - "dishes"
+  balcony:
+    - "balcony"
+    - "terrace"
+    - "patio"
+  view:
+    - "view"
+    - "scenic"
+    - "ocean view"
+    - "city view"

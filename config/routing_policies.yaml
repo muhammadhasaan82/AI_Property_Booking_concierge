@@ -1,0 +1,114 @@
+# config/routing_policies.yaml
+# Declarative routing policies for the graph triage node.
+# Policies are evaluated in priority order (highest first).
+# First matching policy determines the route.
+
+version: "1.0"
+
+policies:
+  # ─── Pre-routing guards ───
+  - id: unsafe_input
+    description: "Block unsafe/injected input"
+    priority: 200
+    condition:
+      is_safe: false
+    route: greeting
+    reply: "I'm here to help with hotel bookings and policy questions. How can I assist you?"
+
+  - id: awaiting_property_flow
+    description: "Property flow follow-ups for unavailable-city handling"
+    priority: 150
+    condition:
+      any_filter_key:
+        - awaiting_unavailable_city_choice
+        - awaiting_city_selection
+        - awaiting_property_type_choice
+    route: property_search
+
+  - id: greeting_priority
+    description: "Greetings always route to greeting handler"
+    priority: 140
+    condition:
+      intent: greeting
+    route: greeting
+
+  - id: awaiting_post_mod_choice
+    description: "After modification, keep in confirmation"
+    priority: 130
+    condition:
+      filter_key: awaiting_post_mod_choice
+    route: confirmation
+
+  # ─── FAQ return guard ───
+  - id: faq_return_guard
+    description: "Return from FAQ to previous flow"
+    priority: 120
+    condition:
+      filter_key: faq_answered
+    route: _faq_return
+    note: "Special handling: pops faq_answered, checks resume keywords"
+
+  # ─── Booking context overrides ───
+  - id: booking_context_field_input
+    description: "In booking context, field input stays in confirmation"
+    priority: 110
+    condition:
+      has_booking_context: true
+      intent: property_search
+      has_field_data: true
+    route: confirmation
+
+  - id: booking_context_awaiting_field
+    description: "Awaiting specific field, keep in confirmation"
+    priority: 105
+    condition:
+      has_booking_context: true
+      intent: property_search
+      awaiting_field_in:
+        - name
+        - phone
+        - email
+        - check_in
+        - check_out
+        - guests
+        - modification
+        - modification_choice
+        - location
+    route: confirmation
+
+  - id: booking_context_not_status
+    description: "In booking context, avoid accidental status routing"
+    priority: 100
+    condition:
+      has_booking_context: true
+      intent: status_update
+      lacks_explicit_status_keywords: true
+    route: confirmation
+
+  # ─── Orphaned affirmation guard ───
+  - id: orphaned_affirmation_guard
+    description: "Prevent yes/ok after greeting from triggering booking"
+    priority: 90
+    condition:
+      intent: confirmation
+      no_selected_property: true
+      no_awaiting_field: true
+      no_active_selection: true
+    route: greeting
+
+  # ─── Status intent with booking_id extraction ───
+  - id: status_with_booking_id
+    description: "Status intent extracts booking_id from text"
+    priority: 80
+    condition:
+      intent: status_update
+    route: status_update
+    extract: booking_id
+
+  # ─── Default: route by intent ───
+  - id: default_route
+    description: "Route based on classified intent"
+    priority: 0
+    condition:
+      always: true
+    route: _from_intent
