@@ -31,6 +31,43 @@ impl std::fmt::Display for InferredIntent {
     }
 }
 
+use serde::Deserialize;
+use std::fs;
+use std::sync::OnceLock;
+
+#[derive(Debug, Deserialize)]
+struct IntentFeatureConfig {
+    keys: Option<Vec<String>>,
+    keywords: Option<Vec<String>>,
+    weight: f64,
+    base_score: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IntentsConfig {
+    search: IntentFeatureConfig,
+    booking: IntentFeatureConfig,
+    status: IntentFeatureConfig,
+    payment: IntentFeatureConfig,
+    faq: IntentFeatureConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct GatewayConfig {
+    intents: IntentsConfig,
+}
+
+fn get_config() -> &'static GatewayConfig {
+    static CONFIG: OnceLock<GatewayConfig> = OnceLock::new();
+    CONFIG.get_or_init(|| {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+        let config_path = format!("{}/config/intent_features.toml", manifest_dir);
+        let config_str = fs::read_to_string(&config_path)
+            .unwrap_or_else(|_| panic!("Failed to read {}", config_path));
+        toml::from_str(&config_str).expect("Failed to parse intent_features.toml")
+    })
+}
+
 /// Infer intent from the keys present in raw JSON data.
 pub fn infer_intent(data: &Value) -> InferredIntent {
     // Explicit intent override
@@ -60,44 +97,39 @@ pub fn infer_intent(data: &Value) -> InferredIntent {
         return InferredIntent::Sentiment;
     }
 
-    // Score each intent based on key presence
+    let config = get_config();
     let mut scores: Vec<(InferredIntent, f64)> = Vec::new();
 
-    // Search signals
-    let search_keys = ["location", "city", "budget", "beds", "amenities", "property_type", "query_text"];
-    let search_score: f64 = search_keys.iter()
-        .filter(|k| data.get(**k).is_some())
-        .count() as f64 * 0.2;
+    // Helper to score based on key presence
+    let score_keys = |cfg: &IntentFeatureConfig| -> f64 {
+        if let Some(keys) = &cfg.keys {
+            let count = keys.iter().filter(|k| data.get(*k).is_some()).count();
+            (count as f64) * cfg.weight + cfg.base_score.unwrap_or(0.0)
+        } else {
+            0.0
+        }
+    };
+
+    let search_score = score_keys(&config.intents.search);
     if search_score > 0.0 { scores.push((InferredIntent::Search, search_score)); }
 
-    // Booking signals
-    let booking_keys = ["property_id", "check_in", "check_out", "user_id", "guests", "name", "email", "phone"];
-    let booking_score: f64 = booking_keys.iter()
-        .filter(|k| data.get(**k).is_some())
-        .count() as f64 * 0.15;
+    let booking_score = score_keys(&config.intents.booking);
     if booking_score > 0.0 { scores.push((InferredIntent::Booking, booking_score)); }
 
-    // Status signals
-    let status_keys = ["booking_id", "status", "tracking"];
-    let status_score: f64 = status_keys.iter()
-        .filter(|k| data.get(**k).is_some())
-        .count() as f64 * 0.35;
+    let status_score = score_keys(&config.intents.status);
     if status_score > 0.0 { scores.push((InferredIntent::Status, status_score)); }
 
-    // Payment signals
-    let payment_keys = ["amount", "currency", "payment_method", "payment_id"];
-    let payment_score: f64 = payment_keys.iter()
-        .filter(|k| data.get(**k).is_some())
-        .count() as f64 * 0.25;
+    let payment_score = score_keys(&config.intents.payment);
     if payment_score > 0.0 { scores.push((InferredIntent::Payment, payment_score)); }
 
     // FAQ signals
     if let Some(q) = data.get("question").and_then(|v| v.as_str()) {
-        let faq_words = ["policy", "refund", "cancel", "wifi", "rule", "check-in", "checkout", "terms"];
-        let faq_score: f64 = faq_words.iter()
-            .filter(|w| q.to_lowercase().contains(*w))
-            .count() as f64 * 0.3 + 0.2;
-        scores.push((InferredIntent::Faq, faq_score));
+        let q_lower = q.to_lowercase();
+        if let Some(keywords) = &config.intents.faq.keywords {
+            let count = keywords.iter().filter(|w| q_lower.contains(*w)).count();
+            let faq_score = (count as f64) * config.intents.faq.weight + config.intents.faq.base_score.unwrap_or(0.0);
+            scores.push((InferredIntent::Faq, faq_score));
+        }
     }
 
     // Select highest-scoring intent
