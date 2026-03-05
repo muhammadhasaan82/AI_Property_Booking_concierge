@@ -665,6 +665,21 @@ def extract_cardinal(text: str) -> Optional[int]:
     return None
 
 
+def has_cardinal_extraction(text: str) -> bool:
+    """Return True when the utterance contains a valid selection cardinal."""
+    return extract_cardinal(text) is not None
+
+
+def is_low_semantic_density(text: str) -> bool:
+    """Treat cardinal-only replies as low-information until state gives them meaning."""
+    if not text or not text.strip():
+        return True
+    tl = text.strip().lower()
+    if has_cardinal_extraction(tl) and not re.search(r"[a-z]", tl):
+        return True
+    return False
+
+
 def extract_guests(text: str) -> Optional[int]:
     """Extract guest count from text."""
     if not text:
@@ -727,6 +742,8 @@ def extract_booking_id(text: str) -> Optional[str]:
 def detect_requested_fields(text: str) -> List[str]:
     """Detect which booking fields the user wants to modify."""
     if not text:
+        return []
+    if is_low_semantic_density(text):
         return []
     tl = text.lower()
     fields: List[str] = []
@@ -851,6 +868,14 @@ async def extract_dates_async(text: str) -> List[str]:
 
 async def extract_cardinal_async(text: str) -> Optional[int]:
     return await asyncio.to_thread(extract_cardinal, text)
+
+
+async def has_cardinal_extraction_async(text: str) -> bool:
+    return await asyncio.to_thread(has_cardinal_extraction, text)
+
+
+async def is_low_semantic_density_async(text: str) -> bool:
+    return await asyncio.to_thread(is_low_semantic_density, text)
 
 async def classify_intent_async(text: str, candidates: List[str]) -> str:
     return await asyncio.to_thread(classify_intent_sync, text, candidates)

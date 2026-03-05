@@ -33,7 +33,7 @@ from .db_logging import (
     get_successful_booking_status,
 )
 import services.config as config
-from .dynamic_config import get_vocabulary
+from .dynamic_config import get_routing_policies, get_vocabulary
 from .state_keys import SK, STATE_KEYS
 
 # -----------------------
@@ -72,6 +72,8 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
     context = {
         "has_selected_property": bool((filters or {}).get(SK.selected_property)),
         "has_booking_progress": any((filters or {}).get(k) for k in config.REQUIRED_FIELDS),
+        "has_last_results": bool((filters or {}).get("last_results")),
+        "last_results_count": len((filters or {}).get("last_results") or []),
         SK.awaiting_field: (filters or {}).get(SK.awaiting_field),
         SK.receipt_shown: bool((filters or {}).get(SK.receipt_shown)),
     }
@@ -95,6 +97,8 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
                     "- 'confirmation' = user is selecting a numbered option (e.g. 'option 3', 'go for number 5', "
                     "'I will take the second one'), providing booking details (name, phone, email, dates, guests), "
                     "or affirming/declining a booking step (yes/no in booking context).\n"
+                    "- If context says the user is currently viewing a list of properties, any numeric reply or selection phrase is 'confirmation'.\n"
+                    "- If the message is only a number and there is NO active property list in context, do NOT classify it as 'confirmation'.\n"
                     "- 'property_search' = user is looking for a place or asking about properties. If they say 'hello I need a loft in NYC', it is 'property_search', NOT 'greeting'.\n"
                     "- 'greeting' = ONLY pure greetings like 'hi', 'hello', 'hey', 'good morning' with NO other intent.\n"
                     "- If the message contains ANY reference to selecting an option number, it is 'confirmation', NOT 'greeting'.\n"
@@ -138,6 +142,57 @@ def _vocab():
 
 def _nlp_fallback():
     return _vocab().nlp_fallback
+
+
+def _apply_contextual_triage_policies(
+    user_text: str,
+    filters: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Evaluate soft-coded routing rules that rely only on current text + state."""
+    active_filters = filters or {}
+    awaiting_field = active_filters.get(SK.awaiting_field)
+    has_cardinal = nlp_engine.has_cardinal_extraction(user_text or "")
+    no_selected_property = not active_filters.get(SK.selected_property)
+    no_awaiting_field = not active_filters.get(SK.awaiting_field)
+
+    for policy in get_routing_policies().sorted_policies:
+        cond = policy.condition
+
+        # Pre-LLM guard only evaluates conditions that do not depend on a prior intent.
+        if (
+            cond.intent is not None
+            or cond.intent_in is not None
+            or cond.always
+            or cond.is_safe is not None
+            or cond.has_booking_context is not None
+            or cond.has_field_data is not None
+            or cond.lacks_explicit_status_keywords is not None
+            or cond.no_active_selection is not None
+        ):
+            continue
+
+        match = True
+        if cond.filter_key is not None and not active_filters.get(cond.filter_key):
+            match = False
+        if cond.any_filter_key is not None and not any(active_filters.get(k) for k in cond.any_filter_key):
+            match = False
+        if cond.has_context_key is not None and not active_filters.get(cond.has_context_key):
+            match = False
+        if cond.lacks_context_key is not None and active_filters.get(cond.lacks_context_key):
+            match = False
+        if cond.awaiting_field_in is not None and awaiting_field not in cond.awaiting_field_in:
+            match = False
+        if cond.requires_cardinal_extraction is not None and cond.requires_cardinal_extraction != has_cardinal:
+            match = False
+        if cond.no_selected_property is not None and cond.no_selected_property != no_selected_property:
+            match = False
+        if cond.no_awaiting_field is not None and cond.no_awaiting_field != no_awaiting_field:
+            match = False
+
+        if match and policy.route not in {"_from_intent", "_faq_return"}:
+            return policy.route
+
+    return None
 
 
 def _classify_proceed_or_modify(user_text: str) -> str | None:
@@ -315,6 +370,13 @@ def _detect_requested_fields(t: str) -> List[str]:
 
 
 
+def _is_contextual_guest_input(user_text: str, filters: Optional[Dict[str, Any]] = None) -> bool:
+    tl = (user_text or "").lower()
+    if (filters or {}).get(SK.awaiting_field) == "guests":
+        return True
+    return any(term in tl for term in _nlp_fallback().guest_context_terms)
+
+
 def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> str:
     t = user_text or ""
     active_filters = filters or {}
@@ -325,11 +387,6 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         return "greeting"
     if _is_end(t):
         return "end"
-
-    # --- STRICT LIST SELECTION GUARD (Must be BEFORE the LLM call!) ---
-    if (filters or {}).get("last_results"):
-        if _parse_selection_index(t) is not None and "?" not in t and not any(k in t.lower() for k in ["policy", "refund", "cancel", "rules", "faq"]):
-            return "confirmation"
 
     # If user is currently deciding on a selected property, keep follow-up
     # turns in confirmation for yes/no, reselection, or "back to list" requests.
@@ -345,6 +402,9 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if _is_ack(t):
         return "confirmation"
 
+    policy_route = _apply_contextual_triage_policies(t, active_filters)
+    if policy_route:
+        return policy_route
 
     # Soft-coded LLM intent router (prioritized as requested by user to be super soft-coded).
     llm_intent = _llm_route_intent(t, filters)
@@ -387,7 +447,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
 
     if (_EMAIL_PAT.search(t) or _DATE_PAT.search(t) or _parse_phone(t) is not None or
         _parse_name(t) is not None or _is_yes(t) or _is_no(t) or
-        _parse_guests(t) is not None or _parse_selection_index(t) is not None):
+        (_parse_guests(t) is not None and _is_contextual_guest_input(t, active_filters))):
         return "confirmation"
 
     vocab = _vocab()
