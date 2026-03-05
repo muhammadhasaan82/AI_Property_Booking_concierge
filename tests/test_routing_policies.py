@@ -1,5 +1,6 @@
 import pytest
 from services.graph import node_triage, ChatState
+from services.state_keys import SK
 
 def test_triage_routing_greeting():
     # Greetings should always be routed to greeting
@@ -11,7 +12,7 @@ def test_triage_routing_booking_context_with_fields():
     # If in booking context and providing names, etc., it should be confirmation
     state: ChatState = {
         "user_text": "John Doe",
-        "filters": {"recent_property_id": "123", "awaiting_field": "name"}
+        "filters": {SK.recent_property_id: "123", SK.awaiting_field: "name"}
     }
     res = node_triage(state)
     assert res["intent"] == "confirmation"
@@ -20,11 +21,11 @@ def test_triage_faq_return():
     # After an FAQ is answered, we should resume the previous intent (usually confirmation/property_search)
     state: ChatState = {
         "user_text": "ok sounds good",
-        "filters": {"faq_answered": True, "faq_resume_intent": "confirmation"}
+        "filters": {SK.faq_answered: True, SK.faq_resume_intent: "confirmation"}
     }
     res = node_triage(state)
     assert res["intent"] == "confirmation"
-    assert not res["filters"].get("faq_answered")
+    assert not res["filters"].get(SK.faq_answered)
 
 def test_triage_status_extraction():
     # Should extract a booking ID automatically if present

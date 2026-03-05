@@ -1,28 +1,9 @@
-# NLP & RAG threshold configuration
-# These values were previously hardcoded across multiple Python files.
-# Centralizing them here allows tuning without code changes.
-
 nlp:
-  # Fuzzy match thresholds for city detection (nlp_extractor.py)
-  fuzzy_match_strict: 0.93 # Exact n-gram match confidence
-  fuzzy_match_high: 0.90 # High-confidence fuzzy match
-  fuzzy_match_medium: 0.88 # Medium-confidence fuzzy match
-  fuzzy_match_low: 0.78 # Low-confidence fuzzy match (property types)
+  fuzzy_match_strict: 0.93
+  fuzzy_match_high: 0.90
+  fuzzy_match_medium: 0.88
+  fuzzy_match_low: 0.78
 
 faq:
-  # Confidence thresholds for FAQ answers (faq_enhanced.py)
-  high_confidence: 0.7 # Score >= this → high confidence answer
-  low_confidence: 0.4 # Score >= this → medium confidence answer
-
-rag:
-  # RAG pipeline hyperparameters (rag_pipeline.py)
-  rrf_constant: 60 # Reciprocal Rank Fusion constant
-  vector_k: 6 # Number of vector search results
-  bm25_k: 6 # Number of BM25 search results
-  max_context_chars: 1500 # Max chars for context compression
-  grounding_threshold: 0.4 # Minimum grounding score (verify_grounding)
-
-retrieval:
-  # Retrieval.py settings
-  top_k: 10 # Top-k results from retrieval
-  truncation: 5 # Results truncation limit
+  high_confidence: 0.7
+  low_confidence: 0.4

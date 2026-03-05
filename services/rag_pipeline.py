@@ -41,9 +41,9 @@ EMBED_NORMALIZE = True
 
 
 def _rag_thresholds():
-    """Load RAG thresholds from config/thresholds.yaml."""
-    from services.dynamic_config import get_thresholds
-    return get_thresholds().rag
+    """Load RAG settings from config/retrieval.yaml."""
+    from services.dynamic_config import get_retrieval_config
+    return get_retrieval_config().rag
 
 # ---------------------------------------------------------------------------
 # Lazy-loaded models (avoid import-time downloads)
@@ -122,7 +122,7 @@ def rewrite_query(user_text: str) -> str:
 # ---------------------------------------------------------------------------
 # 2. BM25 Keyword Search
 # ---------------------------------------------------------------------------
-def bm25_search(query: str, corpus: List[str], k: int = 6) -> List[Tuple[int, float]]:
+def bm25_search(query: str, corpus: List[str], k: Optional[int] = None) -> List[Tuple[int, float]]:
     """Run BM25 over a list of text chunks.
 
     Returns list of (index, score) sorted descending by score.
@@ -136,6 +136,8 @@ def bm25_search(query: str, corpus: List[str], k: int = 6) -> List[Tuple[int, fl
     if not corpus:
         return []
 
+    if k is None:
+        k = _rag_thresholds().bm25_k
     tokenized = [doc.lower().split() for doc in corpus]
     bm25 = BM25Okapi(tokenized)
     scores = bm25.get_scores(query.lower().split())

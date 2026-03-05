@@ -9,7 +9,6 @@ from typing import Dict, Any, List, Optional, Callable
 import httpx
 from dotenv import load_dotenv
 from .tracing import span
-from functools import lru_cache
 import logging
 
 logger = logging.getLogger(__name__)
@@ -23,7 +22,7 @@ from .booking import (
 )
 from .faq import faq_lookup
 from .faq_enhanced import enhanced_faq_agent, initialize_faq_system
-from .confirmation_helpers import _render_receipt
+from services import confirmation_helpers
 from .whatsapp import send_payment_link_async
 from .nlp_extractor import extract_filters, extract_property_type, KNOWN_CITIES, CITY_ALIASES
 from . import nlp_engine
@@ -34,6 +33,7 @@ from .db_logging import (
 )
 import services.config as config
 from .dynamic_config import get_vocabulary
+from .state_keys import SK, STATE_KEYS
 
 # -----------------------
 # Load env
@@ -70,7 +70,7 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
 
     context = {
         "has_selected_property": bool((filters or {}).get(SK.selected_property)),
-        "has_booking_progress": any((filters or {}).get(k) for k in ["name", "phone", "email", "check_in", "check_out", "guests"]),
+        "has_booking_progress": any((filters or {}).get(k) for k in config.REQUIRED_FIELDS),
         SK.awaiting_field: (filters or {}).get(SK.awaiting_field),
         SK.receipt_shown: bool((filters or {}).get(SK.receipt_shown)),
     }
@@ -662,7 +662,7 @@ def greeting_agent(filters: Dict[str, Any], user_text: str = "") -> Dict[str, An
 
     return {"reply": f"Hi there! 👋 I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
 
-async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
+async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     """
     Selection + slot fill → receipt → final yes/no
     - shows a full property card on selection
@@ -710,7 +710,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
         
         # If user asks for total bill or receipt again
         if nlp_engine.is_receipt_request(user_text):
-            receipt = _render_receipt(persisted)
+            receipt = confirmation_helpers._render_receipt(persisted)
             return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
 
     # If we're in any modification sub-flow, ensure post-cancel choice doesn't interfere
@@ -726,7 +726,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
         if tl.strip() == "yes":
             persisted.pop(SK.awaiting_post_mod_choice, None)
             persisted.pop(SK.awaiting_post_cancel_choice, None)
-            receipt = _render_receipt(persisted)
+            receipt = confirmation_helpers._render_receipt(persisted)
             persisted[SK.receipt_shown] = True
             return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
         
@@ -734,15 +734,12 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
             persisted.pop(SK.awaiting_post_mod_choice, None)
             persisted.pop(SK.awaiting_post_cancel_choice, None)
             # Ensure all required fields are present before rendering receipt; otherwise ask for the next missing field
-            required=["name","phone","email","check_in","check_out","guests",SK.selected_property]
-            for rk in ["name","phone","email","check_in","check_out","guests"]:
+            required=[*config.REQUIRED_FIELDS, SK.selected_property]
+            for rk in config.REQUIRED_FIELDS:
                 if not persisted.get(rk):
                     persisted[SK.awaiting_field]=rk
                     return {"reply": _slot_prompt(rk), "filters": persisted, "tool_result": {"ok": False, "need": [rk]}}
-            # Render the updated receipt
-            receipt = _render_receipt(persisted)
-            persisted[SK.receipt_shown] = True
-            return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
+            return confirmation_helpers._try_show_receipt(persisted)
 
         if any(p in tl for p in modify_phrases):
             persisted.pop(SK.awaiting_post_mod_choice, None)
@@ -757,14 +754,11 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
         # If user didn't answer clearly, and we're not in modification mode, proceed to receipt automatically
         if not persisted.get(SK.modifying_dates):
             # Ensure required fields, else ask for next missing
-            for rk in ["name","phone","email","check_in","check_out","guests"]:
+            for rk in config.REQUIRED_FIELDS:
                 if not persisted.get(rk):
                     persisted[SK.awaiting_field]=rk
                     return {"reply": _slot_prompt(rk), "filters": persisted, "tool_result": {"ok": False, "need": [rk]}}
-            # Render receipt
-            receipt = _render_receipt(persisted)
-            persisted[SK.receipt_shown] = True
-            return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
+            return confirmation_helpers._try_show_receipt(persisted)
 
         return {
             "reply": "Would you like to proceed to the updated receipt, or make another change?",
@@ -778,7 +772,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
             "location","city","budget","amenities","beds",
             "results_index_map","last_results","results",
             # Keep user-provided details to avoid losing context
-            "name","phone","email","check_in","check_out","guests"
+            *config.REQUIRED_FIELDS,
         ]
         reset = {k:v for k,v in persisted.items() if k in keep_keys}
         # Clear any selection-specific flags
@@ -825,12 +819,9 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
             SK.awaiting_field: None,
         })
         # If all required booking fields are already present, show the final receipt immediately
-        required = ["name","phone","email","check_in","check_out","guests"]
+        required = list(config.REQUIRED_FIELDS)
         if all(persisted.get(k) for k in required):
-            # Build and return receipt
-            receipt = _render_receipt(persisted)
-            persisted[SK.receipt_shown]=True
-            return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
+            return confirmation_helpers._try_show_receipt(persisted)
         # Otherwise, ask for a quick confirmation on the selected property
         return {
             "reply": f"🏠 Selected:\n\n{card}\n\nWould you like to book this one? (yes/no)",
@@ -887,12 +878,10 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
         if sel is None and _is_yes(user_text):
             persisted[SK.awaiting_selection_confirm] = False
             # If we already have required fields, show receipt directly; otherwise ask for next missing
-            required=["name","phone","email","check_in","check_out","guests"]
+            required=list(config.REQUIRED_FIELDS)
             missing=[k for k in required if not persisted.get(k)]
             if not missing:
-                receipt = _render_receipt(persisted)
-                persisted[SK.receipt_shown]=True
-                return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
+                return confirmation_helpers._try_show_receipt(persisted)
             # Ask for the next missing field
             nxt=missing[0]
             persisted[SK.awaiting_field]=nxt
@@ -1284,7 +1273,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
         # If location change requested, route to search but preserve details
         if "location" in requested:
             keep_keys = [
-                "name","phone","email","check_in","check_out","guests","budget","amenities","beds"
+                *config.REQUIRED_FIELDS, "budget", "amenities", "beds"
             ]
             reset = {k:v for k,v in persisted.items() if k in keep_keys}
             return {
@@ -1295,7 +1284,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
         # If property change requested, route back to search
         if "property" in requested:
             keep_keys = [
-                "name","phone","email","check_in","check_out","guests","budget","amenities","beds","location","city"
+                *config.REQUIRED_FIELDS, "budget", "amenities", "beds", "location", "city"
             ]
             reset = {k:v for k,v in persisted.items() if k in keep_keys}
             return {
@@ -1459,7 +1448,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
 
             if direct_update_applied:
                 # Re-render receipt with updated values
-                receipt = _render_receipt(persisted)
+                receipt = confirmation_helpers._render_receipt(persisted)
                 # Ensure no lingering modification prompt flags remain when rendering receipt
                 persisted[SK.receipt_shown] = True
                 persisted[SK.awaiting_field] = None
@@ -1468,7 +1457,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
                 return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
         # If a targeted field was just updated, immediately re-render the receipt with the new values
         if just_applied_field_update:
-            receipt = _render_receipt(persisted)
+            receipt = confirmation_helpers._render_receipt(persisted)
             # Ensure no lingering modification prompt flags remain when rendering receipt
             persisted[SK.receipt_shown] = True
             persisted[SK.awaiting_field] = None
@@ -1489,7 +1478,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
                 keep_keys = [
                     "location","city","budget","amenities","beds",
                     "results_index_map","last_results","results",
-                    "name","phone","email","check_in","check_out","guests"
+                    *config.REQUIRED_FIELDS,
                 ]
                 reset = {k:v for k,v in persisted.items() if k in keep_keys}
                 for k in [SK.recent_selection_index,SK.recent_property_id,SK.selected_property,SK.awaiting_selection_confirm,SK.awaiting_field,SK.receipt_shown]:
@@ -1605,11 +1594,9 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
         # Allow direct inline updates even when receipt isn't currently shown, if we just updated a field and all data is present
         # This makes the UX consistent after cancellation + modification
     if not persisted.get(SK.receipt_shown) and just_applied_field_update:
-        required=["name","phone","email","check_in","check_out","guests",SK.selected_property]
+        required=[*config.REQUIRED_FIELDS, SK.selected_property]
         if all(persisted.get(k) for k in required):
-            receipt = _render_receipt(persisted)
-            persisted[SK.receipt_shown] = True
-            return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
+            return confirmation_helpers._try_show_receipt(persisted)
 
         # Branch: user wants to search different properties after seeing receipt
         if _wants_property_search_request(user_text):
@@ -1618,7 +1605,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
                 "location","city","budget","amenities","beds",
                 "results_index_map","last_results","results",
                 # Preserve user-provided details
-                "name","phone","email","check_in","check_out","guests"
+                *config.REQUIRED_FIELDS,
             ]
             reset = {k:v for k,v in persisted.items() if k in keep_keys}
             reset.pop(SK.recent_selection_index, None)
@@ -1694,7 +1681,7 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
                 "filters": persisted}
 
     # Ask next missing field (with awaiting_field marker)
-    required=["name","phone","email","check_in","check_out","guests"]
+    required=list(config.REQUIRED_FIELDS)
     for k in required:
         if not persisted.get(k):
             persisted[SK.awaiting_field]=k
@@ -1703,16 +1690,17 @@ async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[st
 
     # Build receipt only when it has not already been shown in this state.
     if not persisted.get(SK.receipt_shown):
-        receipt = _render_receipt(persisted)
-        persisted[SK.receipt_shown]=True
-        persisted[SK.awaiting_field]=None
-        return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
+        return confirmation_helpers._try_show_receipt(persisted)
 
     # Receipt was already shown but message was not strongly classified.
     return {
         "reply": "I want to make sure I get this right. Please reply with a clear 'yes' to confirm and proceed with payment, or 'no' to cancel and modify.",
         "filters": persisted,
     }
+
+
+async def confirmation_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
+    return await _confirmation_agent_impl(user_text, filters)
 
 def faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """Enhanced FAQ agent that uses semantic search on policy documents"""
@@ -1849,7 +1837,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
                 nights = max(1, (co-ci).days)
             except Exception:
                 pass
-            selected = (args.get('selected_property') or {})
+            selected = (args.get(SK.selected_property) or {})
             price = selected.get('price_per_night') or 0
             total = float(price or 0) * float(nights or 1)
             prop_title = selected.get('title') or 'Property'
@@ -1872,7 +1860,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
                 "total_amount": total,
                 "payment": "TRUE",  # mark paid on success; adjust if you add real payments
             }
-            insert_booking_details(row)
+            await insert_booking_details(row)
             # Persist successful bookings in a dedicated table for status checks via chat.
             successful_row = {
                 "booking_id": booking_code if booking_code else str(r.get("booking_id") or ""),
@@ -1891,7 +1879,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
                 "payment_url": r.get("payment_url"),
                 "source": str(r.get("note") or "db"),
             }
-            insert_successful_booking(successful_row)
+            await insert_successful_booking(successful_row)
         except Exception:
             pass
     else:
@@ -1963,7 +1951,7 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
             co = r.get("check_out") or "?"
             return {"tool_result": r, "reply": f"Booking {booking_id}: **{s_human}**\n- Check-in: {ci}\n- Check-out: {co}\n\nWould you like to ask anything else or end this chat session? (say 'end' to close)"}
 
-        db_row = get_successful_booking_status(str(booking_id))
+        db_row = await get_successful_booking_status(str(booking_id))
         if db_row:
             s = str(db_row.get("status") or "confirmed")
             s_human = s.replace("_", " ")
@@ -2020,10 +2008,10 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         )
 
     # Step 1: follow-up after unavailable city prompt
-    if clean_filters.get("awaiting_unavailable_city_choice"):
+    if clean_filters.get(SK.awaiting_unavailable_city_choice):
         if _is_yes(user_text):
-            extracted["awaiting_unavailable_city_choice"] = False
-            extracted["awaiting_city_selection"] = True
+            extracted[SK.awaiting_unavailable_city_choice] = False
+            extracted[SK.awaiting_city_selection] = True
             return {
                 "results": [],
                 "filters": extracted,
@@ -2034,9 +2022,9 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
                 ),
             }
         if _is_no(user_text):
-            extracted.pop("awaiting_unavailable_city_choice", None)
-            extracted.pop("awaiting_city_selection", None)
-            extracted.pop("awaiting_property_type_choice", None)
+            extracted.pop(SK.awaiting_unavailable_city_choice, None)
+            extracted.pop(SK.awaiting_city_selection, None)
+            extracted.pop(SK.awaiting_property_type_choice, None)
             return {
                 "results": [],
                 "filters": extracted,
@@ -2050,12 +2038,12 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         }
 
     # Step 2: user is selecting a city from shown list
-    if clean_filters.get("awaiting_city_selection"):
+    if clean_filters.get(SK.awaiting_city_selection):
         if _is_no(user_text) or any(
             p in user_tl for p in _nlp_fallback().unavailable_city_decline_phrases
         ):
-            extracted.pop("awaiting_city_selection", None)
-            extracted.pop("awaiting_property_type_choice", None)
+            extracted.pop(SK.awaiting_city_selection, None)
+            extracted.pop(SK.awaiting_property_type_choice, None)
             return {
                 "results": [],
                 "filters": extracted,
@@ -2074,8 +2062,8 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
             }
         extracted["location"] = city_pick
         extracted["city"] = city_pick
-        extracted["awaiting_city_selection"] = False
-        extracted["awaiting_property_type_choice"] = True
+        extracted[SK.awaiting_city_selection] = False
+        extracted[SK.awaiting_property_type_choice] = True
         return {
             "results": [],
             "filters": extracted,
@@ -2086,7 +2074,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         }
 
     # Step 3: ask property type after city selection, then search
-    if clean_filters.get("awaiting_property_type_choice"):
+    if clean_filters.get(SK.awaiting_property_type_choice):
         if not prop_type and not any(p in user_tl for p in _nlp_fallback().property_type_any_phrases):
             return {
                 "results": [],
@@ -2096,7 +2084,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
                     "or say 'any'."
                 ),
             }
-        extracted["awaiting_property_type_choice"] = False
+        extracted[SK.awaiting_property_type_choice] = False
         if prop_type:
             extracted["property_type"] = prop_type
 
@@ -2122,9 +2110,9 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
 
         if candidate:
             extracted["requested_unavailable_city"] = candidate
-            extracted["awaiting_unavailable_city_choice"] = True
-            extracted.pop("awaiting_city_selection", None)
-            extracted.pop("awaiting_property_type_choice", None)
+            extracted[SK.awaiting_unavailable_city_choice] = True
+            extracted.pop(SK.awaiting_city_selection, None)
+            extracted.pop(SK.awaiting_property_type_choice, None)
             return {"results": [], "reply": _unavailable_city_reply(), "filters": extracted}
 
     enhanced = f"{prop_type} {user_text}" if prop_type else user_text
@@ -2134,7 +2122,6 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     try:
         from .rust_client import search_properties
         from .search import _DATASET
-        from .state_keys import SK
 
         rust_result = await search_properties(
             location=requested_city or "",
@@ -2166,7 +2153,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
 
     # If city is known/requested but no listings, trigger unavailable-city flow.
     if requested_city and not results:
-        extracted["awaiting_unavailable_city_choice"] = True
+        extracted[SK.awaiting_unavailable_city_choice] = True
         return {"results": [], "reply": _unavailable_city_reply(), "filters": extracted}
 
     max_display = min(len(results), 15)
@@ -2174,9 +2161,9 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     extracted.update({
         "results_index_map": index_map,
         "last_results": results[:max_display],
-        "awaiting_unavailable_city_choice": False,
-        "awaiting_city_selection": False,
-        "awaiting_property_type_choice": False,
+        SK.awaiting_unavailable_city_choice: False,
+        SK.awaiting_city_selection: False,
+        SK.awaiting_property_type_choice: False,
     })
 
     stream = bool(filters.get("stream", False))

@@ -5,6 +5,7 @@ import json
 import threading
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+from services.dynamic_config import get_retrieval_config
 
 # ---------- Config ----------
 CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma")
@@ -25,6 +26,10 @@ except Exception as _e:
 _properties_file = Path(CHROMA_DIR) / "properties.json"
 _properties_data: List[Dict] = []
 _properties_lock = threading.RLock()
+
+
+def _retrieval_runtime():
+    return get_retrieval_config().retrieval
 
 def _load_properties():
     global _properties_data
@@ -204,7 +209,7 @@ def bulk_upsert(properties: List[Dict]) -> None:
 
 def query_properties(
     query_text: str,
-    k: int = 10,
+    k: Optional[int] = None,
     budget: Optional[float] = None,
     city: Optional[str] = None,
     beds: Optional[int] = None,
@@ -215,6 +220,10 @@ def query_properties(
     Filters (budget/city/beds/amenities) are applied on metadata after retrieval.
     Returns up to 5 compact dicts with basic fields + snippet + score.
     """
+    runtime = _retrieval_runtime()
+    if k is None:
+        k = runtime.top_k
+
     # ---------- Vector mode ----------
     if _init_vector_mode():
         try:
@@ -256,7 +265,7 @@ def query_properties(
             items = _apply_filters(items, budget=budget, city=city, beds=beds, amenities=amenities)
             # Sort by score descending & truncate to 5
             items.sort(key=lambda x: x.get("score", 0), reverse=True)
-            return items[:5]
+            return items[:runtime.result_limit]
         except Exception as e:
             print(f"[retrieval] vector query error (fallback to JSON): {e}")
 
@@ -276,22 +285,23 @@ def query_properties(
             "document": prop.get("document", ""),
         })
 
-    # crude scoring
+    # Config-driven heuristic scoring for JSON fallback mode
     q = (query_text or "").lower()
+    weights = runtime.scoring_weights
     scored: List[Tuple[float, Dict]] = []
     for p in filtered:
         score = 0.0
         doc = p.get("document", "") or ""
         title = p.get("title", "") or ""
         if q and q in doc.lower():
-            score += 1.0
+            score += weights.exact_doc
         if q and q in title.lower():
-            score += 2.0
+            score += weights.exact_title
         for w in q.split():
             if w in doc.lower():
-                score += 0.5
+                score += weights.token_doc
             if w in title.lower():
-                score += 1.0
+                score += weights.token_title
         if score > 0.0:
             p2 = p.copy()
             p2["snippet"] = doc[:240] + ("..." if len(doc) > 240 else "")
@@ -301,7 +311,7 @@ def query_properties(
     # apply filters and sort
     out = [p for _, p in sorted(scored, key=lambda x: x[0], reverse=True)]
     out = _apply_filters(out, budget=budget, city=city, beds=beds, amenities=amenities)
-    return out[:5]
+    return out[:runtime.result_limit]
 
 # ---------- Helpers ----------
 # In query_properties function, update the filter logic:

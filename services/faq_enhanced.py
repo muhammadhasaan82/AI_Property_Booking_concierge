@@ -160,6 +160,7 @@ class FAQService:
             rewrite_query, hybrid_retrieve, rerank,
             compress_context, verify_grounding, get_cag_cache,
         )
+        from .dynamic_config import get_retrieval_config
 
         # --- CAG: check cache first ---
         cache = get_cag_cache()
@@ -177,7 +178,8 @@ class FAQService:
         rewritten = rewrite_query(question)
 
         # --- Hybrid retrieval (vector + BM25 via RRF) ---
-        hybrid_results = hybrid_retrieve(self._vector_store, rewritten, k=6)
+        rag_cfg = get_retrieval_config().rag
+        hybrid_results = hybrid_retrieve(self._vector_store, rewritten, k=rag_cfg.vector_k)
 
         if not hybrid_results:
             # Fallback to plain vector search
@@ -224,8 +226,7 @@ class FAQService:
 
         # --- Answer grounding verification ---
         answer, grounding_score = verify_grounding(answer, raw_chunks)
-        from .dynamic_config import get_thresholds as _get_thresholds
-        _grounding_threshold = _get_thresholds().rag.grounding_threshold
+        _grounding_threshold = rag_cfg.grounding_threshold
         if grounding_score < _grounding_threshold:
             answer += "\n\n[Note: Some details may need verification. Please contact support for confirmation.]"
 
