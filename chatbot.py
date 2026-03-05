@@ -7,6 +7,10 @@ import asyncio
 import json
 import selectors
 import sys
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from typing import Any, Dict, List, Optional
 import os
 import subprocess
@@ -74,12 +78,8 @@ from services.faq import faq_lookup
 from services.search import property_search
 
 
-def _selector_loop_factory() -> asyncio.AbstractEventLoop:
-    return asyncio.SelectorEventLoop(selectors.SelectSelector())
-
-
 def _run_async(coro):
-    return asyncio.run(coro, loop_factory=_selector_loop_factory)
+    return asyncio.run(coro, loop_factory=asyncio.SelectorEventLoop if sys.platform == 'win32' else None)
 
 def _parse_kv_list(values: Optional[List[str]]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}

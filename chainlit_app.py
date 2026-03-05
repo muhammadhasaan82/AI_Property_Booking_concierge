@@ -1,4 +1,10 @@
 # chainlit_app.py
+import asyncio
+import sys
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 import chainlit as cl
 from services.graph import run_chat_graph
 from services.db_logging import log_feedback
