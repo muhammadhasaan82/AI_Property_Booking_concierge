@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import selectors
 import sys
 from typing import Any, Dict, List, Optional
 import os
@@ -71,6 +72,14 @@ from services.graph import run_chat_graph
 from services.booking import create_booking, update_booking_status
 from services.faq import faq_lookup
 from services.search import property_search
+
+
+def _selector_loop_factory() -> asyncio.AbstractEventLoop:
+    return asyncio.SelectorEventLoop(selectors.SelectSelector())
+
+
+def _run_async(coro):
+    return asyncio.run(coro, loop_factory=_selector_loop_factory)
 
 def _parse_kv_list(values: Optional[List[str]]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
@@ -223,12 +232,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp_chat = sub.add_parser("chat", help="Interactive chat loop (LangGraph)")
     add_common_chat_opts(sp_chat)
-    sp_chat.set_defaults(func=lambda a: asyncio.run(cmd_chat(a)))
+    sp_chat.set_defaults(func=lambda a: _run_async(cmd_chat(a)))
 
     sp_say = sub.add_parser("say", help="Send one message through the graph")
     add_common_chat_opts(sp_say)
     sp_say.add_argument("message", type=str, help="User message")
-    sp_say.set_defaults(func=lambda a: asyncio.run(cmd_say(a)))
+    sp_say.set_defaults(func=lambda a: _run_async(cmd_say(a)))
 
     sp_search = sub.add_parser("search", help="Direct property search (debug)")
     sp_search.add_argument("--query", type=str, default="", help="Free-text query")
@@ -263,7 +272,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if getattr(args, "cmd", None) is None:
-        return asyncio.run(cmd_chat(args))
+        return _run_async(cmd_chat(args))
     return args.func(args)
 
 if __name__ == "__main__":
