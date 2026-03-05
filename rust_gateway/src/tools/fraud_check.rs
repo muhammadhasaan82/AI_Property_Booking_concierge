@@ -36,6 +36,7 @@ impl Tool for FraudCheckTool {
                 risk_score += 30.0;
             }
             // Disposable email domains
+            // TODO: Move this list to config/tool_registry.toml for operational updates without recompilation.
             let disposable = ["tempmail.com", "throwaway.email", "guerrillamail.com",
                             "mailinator.com", "10minutemail.com", "yopmail.com"];
             let domain = email.split('@').last().unwrap_or("");

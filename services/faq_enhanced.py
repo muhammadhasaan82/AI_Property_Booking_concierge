@@ -9,6 +9,9 @@ import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 # PDF Processing
 from PyPDF2 import PdfReader
@@ -37,6 +40,7 @@ elif env_path_services.exists():
     load_dotenv(env_path_services)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
 # Initialize ChromaDB path
 CHROMA_PATH = Path(__file__).parent.parent / "chroma_faq"
@@ -78,7 +82,7 @@ class FAQService:
                     text += f"\n[Page {page_num}]\n{page_text}\n"
             return text
         except Exception as e:
-            print(f"[FAQ] Error loading PDF: {e}")
+            logger.error("Error loading PDF: %s", e)
             return ""
 
     def process_policy_document(self, pdf_path: str, force_reload: bool = False) -> Chroma:
@@ -114,12 +118,12 @@ class FAQService:
                     collection_name="company_policies",
                 )
                 self._healthy = True
-                print("[FAQ] Loaded existing vector store")
+                logger.info("Loaded existing vector store")
                 return self._vector_store
             except Exception as e:
-                print(f"[FAQ] Error loading existing store: {e}, creating new one")
+                logger.warning("Error loading existing store: %s, creating new one", e)
 
-        print(f"[FAQ] Processing PDF document: {pdf_path}")
+        logger.info("Processing PDF document: %s", pdf_path)
         pdf_text = self.load_pdf_document(pdf_path)
         if not pdf_text:
             raise ValueError("Could not extract text from PDF")
@@ -139,14 +143,14 @@ class FAQService:
                 metadata={"source": "Company Policy", "page": page_num, "chunk_index": i, "document": "company_policy.pdf"},
             )
             documents.append(doc)
-        print(f"[FAQ] Created {len(documents)} document chunks")
+        logger.info("Created %d document chunks", len(documents))
 
         self._vector_store = Chroma.from_documents(
             documents=documents, embedding=self._embeddings,
             persist_directory=persist_directory, collection_name="company_policies",
         )
         self._healthy = True
-        print("[FAQ] Vector store created and persisted")
+        logger.info("Vector store created and persisted")
         return self._vector_store
 
     # --- Semantic search (enhanced with full RAG pipeline) ---
@@ -220,7 +224,9 @@ class FAQService:
 
         # --- Answer grounding verification ---
         answer, grounding_score = verify_grounding(answer, raw_chunks)
-        if grounding_score < 0.5:
+        from .dynamic_config import get_thresholds as _get_thresholds
+        _grounding_threshold = _get_thresholds().rag.grounding_threshold
+        if grounding_score < _grounding_threshold:
             answer += "\n\n[Note: Some details may need verification. Please contact support for confirmation.]"
 
         # --- Page references ---
@@ -242,13 +248,13 @@ class FAQService:
             pdf_path = Path(__file__).parent.parent / "Company policy.pdf"
             if pdf_path.exists():
                 self.process_policy_document(str(pdf_path))
-                print("[FAQ] System initialized successfully")
+                logger.info("System initialized successfully")
                 return True
             else:
-                print("[FAQ][CRITICAL] Company policy.pdf not found — FAQ will not function")
+                logger.critical("Company policy.pdf not found — FAQ will not function")
                 return False
         except Exception as e:
-            print(f"[FAQ][CRITICAL] Initialization failed: {e}")
+            logger.critical("Initialization failed: %s", e)
             return False
 
 
@@ -310,7 +316,9 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         
         # Check if we found a good answer
         top_score = float((sources[0] or {}).get("score", 0.0)) if sources else 0.0
-        if sources and answer and top_score >= 0.7:
+        from .dynamic_config import get_thresholds
+        _faq_thresholds = get_thresholds().faq
+        if sources and answer and top_score >= _faq_thresholds.high_confidence:
             # High confidence answer
             result = {
                 "reply": answer,
@@ -320,7 +328,7 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
                     "confidence": "high"
                 }
             }
-        elif sources and answer and top_score >= 0.4:
+        elif sources and answer and top_score >= _faq_thresholds.low_confidence:
             # Medium confidence - add disclaimer
             result = {
                 "reply": f"{answer}\n\n[Note: If this doesn't fully answer your question, I can connect you with our support team.]",
@@ -363,7 +371,7 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         return result
         
     except Exception as e:
-        print(f"Error in FAQ agent: {e}")
+        logger.error("Error in FAQ agent: %s", e)
         return {
             "reply": "I'm having trouble accessing the policy information right now. Please try again or contact support directly.",
             "tool_result": {
@@ -437,7 +445,7 @@ Provide a clear, direct answer:"""
                 "Content-Type": "application/json"
             },
             json={
-                "model": "gpt-4o-mini",
+                "model": OPENAI_CHAT_MODEL,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -453,11 +461,11 @@ Provide a clear, direct answer:"""
             answer = result["choices"][0]["message"]["content"].strip()
             return answer
         else:
-            print(f"OpenAI API error: {response.status_code}")
+            logger.error("OpenAI API error: %s", response.status_code)
             return extract_key_sentences(context, question)
             
     except Exception as e:
-        print(f"Error generating concise answer: {e}")
+        logger.error("Error generating concise answer: %s", e)
         return extract_key_sentences(context, question)
 
 

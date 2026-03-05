@@ -8,8 +8,11 @@ Patterns are loaded from config/guardrails.yaml at runtime.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Tuple
+
+logger = logging.getLogger(__name__)
 
 from services.dynamic_config import (
     get_compiled_injection_patterns,
@@ -43,13 +46,13 @@ def sanitize_input(text: str) -> Tuple[str, bool]:
     # Check for script injection
     for pat in get_compiled_script_patterns():
         if pat.search(cleaned):
-            print(f"[GUARD] Script injection blocked")
+            logger.warning("Script injection blocked")
             return "", False
 
     # Check for prompt injection
     for pat in get_compiled_injection_patterns():
         if pat.search(cleaned):
-            print(f"[GUARD] Prompt injection blocked")
+            logger.warning("Prompt injection blocked")
             return "", False
 
     return cleaned, True

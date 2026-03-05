@@ -23,6 +23,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from dotenv import load_dotenv
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 env_path = Path(__file__).parent.parent / ".env"
 if env_path.exists():
     load_dotenv(env_path)
@@ -34,6 +38,12 @@ else:
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 EMBED_NORMALIZE = True
+
+
+def _rag_thresholds():
+    """Load RAG thresholds from config/thresholds.yaml."""
+    from services.dynamic_config import get_thresholds
+    return get_thresholds().rag
 
 # ---------------------------------------------------------------------------
 # Lazy-loaded models (avoid import-time downloads)
@@ -61,7 +71,7 @@ def _get_cross_encoder():
                     from sentence_transformers import CrossEncoder
                     _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L6-v2")
                 except Exception as e:
-                    print(f"[RAG] Cross-encoder unavailable: {e}")
+                    logger.warning("Cross-encoder unavailable: %s", e)
     return _cross_encoder
 
 
@@ -101,10 +111,10 @@ def rewrite_query(user_text: str) -> str:
         if r.status_code == 200:
             rewritten = r.json()["choices"][0]["message"]["content"].strip()
             if rewritten:
-                print(f"[RAG] Query rewritten: {user_text!r} -> {rewritten!r}")
+                logger.debug("Query rewritten: %r -> %r", user_text, rewritten)
                 return rewritten
     except Exception as e:
-        print(f"[RAG] Query rewrite failed (using original): {e}")
+        logger.warning("Query rewrite failed (using original): %s", e)
 
     return user_text
 
@@ -120,7 +130,7 @@ def bm25_search(query: str, corpus: List[str], k: int = 6) -> List[Tuple[int, fl
     try:
         from rank_bm25 import BM25Okapi
     except ImportError:
-        print("[RAG] rank_bm25 not installed, skipping BM25")
+        logger.warning("rank_bm25 not installed, skipping BM25")
         return []
 
     if not corpus:
@@ -141,20 +151,27 @@ def hybrid_retrieve(
     vector_store,
     query: str,
     k: int = 4,
-    vector_k: int = 6,
-    bm25_k: int = 6,
-    rrf_constant: int = 60,
+    vector_k: Optional[int] = None,
+    bm25_k: Optional[int] = None,
+    rrf_constant: Optional[int] = None,
 ) -> List[Tuple[Any, float]]:
     """Combine Chroma vector search with BM25 keyword search via RRF.
 
     Returns list of (Document, fused_score) tuples, highest score first.
     This method is embedding-model agnostic and works with normalized BGE vectors.
     """
+    cfg = _rag_thresholds()
+    if vector_k is None:
+        vector_k = cfg.vector_k
+    if bm25_k is None:
+        bm25_k = cfg.bm25_k
+    if rrf_constant is None:
+        rrf_constant = cfg.rrf_constant
     # --- Vector search ---
     try:
         vector_results = vector_store.similarity_search_with_score(query, k=vector_k)
     except Exception as e:
-        print(f"[RAG] Vector search failed: {e}")
+        logger.error("Vector search failed: %s", e)
         vector_results = []
 
     # --- Build corpus from vector store for BM25 ---
@@ -228,18 +245,20 @@ def rerank(query: str, documents: List[Any], top_n: int = 3) -> List[Any]:
         scored = sorted(zip(documents, scores), key=lambda x: x[1], reverse=True)
         return [doc for doc, _ in scored[:top_n]]
     except Exception as e:
-        print(f"[RAG] Re-ranking failed (using original order): {e}")
+        logger.warning("Re-ranking failed (using original order): %s", e)
         return documents[:top_n]
 
 
 # ---------------------------------------------------------------------------
 # 5. Context Compression
 # ---------------------------------------------------------------------------
-def compress_context(question: str, chunks: List[str], max_chars: int = 1500) -> str:
+def compress_context(question: str, chunks: List[str], max_chars: Optional[int] = None) -> str:
     """Extract only the sentences most relevant to the question.
 
     Uses keyword overlap scoring to pick the best sentences from all chunks.
     """
+    if max_chars is None:
+        max_chars = _rag_thresholds().max_context_chars
     if not chunks:
         return ""
 
@@ -311,7 +330,7 @@ def verify_grounding(answer: str, source_chunks: List[str]) -> Tuple[str, float]
             continue
         overlap = meaningful & source_words
         ratio = len(overlap) / max(len(meaningful), 1)
-        if ratio >= 0.4:
+        if ratio >= _rag_thresholds().grounding_threshold:
             grounded_count += 1
 
     score = grounded_count / max(len(sentences), 1)
@@ -355,7 +374,7 @@ class CAGCache:
             if (time.time() - created) > ttl:
                 del self._store[key]
                 return None
-            print(f"[CAG] Cache HIT for query")
+            logger.debug("CAG cache hit for query")
             return value
 
     def set(self, query: str, value: Any, ttl: Optional[int] = None):
