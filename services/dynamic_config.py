@@ -196,9 +196,12 @@ class RoutingCondition(BaseModel):
     intent_in: Optional[List[str]] = None
     filter_key: Optional[str] = None
     any_filter_key: Optional[List[str]] = None
+    has_context_key: Optional[str] = None
+    lacks_context_key: Optional[str] = None
     has_booking_context: Optional[bool] = None
     has_field_data: Optional[bool] = None
     awaiting_field_in: Optional[List[str]] = None
+    requires_cardinal_extraction: Optional[bool] = None
     lacks_explicit_status_keywords: Optional[bool] = None
     no_selected_property: Optional[bool] = None
     no_awaiting_field: Optional[bool] = None

@@ -86,6 +86,24 @@ policies:
     route: confirmation
 
   # ─── Orphaned affirmation guard ───
+  - id: active_results_numeric_selection
+    description: "When a result list is active, numeric replies are treated as a selection"
+    priority: 100
+    condition:
+      has_context_key: last_results
+      requires_cardinal_extraction: true
+    route: confirmation
+
+  - id: numeric_without_active_results
+    description: "A numeric reply without an active result list should not enter confirmation"
+    priority: 99
+    condition:
+      lacks_context_key: last_results
+      requires_cardinal_extraction: true
+      no_selected_property: true
+      no_awaiting_field: true
+    route: property_search
+
   - id: orphaned_affirmation_guard
     description: "Prevent yes/ok after greeting from triggering booking"
     priority: 90

@@ -44,6 +44,7 @@ def node_triage(state: ChatState) -> ChatState:
             "intent": intent,
             "is_safe": is_safe,
             "filter_keys": set(filters.keys()),
+            "has_cardinal_extraction": nlp_engine.has_cardinal_extraction(user_text),
             "has_booking_context": bool(
                 filters.get(SK.recent_property_id) or
                 filters.get("name") or filters.get("phone") or filters.get("email") or
@@ -102,9 +103,12 @@ def node_triage(state: ChatState) -> ChatState:
             if cond.intent_in is not None and ctx["intent"] not in cond.intent_in: match = False
             if cond.filter_key is not None and cond.filter_key not in ctx["filter_keys"]: match = False
             if cond.any_filter_key is not None and not any(k in ctx["filter_keys"] for k in cond.any_filter_key): match = False
+            if cond.has_context_key is not None and not filters.get(cond.has_context_key): match = False
+            if cond.lacks_context_key is not None and filters.get(cond.lacks_context_key): match = False
             if cond.has_booking_context is not None and cond.has_booking_context != ctx["has_booking_context"]: match = False
             if cond.has_field_data is not None and cond.has_field_data != ctx["has_field_data"]: match = False
             if cond.awaiting_field_in is not None and ctx[SK.awaiting_field] not in cond.awaiting_field_in: match = False
+            if cond.requires_cardinal_extraction is not None and cond.requires_cardinal_extraction != ctx["has_cardinal_extraction"]: match = False
             if cond.lacks_explicit_status_keywords is not None and cond.lacks_explicit_status_keywords != ctx["lacks_explicit_status_keywords"]: match = False
             if cond.no_selected_property is not None and cond.no_selected_property != ctx["no_selected_property"]: match = False
             if cond.no_awaiting_field is not None and cond.no_awaiting_field != ctx["no_awaiting_field"]: match = False
