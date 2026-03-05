@@ -5,15 +5,18 @@ from typing import Optional
 from supabase import create_client, Client
 
 _SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-_SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+# Use service role key for server-side operations (bypasses RLS appropriately).
+# The anon key is scoped to public/unauthenticated access and must NOT be used
+# for server-side writes.
+_SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 _sb: Client | None = None
 def _sb_client() -> Client:
     global _sb
     if _sb is None:
-        if not (_SUPABASE_URL and _SUPABASE_ANON_KEY):
-            raise RuntimeError("Supabase env not set")
-        _sb = create_client(_SUPABASE_URL, _SUPABASE_ANON_KEY)
+        if not (_SUPABASE_URL and _SUPABASE_SERVICE_KEY):
+            raise RuntimeError("Supabase env not set (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required)")
+        _sb = create_client(_SUPABASE_URL, _SUPABASE_SERVICE_KEY)
     return _sb
 
 def faq_lookup(question: str) -> Optional[str]:

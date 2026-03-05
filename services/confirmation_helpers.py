@@ -13,11 +13,12 @@ from .config import (
     PROCEED_PHRASES,
     MODIFY_PHRASES,
 )
+from .state_keys import SK
 
 
 def _render_receipt(persisted: Dict[str, Any]) -> str:
     """Render the booking summary receipt."""
-    selected_property = persisted.get("selected_property") or {}
+    selected_property = persisted.get(SK.selected_property) or {}
     title = selected_property.get("title", "Property")
     city = (selected_property.get("city") or "").title()
     price_per_night = float(selected_property.get("price_per_night") or 0)
@@ -66,7 +67,7 @@ def _next_missing_field(persisted: Dict[str, Any]) -> Optional[str]:
 
 def _ask_for_field(field: str, persisted: Dict[str, Any]) -> Dict[str, Any]:
     """Return a response asking for the given field."""
-    persisted["awaiting_field"] = field
+    persisted[SK.awaiting_field] = field
     return {
         "reply": FIELD_PROMPTS.get(field, f"Please provide your {field}."),
         "filters": persisted,
@@ -84,7 +85,7 @@ def _try_show_receipt(persisted: Dict[str, Any]) -> Dict[str, Any]:
         return _ask_for_field(missing, persisted)
 
     receipt = _render_receipt(persisted)
-    persisted["receipt_shown"] = True
+    persisted[SK.receipt_shown] = True
     return {
         "reply": receipt,
         "tool_result": {"ok": False, "need": ["final_confirmation"], "show_receipt": True},
@@ -98,35 +99,35 @@ def handle_final_confirmation(user_text: str, persisted: Dict[str, Any],
     Handle the yes/no response after receipt is shown.
     Returns None if not in receipt_shown state.
     """
-    if not persisted.get("receipt_shown"):
+    if not persisted.get(SK.receipt_shown):
         return None
 
     if _is_yes(user_text):
-        persisted.pop("awaiting_post_mod_choice", None)
-        persisted.pop("awaiting_post_cancel_choice", None)
-        persisted.pop("receipt_shown", None)
-        persisted.pop("awaiting_field", None)
-        persisted.pop("modifying_dates", None)
+        persisted.pop(SK.awaiting_post_mod_choice, None)
+        persisted.pop(SK.awaiting_post_cancel_choice, None)
+        persisted.pop(SK.receipt_shown, None)
+        persisted.pop(SK.awaiting_field, None)
+        persisted.pop(SK.modifying_dates, None)
         return {
             "reply": "🎯 Perfect! Creating your booking now...",
             "tool_result": {"ok": True, "ready_for_booking": True},
             "filters": persisted,
             "booking_args": {
-                "property_id": persisted.get("recent_property_id"),
+                "property_id": persisted.get(SK.recent_property_id),
                 "check_in": persisted.get("check_in"),
                 "check_out": persisted.get("check_out"),
                 "guests": persisted.get("guests"),
                 "name": persisted.get("name"),
                 "email": persisted.get("email"),
                 "phone": persisted.get("phone"),
-                "selected_property": persisted.get("selected_property"),
+                SK.selected_property: persisted.get(SK.selected_property),
             },
         }
 
     if _is_no(user_text):
-        persisted.pop("receipt_shown", None)
-        persisted.pop("awaiting_post_mod_choice", None)
-        persisted["awaiting_field"] = "modification_choice"
+        persisted.pop(SK.receipt_shown, None)
+        persisted.pop(SK.awaiting_post_mod_choice, None)
+        persisted[SK.awaiting_field] = "modification_choice"
         return {
             "reply": "No problem, the booking has been cancelled. What would you like to modify — dates, guests, name, phone, email, or property?",
             "filters": persisted,
@@ -151,20 +152,20 @@ def handle_post_modification_choice(user_text: str, persisted: Dict[str, Any]) -
     After a modification, handle the proceed/modify-more decision.
     Returns None if not in awaiting_post_mod_choice state.
     """
-    if not persisted.get("awaiting_post_mod_choice"):
+    if not persisted.get(SK.awaiting_post_mod_choice):
         return None
 
     tl = (user_text or "").lower().strip()
 
     if tl.strip() == "yes" or any(p in tl for p in PROCEED_PHRASES):
-        persisted.pop("awaiting_post_mod_choice", None)
-        persisted.pop("awaiting_post_cancel_choice", None)
+        persisted.pop(SK.awaiting_post_mod_choice, None)
+        persisted.pop(SK.awaiting_post_cancel_choice, None)
         return _try_show_receipt(persisted)
 
     if any(p in tl for p in MODIFY_PHRASES):
-        persisted.pop("awaiting_post_mod_choice", None)
-        persisted.pop("awaiting_post_cancel_choice", None)
-        persisted["awaiting_field"] = "modification_choice"
+        persisted.pop(SK.awaiting_post_mod_choice, None)
+        persisted.pop(SK.awaiting_post_cancel_choice, None)
+        persisted[SK.awaiting_field] = "modification_choice"
         return {
             "reply": "What would you like to modify — dates, guests, name, phone, email, or property?",
             "filters": persisted,
@@ -172,7 +173,7 @@ def handle_post_modification_choice(user_text: str, persisted: Dict[str, Any]) -
         }
 
     # Default: proceed to receipt
-    if not persisted.get("modifying_dates"):
+    if not persisted.get(SK.modifying_dates):
         return _try_show_receipt(persisted)
 
     return {
@@ -192,7 +193,7 @@ def handle_property_selection(
     Handle numeric selection of a property from results.
     Returns None if no valid selection is made.
     """
-    awaiting_guests = persisted.get("awaiting_field") == "guests"
+    awaiting_guests = persisted.get(SK.awaiting_field) == "guests"
 
     # If we're waiting for guests and got a number, treat as guest count
     import re
@@ -218,11 +219,11 @@ def handle_property_selection(
 
     card = _format_property_full(chosen)
     persisted.update({
-        "recent_selection_index": sel,
-        "recent_property_id": prop_id,
-        "selected_property": chosen,
-        "awaiting_selection_confirm": True,
-        "awaiting_field": None,
+        SK.recent_selection_index: sel,
+        SK.recent_property_id: prop_id,
+        SK.selected_property: chosen,
+        SK.awaiting_selection_confirm: True,
+        SK.awaiting_field: None,
     })
 
     # If all fields present, show receipt immediately
@@ -246,7 +247,7 @@ def handle_selection_confirm(
     Handle yes/no response after a property is selected.
     Returns None if not in awaiting_selection_confirm state.
     """
-    if not persisted.get("awaiting_selection_confirm"):
+    if not persisted.get(SK.awaiting_selection_confirm):
         return None
 
     tl = (user_text or "").strip().lower()
@@ -254,8 +255,8 @@ def handle_selection_confirm(
         user_text = "yes"
 
     if _is_no(user_text):
-        for k in ["recent_property_id", "recent_selection_index", "selected_property",
-                   "awaiting_selection_confirm", "awaiting_field"]:
+        for k in [SK.recent_property_id, SK.recent_selection_index, SK.selected_property,
+                   SK.awaiting_selection_confirm, SK.awaiting_field]:
             persisted.pop(k, None)
         return {
             "reply": "No worries — thanks for visiting! Have a lovely day ✨",
@@ -264,7 +265,7 @@ def handle_selection_confirm(
         }
 
     if _is_yes(user_text) or tl in {"yes sure", "sure yes", "yes please", "yes pls", "sure"}:
-        persisted["awaiting_selection_confirm"] = False
+        persisted[SK.awaiting_selection_confirm] = False
         return _try_show_receipt(persisted)
 
     return {

@@ -33,6 +33,7 @@ _INTENT_CATALOG_PATH = _CONFIG_DIR / "intent_catalog.yaml"
 _VOCABULARY_PATH = _CONFIG_DIR / "vocabulary.yaml"
 _GUARDRAILS_PATH = _CONFIG_DIR / "guardrails.yaml"
 _ROUTING_POLICIES_PATH = _CONFIG_DIR / "routing_policies.yaml"
+_THRESHOLDS_PATH = _CONFIG_DIR / "thresholds.yaml"
 
 # ---------------------------------------------------------------------------
 # Legacy mode flag
@@ -228,6 +229,43 @@ class RoutingPoliciesConfig(BaseModel):
         return sorted(self.policies, key=lambda p: p.priority, reverse=True)
 
 
+class NlpThresholdsConfig(BaseModel):
+    """NLP fuzzy-match thresholds."""
+    fuzzy_match_strict: float = 0.93
+    fuzzy_match_high: float = 0.90
+    fuzzy_match_medium: float = 0.88
+    fuzzy_match_low: float = 0.78
+
+
+class FaqThresholdsConfig(BaseModel):
+    """FAQ confidence thresholds."""
+    high_confidence: float = 0.7
+    low_confidence: float = 0.4
+
+
+class RagThresholdsConfig(BaseModel):
+    """RAG pipeline hyperparameters."""
+    rrf_constant: int = 60
+    vector_k: int = 6
+    bm25_k: int = 6
+    max_context_chars: int = 1500
+    grounding_threshold: float = 0.4
+
+
+class RetrievalThresholdsConfig(BaseModel):
+    """Retrieval settings."""
+    top_k: int = 10
+    truncation: int = 5
+
+
+class ThresholdsConfig(BaseModel):
+    """All NLP/RAG thresholds loaded from thresholds.yaml."""
+    nlp: NlpThresholdsConfig = Field(default_factory=NlpThresholdsConfig)
+    faq: FaqThresholdsConfig = Field(default_factory=FaqThresholdsConfig)
+    rag: RagThresholdsConfig = Field(default_factory=RagThresholdsConfig)
+    retrieval: RetrievalThresholdsConfig = Field(default_factory=RetrievalThresholdsConfig)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Cache + Thread-safe loading
 # ═══════════════════════════════════════════════════════════════════════
@@ -294,15 +332,22 @@ def get_routing_policies() -> RoutingPoliciesConfig:
     return _get_or_load("routing_policies", _ROUTING_POLICIES_PATH, RoutingPoliciesConfig)
 
 
+def get_thresholds() -> ThresholdsConfig:
+    """Get the NLP/RAG thresholds configuration."""
+    return _get_or_load("thresholds", _THRESHOLDS_PATH, ThresholdsConfig)
+
+
 def reload_all() -> None:
     """Clear cache and reload all config files from disk."""
     with _lock:
         _cache.clear()
+    clear_compiled_guardrails()
     # Touch each to force re-load
     get_intent_catalog()
     get_vocabulary()
     get_guardrails()
     get_routing_policies()
+    get_thresholds()
     logger.info("[dynamic_config] All configuration reloaded")
 
 

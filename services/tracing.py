@@ -1,8 +1,11 @@
 # services/tracing.py
 import time
 import threading
+import logging
 from contextlib import ContextDecorator
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class _Span(ContextDecorator):
@@ -28,14 +31,14 @@ class _Span(ContextDecorator):
     def __enter__(self):
         self.start_time = time.perf_counter()
         kv = " ".join(f"{k}={v}" for k, v in self.attributes.items())
-        print(f"[TRACE] > span={self.name} id={self.span_id} {kv}".strip())
+        logger.debug("span=%s id=%d %s", self.name, self.span_id, kv)
         return self
 
     def __exit__(self, exc_type, exc, tb):
         self.end_time = time.perf_counter()
         self.duration_ms = (self.end_time - self.start_time) * 1000.0
         status = "ok" if exc is None else f"error={exc}"
-        print(f"[TRACE] < span={self.name} id={self.span_id} duration_ms={self.duration_ms:.1f} {status}")
+        logger.debug("span=%s id=%d duration_ms=%.1f %s", self.name, self.span_id, self.duration_ms, status)
         # Do not suppress exceptions
         return False
 
@@ -61,4 +64,4 @@ def annotate(extra: Dict[str, Any]) -> None:
     """Placeholder for richer attribute updates mid-span. Currently logs."""
     kv = " ".join(f"{k}={v}" for k, v in (extra or {}).items())
     if kv:
-        print(f"[TRACE] • {kv}")
+        logger.debug("%s", kv)

@@ -1,6 +1,7 @@
 # services/graph.py
 from __future__ import annotations
 from typing import TypedDict, Optional, Dict, Any, List
+import logging
 import re
 import inspect
 from langgraph.graph import StateGraph, END
@@ -9,11 +10,14 @@ from .db_logging import log_chat
 from .guardrails import sanitize_input, sanitize_output
 from . import nlp_engine
 
+logger = logging.getLogger(__name__)
+
 from .agents import (
     triage_intent,
     greeting_agent, faq_agent, property_agent, booking_agent, status_agent, payment_agent,
     confirmation_agent
 )
+from .state_keys import SK
 
 class ChatState(TypedDict, total=False):
     user_text: str
@@ -41,15 +45,15 @@ def node_triage(state: ChatState) -> ChatState:
             "is_safe": is_safe,
             "filter_keys": set(filters.keys()),
             "has_booking_context": bool(
-                filters.get("recent_property_id") or
+                filters.get(SK.recent_property_id) or
                 filters.get("name") or filters.get("phone") or filters.get("email") or
-                filters.get("check_in") or filters.get("check_out") or filters.get("receipt_shown")
+                filters.get("check_in") or filters.get("check_out") or filters.get(SK.receipt_shown)
             ),
-            "awaiting_field": filters.get("awaiting_field"),
+            SK.awaiting_field: filters.get(SK.awaiting_field),
             "has_field_data": False,
             "lacks_explicit_status_keywords": False,
-            "no_selected_property": not filters.get("selected_property"),
-            "no_awaiting_field": not filters.get("awaiting_field"),
+            "no_selected_property": not filters.get(SK.selected_property),
+            "no_awaiting_field": not filters.get(SK.awaiting_field),
             "no_active_selection": not any(filters.get(k) for k in [
                 "awaiting_unavailable_city_choice", "awaiting_city_selection", "awaiting_property_type_choice"
             ]),
@@ -98,7 +102,7 @@ def node_triage(state: ChatState) -> ChatState:
             if cond.any_filter_key is not None and not any(k in ctx["filter_keys"] for k in cond.any_filter_key): match = False
             if cond.has_booking_context is not None and cond.has_booking_context != ctx["has_booking_context"]: match = False
             if cond.has_field_data is not None and cond.has_field_data != ctx["has_field_data"]: match = False
-            if cond.awaiting_field_in is not None and ctx["awaiting_field"] not in cond.awaiting_field_in: match = False
+            if cond.awaiting_field_in is not None and ctx[SK.awaiting_field] not in cond.awaiting_field_in: match = False
             if cond.lacks_explicit_status_keywords is not None and cond.lacks_explicit_status_keywords != ctx["lacks_explicit_status_keywords"]: match = False
             if cond.no_selected_property is not None and cond.no_selected_property != ctx["no_selected_property"]: match = False
             if cond.no_awaiting_field is not None and cond.no_awaiting_field != ctx["no_awaiting_field"]: match = False
@@ -110,15 +114,19 @@ def node_triage(state: ChatState) -> ChatState:
                 extract_action = policy.extract
                 if policy.id == "faq_return_guard":
                     # Special inline action for FAQ return
-                    resume_intent = filters.get("faq_resume_intent", "confirmation")
-                    filters.pop("faq_answered", None)
-                    filters.pop("faq_resume_intent", None)
-                    if intent == "faq":
-                        target_route = "faq"
-                    elif intent in ["confirmation", "booking"] or nlp_engine.is_resume_request(user_text):
-                        target_route = resume_intent
-                    else:
-                        target_route = "_from_intent"  # Let it fall through normally
+                    try:
+                        resume_intent = filters.get("faq_resume_intent", "confirmation")
+                        filters.pop("faq_answered", None)
+                        filters.pop("faq_resume_intent", None)
+                        if intent == "faq":
+                            target_route = "faq"
+                        elif intent in ["confirmation", "booking"] or nlp_engine.is_resume_request(user_text):
+                            target_route = resume_intent
+                        else:
+                            target_route = "_from_intent"  # Let it fall through normally
+                    except Exception:
+                        logger.warning("[graph] faq_return_guard policy failed, falling through")
+                        target_route = "_from_intent"
                 break
 
         # --- Apply target route ---
@@ -152,7 +160,7 @@ def node_faq(state: ChatState) -> ChatState:
         
         # Check if we're in the middle of a booking/property flow
         filters = state.get("filters", {})
-        if filters and any(filters.get(k) for k in ["selected_property", "name", "phone", "email", "check_in", "check_out"]):
+        if filters and any(filters.get(k) for k in [SK.selected_property, "name", "phone", "email", "check_in", "check_out"]):
             context["in_booking_flow"] = True
             context["return_to"] = "confirmation"
             context["booking_state"] = filters
@@ -185,7 +193,7 @@ async def node_confirmation(state: ChatState) -> ChatState:
         # If user confirmed and we're proceeding to booking, clear confirmation-only flags to avoid re-entry loops
         if result.get("intent") == "booking":
             f = {**(result.get("filters") or {})}
-            for k in ["awaiting_post_mod_choice","awaiting_post_cancel_choice","awaiting_field","receipt_shown"]:
+            for k in [SK.awaiting_post_mod_choice,SK.awaiting_post_cancel_choice,SK.awaiting_field,SK.receipt_shown]:
                 f.pop(k, None)
             result["filters"] = f
         return result
@@ -205,10 +213,10 @@ async def node_booking(state: ChatState) -> ChatState:
             # Clear all booking-related filters to prevent re-entry
             filters = result.get("filters", {})
             booking_keys_to_clear = [
-                "selected_property", "recent_property_id", "recent_selection_index",
+                SK.selected_property, SK.recent_property_id, SK.recent_selection_index,
                 "name", "phone", "email", "check_in", "check_out", "guests",
-                "receipt_shown", "awaiting_field", "awaiting_post_mod_choice", 
-                "awaiting_post_cancel_choice", "modifying_dates", "awaiting_selection_confirm"
+                SK.receipt_shown, SK.awaiting_field, SK.awaiting_post_mod_choice, 
+                SK.awaiting_post_cancel_choice, SK.modifying_dates, SK.awaiting_selection_confirm
             ]
             for key in booking_keys_to_clear:
                 filters.pop(key, None)
@@ -340,7 +348,7 @@ async def run_chat_graph(
     # If this looks like a greeting and we have booking context, clear it
     if message and nlp_engine.is_greeting(message):
         # Remove any booking-related context that might interfere
-        for key in ["awaiting_field", "awaiting_selection_confirm", "receipt_shown"]:
+        for key in [SK.awaiting_field, SK.awaiting_selection_confirm, SK.receipt_shown]:
             clean_filters.pop(key, None)
     
     state: ChatState = {
