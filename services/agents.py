@@ -1,3 +1,4 @@
+from services.confirmation_helpers import _render_receipt
 # services/agents.py
 from __future__ import annotations
 import os
@@ -710,7 +711,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         
         # If user asks for total bill or receipt again
         if nlp_engine.is_receipt_request(user_text):
-            receipt = confirmation_helpers._render_receipt(persisted)
+            receipt = _render_receipt(persisted)
             return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
 
     # If we're in any modification sub-flow, ensure post-cancel choice doesn't interfere
@@ -726,7 +727,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         if tl.strip() == "yes":
             persisted.pop(SK.awaiting_post_mod_choice, None)
             persisted.pop(SK.awaiting_post_cancel_choice, None)
-            receipt = confirmation_helpers._render_receipt(persisted)
+            receipt = _render_receipt(persisted)
             persisted[SK.receipt_shown] = True
             return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
         
@@ -734,7 +735,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             persisted.pop(SK.awaiting_post_mod_choice, None)
             persisted.pop(SK.awaiting_post_cancel_choice, None)
             # Ensure all required fields are present before rendering receipt; otherwise ask for the next missing field
-            required=[*config.REQUIRED_FIELDS, SK.selected_property]
+            required = config.REQUIRED_FIELDS + [SK.selected_property]
             for rk in config.REQUIRED_FIELDS:
                 if not persisted.get(rk):
                     persisted[SK.awaiting_field]=rk
@@ -1448,7 +1449,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
 
             if direct_update_applied:
                 # Re-render receipt with updated values
-                receipt = confirmation_helpers._render_receipt(persisted)
+                receipt = _render_receipt(persisted)
                 # Ensure no lingering modification prompt flags remain when rendering receipt
                 persisted[SK.receipt_shown] = True
                 persisted[SK.awaiting_field] = None
@@ -1457,7 +1458,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
                 return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
         # If a targeted field was just updated, immediately re-render the receipt with the new values
         if just_applied_field_update:
-            receipt = confirmation_helpers._render_receipt(persisted)
+            receipt = _render_receipt(persisted)
             # Ensure no lingering modification prompt flags remain when rendering receipt
             persisted[SK.receipt_shown] = True
             persisted[SK.awaiting_field] = None
@@ -1594,7 +1595,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         # Allow direct inline updates even when receipt isn't currently shown, if we just updated a field and all data is present
         # This makes the UX consistent after cancellation + modification
     if not persisted.get(SK.receipt_shown) and just_applied_field_update:
-        required=[*config.REQUIRED_FIELDS, SK.selected_property]
+        required = config.REQUIRED_FIELDS + [SK.selected_property]
         if all(persisted.get(k) for k in required):
             return confirmation_helpers._try_show_receipt(persisted)
 
