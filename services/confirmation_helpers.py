@@ -85,6 +85,7 @@ def _try_show_receipt(persisted: Dict[str, Any]) -> Dict[str, Any]:
         return _ask_for_field(missing, persisted)
 
     receipt = _render_receipt(persisted)
+    persisted[SK.awaiting_field] = None
     persisted[SK.receipt_shown] = True
     return {
         "reply": receipt,

@@ -1,8 +1,17 @@
 use serde_json::{json, Value};
 use super::Tool;
+use crate::config::FraudThresholds;
 
 /// Fraud and sanity checks on booking/payment data.
-pub struct FraudCheckTool;
+pub struct FraudCheckTool {
+    thresholds: FraudThresholds,
+}
+
+impl FraudCheckTool {
+    pub fn new(thresholds: FraudThresholds) -> Self {
+        Self { thresholds }
+    }
+}
 
 impl Tool for FraudCheckTool {
     fn name(&self) -> &'static str {
@@ -66,7 +75,7 @@ impl Tool for FraudCheckTool {
 
         // Amount checks
         if let Some(amount) = input.get("amount").and_then(|v| v.as_f64()) {
-            if amount > 50000.0 {
+            if amount > self.thresholds.amount_limit {
                 flags.push("unusually_high_amount".to_string());
                 risk_score += 20.0;
             }
@@ -98,9 +107,9 @@ impl Tool for FraudCheckTool {
             }
         }
 
-        let risk_level = if risk_score >= 50.0 {
+        let risk_level = if risk_score >= self.thresholds.high_risk {
             "high"
-        } else if risk_score >= 20.0 {
+        } else if risk_score >= self.thresholds.medium_risk {
             "medium"
         } else {
             "low"
@@ -125,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_low_risk() {
-        let tool = FraudCheckTool;
+        let tool = FraudCheckTool::new(FraudThresholds::default());
         let input = json!({
             "check_fraud": true,
             "email": "john@gmail.com",
@@ -139,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_high_risk_disposable_email() {
-        let tool = FraudCheckTool;
+        let tool = FraudCheckTool::new(FraudThresholds::default());
         let input = json!({
             "check_fraud": true,
             "email": "fake@mailinator.com",

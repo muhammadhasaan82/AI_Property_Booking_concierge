@@ -34,6 +34,7 @@ _VOCABULARY_PATH = _CONFIG_DIR / "vocabulary.yaml"
 _GUARDRAILS_PATH = _CONFIG_DIR / "guardrails.yaml"
 _ROUTING_POLICIES_PATH = _CONFIG_DIR / "routing_policies.yaml"
 _THRESHOLDS_PATH = _CONFIG_DIR / "thresholds.yaml"
+_RETRIEVAL_PATH = _CONFIG_DIR / "retrieval.yaml"
 
 # ---------------------------------------------------------------------------
 # Legacy mode flag
@@ -252,18 +253,31 @@ class RagThresholdsConfig(BaseModel):
     grounding_threshold: float = 0.4
 
 
-class RetrievalThresholdsConfig(BaseModel):
-    """Retrieval settings."""
-    top_k: int = 10
-    truncation: int = 5
-
-
 class ThresholdsConfig(BaseModel):
-    """All NLP/RAG thresholds loaded from thresholds.yaml."""
+    """NLP thresholds loaded from thresholds.yaml."""
     nlp: NlpThresholdsConfig = Field(default_factory=NlpThresholdsConfig)
     faq: FaqThresholdsConfig = Field(default_factory=FaqThresholdsConfig)
+
+
+class RetrievalScoringWeightsConfig(BaseModel):
+    """Heuristic fallback scoring weights for retrieval.py JSON mode."""
+    exact_doc: float = 1.0
+    exact_title: float = 2.0
+    token_doc: float = 0.5
+    token_title: float = 1.0
+
+
+class RetrievalRuntimeConfig(BaseModel):
+    """Retrieval runtime settings."""
+    top_k: int = 10
+    result_limit: int = 5
+    scoring_weights: RetrievalScoringWeightsConfig = Field(default_factory=RetrievalScoringWeightsConfig)
+
+
+class RetrievalConfig(BaseModel):
+    """RAG + retrieval settings loaded from retrieval.yaml."""
     rag: RagThresholdsConfig = Field(default_factory=RagThresholdsConfig)
-    retrieval: RetrievalThresholdsConfig = Field(default_factory=RetrievalThresholdsConfig)
+    retrieval: RetrievalRuntimeConfig = Field(default_factory=RetrievalRuntimeConfig)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -333,8 +347,13 @@ def get_routing_policies() -> RoutingPoliciesConfig:
 
 
 def get_thresholds() -> ThresholdsConfig:
-    """Get the NLP/RAG thresholds configuration."""
+    """Get NLP thresholds configuration."""
     return _get_or_load("thresholds", _THRESHOLDS_PATH, ThresholdsConfig)
+
+
+def get_retrieval_config() -> RetrievalConfig:
+    """Get RAG/retrieval runtime configuration."""
+    return _get_or_load("retrieval", _RETRIEVAL_PATH, RetrievalConfig)
 
 
 def reload_all() -> None:
@@ -348,6 +367,7 @@ def reload_all() -> None:
     get_guardrails()
     get_routing_policies()
     get_thresholds()
+    get_retrieval_config()
     logger.info("[dynamic_config] All configuration reloaded")
 
 
@@ -362,6 +382,7 @@ def get_config_summary() -> Dict[str, Any]:
     vc = get_vocabulary()
     gc = get_guardrails()
     rp = get_routing_policies()
+    rt = get_retrieval_config()
     return {
         "intent_catalog": {
             "version": ic.version,
@@ -388,6 +409,10 @@ def get_config_summary() -> Dict[str, Any]:
             "version": rp.version,
             "policy_count": len(rp.policies),
             "policy_ids": [p.id for p in rp.sorted_policies],
+        },
+        "retrieval": {
+            "rag": rt.rag.model_dump(),
+            "retrieval": rt.retrieval.model_dump(),
         },
         "legacy_rules": LEGACY_RULES,
     }

@@ -1,0 +1,9 @@
+[fraud]
+high_risk = 50.0
+medium_risk = 20.0
+amount_limit = 50000.0
+
+[pricing]
+peak_multiplier = 1.20
+shoulder_multiplier = 1.15
+tax_rate = 0.10

@@ -5,6 +5,7 @@ pub mod sentiment;
 pub mod fraud_check;
 
 use serde_json::Value;
+use crate::config::{ThresholdsConfig, VaderLexiconConfig};
 
 // ---------------------------------------------------------------------------
 // Tool trait – plugin-style extensibility
@@ -119,19 +120,19 @@ fn load_tool_names_from_config() -> std::collections::HashSet<String> {
 }
 
 /// Build the default registry with only tools enabled in config/tool_registry.toml.
-pub fn build_default_registry() -> ToolRegistry {
+pub fn build_default_registry(thresholds: &ThresholdsConfig, vader_lexicon: &VaderLexiconConfig) -> ToolRegistry {
     let mut reg = ToolRegistry::new();
     let enabled_tools = load_tool_names_from_config();
     let is_enabled = |name: &str| -> bool { enabled_tools.is_empty() || enabled_tools.contains(name) };
 
     if is_enabled("property_search") { reg.register(Box::new(search::PropertySearchTool)); }
     if is_enabled("booking_validator") { reg.register(Box::new(booking_validator::BookingValidatorTool)); }
-    if is_enabled("calculate_payment") { reg.register(Box::new(pricing::PricingTool)); }
-    if is_enabled("analyze_sentiment") { reg.register(Box::new(sentiment::SentimentTool)); }
-    if is_enabled("fraud_check") { reg.register(Box::new(fraud_check::FraudCheckTool)); }
+    if is_enabled("calculate_payment") { reg.register(Box::new(pricing::PricingTool::new(thresholds.pricing.clone()))); }
+    if is_enabled("analyze_sentiment") { reg.register(Box::new(sentiment::SentimentTool::new(vader_lexicon.words.clone()))); }
+    if is_enabled("fraud_check") { reg.register(Box::new(fraud_check::FraudCheckTool::new(thresholds.fraud.clone()))); }
     
     // Fallback names mapping to tools if they differ from the class name:
-    if is_enabled("sentiment") && !enabled_tools.contains("analyze_sentiment") { reg.register(Box::new(sentiment::SentimentTool)); }
+    if is_enabled("sentiment") && !enabled_tools.contains("analyze_sentiment") { reg.register(Box::new(sentiment::SentimentTool::new(vader_lexicon.words.clone()))); }
     
     reg
 }

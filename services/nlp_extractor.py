@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Set, Tuple
 
 import services.config as config
+from .dynamic_config import get_thresholds
 
 # ------------------------------- Utils -------------------------------
 
@@ -83,6 +84,10 @@ PROPERTY_TYPES: list[str] = []
 AMENITY_KEYWORDS: Dict[str, List[str]] = {}
 
 _vocab_loaded = False
+
+
+def _nlp_thresholds():
+    return get_thresholds().nlp
 
 
 def _add_city_alias(alias: str, canonical: str) -> None:
@@ -157,6 +162,7 @@ def _ensure_vocab_loaded() -> None:
 # ----------------------- Helpers ------------------------------------
 
 def _fuzzy_property_type(text: str) -> Optional[str]:
+    cutoff = _nlp_thresholds().fuzzy_match_low
     tokens = re.findall(r"[a-zA-Z]+", text)
     candidates = set(tokens + text.split())
     for tok in candidates:
@@ -166,7 +172,7 @@ def _fuzzy_property_type(text: str) -> Optional[str]:
         for p in PROPERTY_TYPES:
             if p in tok_n or tok_n in p:
                 return p
-        match = difflib.get_close_matches(tok_n, PROPERTY_TYPES, n=1, cutoff=0.78)
+        match = difflib.get_close_matches(tok_n, PROPERTY_TYPES, n=1, cutoff=cutoff)
         if match:
             return match[0]
     return None
@@ -213,6 +219,7 @@ def _detect_city(user_text: str) -> Optional[str]:
             return cities_ns[g_ns]
 
     # 3) fuzzy on MULTIWORD grams only (avoid 1-token false positives)
+    thresholds = _nlp_thresholds()
     best: Tuple[float, Optional[str]] = (0.0, None)
     for g in grams_sorted:
         if " " not in g:
@@ -220,14 +227,14 @@ def _detect_city(user_text: str) -> Optional[str]:
         g_norm = _norm(g)
         g_tokens = g_norm.split()
         # broader candidate pool; we'll apply our own stricter acceptance below
-        matches = difflib.get_close_matches(g_norm, list(KNOWN_CITIES), n=3, cutoff=0.88)
+        matches = difflib.get_close_matches(g_norm, list(KNOWN_CITIES), n=3, cutoff=thresholds.fuzzy_match_medium)
         if not matches:
             continue
         for cand in matches:
             cand_tokens = cand.split()
             # dynamic acceptance: if first tokens match, allow slightly lower ratio
             tokens_share_first = len(g_tokens) > 0 and len(cand_tokens) > 0 and g_tokens[0] == cand_tokens[0]
-            required_ratio = 0.94 if not tokens_share_first else 0.90
+            required_ratio = thresholds.fuzzy_match_strict if not tokens_share_first else thresholds.fuzzy_match_high
             # require that at least half the tokens overlap (rounded up)
             overlap = len(set(g_tokens) & set(cand_tokens))
             min_overlap = max(1, (len(g_tokens) + 1) // 2)

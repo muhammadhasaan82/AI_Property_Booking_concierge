@@ -1,8 +1,8 @@
 from __future__ import annotations
-import os
+import asyncio
 from typing import Optional
 
-import psycopg
+from . import db_client
 
 
 SCHEMA_SQL = r"""
@@ -136,76 +136,50 @@ end$$;
 """
 
 
-def _build_conninfo() -> Optional[str]:
-    """Build a Postgres conninfo string from Supabase env.
-    Prefer SUPABASE_DB_URL if present; otherwise compose from known local defaults.
-    """
-    # If user provided a direct Postgres connection string, prefer it
-    db_url = os.getenv("SUPABASE_DB_URL") or os.getenv("POSTGRES_URL")
-    if db_url:
-        return db_url
-
-    # Compose from local supabase defaults
-    host = os.getenv("SUPABASE_DB_HOST", "127.0.0.1")
-    port = os.getenv("SUPABASE_DB_PORT", "54322")
-    dbname = os.getenv("SUPABASE_DB_NAME", "postgres")
-    user = os.getenv("SUPABASE_DB_USER", "postgres")
-    password = os.getenv("SUPABASE_DB_PASSWORD", "postgres")
-
-    if not host or not port or not dbname or not user:
-        return None
-    return f"host={host} port={port} dbname={dbname} user={user} password={password}"
+async def _init_schema_async(conninfo: Optional[str] = None) -> None:
+    """Create tables/policies if missing. Safe to run multiple times."""
+    await db_client.execute(SCHEMA_SQL, conninfo=conninfo)
 
 
 def init_schema(conninfo: Optional[str] = None) -> None:
-    """Create tables/policies if missing. Safe to run multiple times."""
-    conninfo = conninfo or _build_conninfo()
-    if not conninfo:
-        raise RuntimeError("Database connection info not found. Set SUPABASE_DB_URL or SUPABASE_DB_* envs.")
-    with psycopg.connect(conninfo, autocommit=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute(SCHEMA_SQL)
+    asyncio.run(_init_schema_async(conninfo))
+
+
+async def _verify_async(conninfo: Optional[str] = None) -> dict:
+    """Return counts and a simple health snapshot for users/bookings."""
+    out: dict = {"ok": True}
+    users = await db_client.fetch_one("select count(*) as c from public.users;", conninfo=conninfo)
+    bookings = await db_client.fetch_one("select count(*) as c from public.bookings;", conninfo=conninfo)
+    chat = None
+    details = None
+    successful = None
+    try:
+        row = await db_client.fetch_one("select count(*) as c from public.chat_history;", conninfo=conninfo)
+        chat = (row or {}).get("c")
+    except Exception:
+        chat = None
+    try:
+        row = await db_client.fetch_one("select count(*) as c from public.booking_details;", conninfo=conninfo)
+        details = (row or {}).get("c")
+    except Exception:
+        details = None
+    try:
+        row = await db_client.fetch_one("select count(*) as c from public.successful_bookings;", conninfo=conninfo)
+        successful = (row or {}).get("c")
+    except Exception:
+        successful = None
+    out.update({
+        "users": (users or {}).get("c", 0),
+        "bookings": (bookings or {}).get("c", 0),
+        "chat_history": chat,
+        "booking_details": details,
+        "successful_bookings": successful,
+    })
+    return out
 
 
 def verify(conninfo: Optional[str] = None) -> dict:
-    """Return counts and a simple health snapshot for users/bookings."""
-    conninfo = conninfo or _build_conninfo()
-    if not conninfo:
-        raise RuntimeError("Database connection info not found. Set SUPABASE_DB_URL or SUPABASE_DB_* envs.")
-    out: dict = {"ok": True}
-    with psycopg.connect(conninfo) as conn:
-        with conn.cursor() as cur:
-            cur.execute("select count(*) from public.users;")
-            users = cur.fetchone()[0]
-            cur.execute("select count(*) from public.bookings;")
-            bookings = cur.fetchone()[0]
-            # Optional tables (may not exist if older schema); guard each
-            chat = None
-            details = None
-            successful = None
-            try:
-                cur.execute("select count(*) from public.chat_history;")
-                chat = cur.fetchone()[0]
-            except Exception:
-                chat = None
-            try:
-                cur.execute("select count(*) from public.booking_details;")
-                details = cur.fetchone()[0]
-            except Exception:
-                details = None
-            try:
-                cur.execute("select count(*) from public.successful_bookings;")
-                successful = cur.fetchone()[0]
-            except Exception:
-                successful = None
-            out.update({
-                "users": users,
-                "bookings": bookings,
-                "chat_history": chat,
-                "booking_details": details,
-                "successful_bookings": successful,
-            })
-    return out
+    return asyncio.run(_verify_async(conninfo))
 
 
 if __name__ == "__main__":

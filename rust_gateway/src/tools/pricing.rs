@@ -1,8 +1,17 @@
 use serde_json::{json, Value};
 use super::Tool;
+use crate::config::PricingThresholds;
 
 /// Computes pricing: nights × rate, optional tax, seasonal multipliers.
-pub struct PricingTool;
+pub struct PricingTool {
+    thresholds: PricingThresholds,
+}
+
+impl PricingTool {
+    pub fn new(thresholds: PricingThresholds) -> Self {
+        Self { thresholds }
+    }
+}
 
 impl Tool for PricingTool {
     fn name(&self) -> &'static str {
@@ -55,8 +64,8 @@ impl Tool for PricingTool {
         let season_multiplier = if let Some(ci_str) = input.get("check_in").and_then(|v| v.as_str()) {
             if let Ok(d) = chrono::NaiveDate::parse_from_str(ci_str, "%Y-%m-%d") {
                 match d.format("%m").to_string().parse::<u32>().unwrap_or(1) {
-                    12 | 1 | 2 => 1.20,
-                    6 | 7 | 8 => 1.15,
+                    12 | 1 | 2 => self.thresholds.peak_multiplier,
+                    6 | 7 | 8 => self.thresholds.shoulder_multiplier,
                     _ => 1.0,
                 }
             } else {
@@ -67,7 +76,7 @@ impl Tool for PricingTool {
         };
 
         let subtotal = price_per_night * nights as f64 * season_multiplier;
-        let tax_rate = input.get("tax_rate").and_then(|v| v.as_f64()).unwrap_or(0.10);
+        let tax_rate = input.get("tax_rate").and_then(|v| v.as_f64()).unwrap_or(self.thresholds.tax_rate);
         let tax = subtotal * tax_rate;
         let total = subtotal + tax;
 
@@ -93,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_basic_pricing() {
-        let tool = PricingTool;
+        let tool = PricingTool::new(PricingThresholds::default());
         let input = json!({
             "price_per_night": 100.0,
             "nights": 3,
@@ -110,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_pricing_with_dates() {
-        let tool = PricingTool;
+        let tool = PricingTool::new(PricingThresholds::default());
         let input = json!({
             "price_per_night": 200.0,
             "check_in": "2027-03-10",

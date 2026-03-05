@@ -14,6 +14,7 @@ from services.confirmation_helpers import (
     REQUIRED_FIELDS,
     FIELD_PROMPTS,
 )
+from services.state_keys import SK
 
 
 # --- Helpers for mocking intent detection ---
@@ -32,12 +33,12 @@ COMPLETE_FILTERS = {
     "check_in": "2027-06-01",
     "check_out": "2027-06-05",
     "guests": 2,
-    "selected_property": {
+    SK.selected_property: {
         "title": "Beach Villa",
         "city": "miami",
         "price_per_night": 200,
     },
-    "recent_property_id": "p1",
+    SK.recent_property_id: "p1",
 }
 
 
@@ -87,7 +88,7 @@ class TestAskForField:
         persisted = {}
         result = _ask_for_field("name", persisted)
         assert "name" in result["reply"].lower()
-        assert persisted["awaiting_field"] == "name"
+        assert persisted[SK.awaiting_field] == "name"
 
     def test_asks_for_email(self):
         persisted = {}
@@ -100,13 +101,13 @@ class TestTryShowReceipt:
         persisted = {**COMPLETE_FILTERS}
         result = _try_show_receipt(persisted)
         assert "BOOKING SUMMARY" in result["reply"]
-        assert persisted.get("receipt_shown") is True
+        assert persisted.get(SK.receipt_shown) is True
 
     def test_asks_for_missing_field(self):
         persisted = {k: v for k, v in COMPLETE_FILTERS.items() if k != "phone"}
         result = _try_show_receipt(persisted)
         assert "phone" in result["reply"].lower()
-        assert persisted["awaiting_field"] == "phone"
+        assert persisted[SK.awaiting_field] == "phone"
 
 
 class TestHandleFinalConfirmation:
@@ -116,20 +117,20 @@ class TestHandleFinalConfirmation:
         assert result is None
 
     def test_confirms_booking_on_yes(self):
-        persisted = {**COMPLETE_FILTERS, "receipt_shown": True}
+        persisted = {**COMPLETE_FILTERS, SK.receipt_shown: True}
         result = handle_final_confirmation("yes", persisted, _mock_is_yes, _mock_is_no)
         assert result is not None
         assert result["tool_result"]["ready_for_booking"] is True
         assert result["booking_args"]["property_id"] == "p1"
 
     def test_cancels_on_no(self):
-        persisted = {**COMPLETE_FILTERS, "receipt_shown": True}
+        persisted = {**COMPLETE_FILTERS, SK.receipt_shown: True}
         result = handle_final_confirmation("no", persisted, _mock_is_yes, _mock_is_no)
         assert result is not None
         assert result["tool_result"]["cancelled"] is True
 
     def test_re_renders_receipt_on_total_request(self):
-        persisted = {**COMPLETE_FILTERS, "receipt_shown": True}
+        persisted = {**COMPLETE_FILTERS, SK.receipt_shown: True}
         result = handle_final_confirmation("show total", persisted, _mock_is_yes, _mock_is_no)
         assert result is not None
         assert "BOOKING SUMMARY" in result["reply"]
@@ -141,13 +142,13 @@ class TestHandlePostModification:
         assert result is None
 
     def test_proceeds_to_receipt(self):
-        persisted = {**COMPLETE_FILTERS, "awaiting_post_mod_choice": True}
+        persisted = {**COMPLETE_FILTERS, SK.awaiting_post_mod_choice: True}
         result = handle_post_modification_choice("yes", persisted)
         assert result is not None
         assert "BOOKING SUMMARY" in result["reply"]
 
     def test_allows_more_modifications(self):
-        persisted = {**COMPLETE_FILTERS, "awaiting_post_mod_choice": True}
+        persisted = {**COMPLETE_FILTERS, SK.awaiting_post_mod_choice: True}
         result = handle_post_modification_choice("modify", persisted)
         assert result is not None
         assert "modify" in result["reply"].lower()
@@ -159,13 +160,13 @@ class TestHandleSelectionConfirm:
         assert result is None
 
     def test_confirms_and_shows_receipt(self):
-        persisted = {**COMPLETE_FILTERS, "awaiting_selection_confirm": True}
+        persisted = {**COMPLETE_FILTERS, SK.awaiting_selection_confirm: True}
         result = handle_selection_confirm("yes", persisted, _mock_is_yes, _mock_is_no)
         assert result is not None
         assert "BOOKING SUMMARY" in result["reply"]
 
     def test_declines_selection(self):
-        persisted = {**COMPLETE_FILTERS, "awaiting_selection_confirm": True}
+        persisted = {**COMPLETE_FILTERS, SK.awaiting_selection_confirm: True}
         result = handle_selection_confirm("no", persisted, _mock_is_yes, _mock_is_no)
         assert result is not None
         assert "end" in str(result.get("tool_result", {}))

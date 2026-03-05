@@ -55,7 +55,9 @@ def node_triage(state: ChatState) -> ChatState:
             "no_selected_property": not filters.get(SK.selected_property),
             "no_awaiting_field": not filters.get(SK.awaiting_field),
             "no_active_selection": not any(filters.get(k) for k in [
-                "awaiting_unavailable_city_choice", "awaiting_city_selection", "awaiting_property_type_choice"
+                SK.awaiting_unavailable_city_choice,
+                SK.awaiting_city_selection,
+                SK.awaiting_property_type_choice,
             ]),
         }
 
@@ -115,9 +117,9 @@ def node_triage(state: ChatState) -> ChatState:
                 if policy.id == "faq_return_guard":
                     # Special inline action for FAQ return
                     try:
-                        resume_intent = filters.get("faq_resume_intent", "confirmation")
-                        filters.pop("faq_answered", None)
-                        filters.pop("faq_resume_intent", None)
+                        resume_intent = filters.get(SK.faq_resume_intent, "confirmation")
+                        filters.pop(SK.faq_answered, None)
+                        filters.pop(SK.faq_resume_intent, None)
                         if intent == "faq":
                             target_route = "faq"
                         elif intent in ["confirmation", "booking"] or nlp_engine.is_resume_request(user_text):
@@ -175,8 +177,8 @@ def node_faq(state: ChatState) -> ChatState:
         # Preserve state if FAQ was asked during booking/search.
         if out.get("preserve_context") and context.get("booking_state"):
             kept = {**context["booking_state"]}
-            kept["faq_answered"] = True
-            kept["faq_resume_intent"] = context.get("return_to", "confirmation")
+            kept[SK.faq_answered] = True
+            kept[SK.faq_resume_intent] = context.get("return_to", "confirmation")
             out["filters"] = kept
         
         return {**state, **out}
@@ -367,7 +369,7 @@ async def run_chat_graph(
         user_msg = message or ""
         bot_resp = (result.get("reply") or "").strip()
         if user_msg and bot_resp:
-            log_chat(user_msg, bot_resp)
+            await log_chat(user_msg, bot_resp)
     except Exception:
         pass
     return result

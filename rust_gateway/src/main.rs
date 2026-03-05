@@ -2,6 +2,7 @@ mod gateway;
 mod tools;
 mod cache;
 mod toon;
+mod config;
 
 use crate::tools::Tool;
 use axum::{
@@ -22,6 +23,8 @@ use tower_http::cors::{Any, CorsLayer};
 struct AppState {
     registry: tools::ToolRegistry,
     cache: cache::Cache,
+    thresholds: config::ThresholdsConfig,
+    vader_lexicon: config::VaderLexiconConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -144,28 +147,28 @@ async fn tool_validate_booking(
 
 /// Direct pricing tool endpoint.
 async fn tool_pricing(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    let tool = tools::pricing::PricingTool;
+    let tool = tools::pricing::PricingTool::new(state.thresholds.pricing.clone());
     Json(tool.execute(&body))
 }
 
 /// Direct sentiment analysis tool endpoint.
 async fn tool_sentiment(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    let tool = tools::sentiment::SentimentTool;
+    let tool = tools::sentiment::SentimentTool::new(state.vader_lexicon.words.clone());
     Json(tool.execute(&body))
 }
 
 /// Direct fraud check tool endpoint.
 async fn tool_fraud(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    let tool = tools::fraud_check::FraudCheckTool;
+    let tool = tools::fraud_check::FraudCheckTool::new(state.thresholds.fraud.clone());
     Json(tool.execute(&body))
 }
 
@@ -194,14 +197,22 @@ async fn main() {
 
     tracing::info!("Initializing Rust Gateway...");
 
+    let thresholds = config::load_thresholds_config();
+    let vader_lexicon = config::load_vader_lexicon();
+
     // Build tool registry
-    let registry = tools::build_default_registry();
+    let registry = tools::build_default_registry(&thresholds, &vader_lexicon);
     tracing::info!("Registered {} tools", registry.list_tools().len());
 
     // Build cache
     let cache = cache::Cache::new(10_000);
 
-    let state = Arc::new(AppState { registry, cache });
+    let state = Arc::new(AppState {
+        registry,
+        cache,
+        thresholds,
+        vader_lexicon,
+    });
 
     // CORS
     let cors = CorsLayer::new()

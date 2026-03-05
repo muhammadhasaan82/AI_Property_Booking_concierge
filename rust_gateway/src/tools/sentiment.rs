@@ -4,67 +4,13 @@ use super::Tool;
 
 /// VADER-inspired sentiment analysis tool.
 /// Uses a built-in lexicon for fast, deterministic scoring.
-pub struct SentimentTool;
+pub struct SentimentTool {
+    lexicon: HashMap<String, f64>,
+}
 
 impl SentimentTool {
-    fn build_lexicon() -> HashMap<&'static str, f64> {
-        let mut lex = HashMap::new();
-        // Positive words (general)
-        for (word, score) in [
-            ("good", 1.9), ("great", 3.1), ("excellent", 3.4), ("amazing", 3.2),
-            ("wonderful", 3.0), ("fantastic", 3.1), ("perfect", 3.0), ("beautiful", 2.7),
-            ("love", 2.9), ("like", 1.5), ("happy", 2.7), ("best", 3.2),
-            ("awesome", 3.1), ("nice", 1.8), ("lovely", 2.5), ("comfortable", 2.0),
-            ("clean", 1.8), ("friendly", 2.2), ("helpful", 2.1), ("recommend", 2.3),
-            ("spacious", 1.9), ("convenient", 1.8), ("pleasant", 2.0), ("enjoy", 2.3),
-            ("satisfied", 2.0), ("impressed", 2.5), ("thank", 1.5), ("thanks", 1.5),
-            ("please", 0.5), ("yes", 0.5), ("sure", 0.5),
-        ] {
-            lex.insert(word, score);
-        }
-        // Positive words (hospitality domain)
-        for (word, score) in [
-            ("cozy", 2.1), ("charming", 2.3), ("luxurious", 3.0), ("immaculate", 2.8),
-            ("pristine", 2.7), ("welcoming", 2.4), ("modern", 1.6), ("renovated", 1.8),
-            ("stunning", 2.9), ("breathtaking", 3.0), ("serene", 2.3), ("tranquil", 2.2),
-            ("attentive", 2.2), ("responsive", 2.0), ("courteous", 2.2), ("prompt", 1.8),
-            ("delicious", 2.7), ("gourmet", 2.3), ("scenic", 2.1), ("panoramic", 2.0),
-            ("upgraded", 1.9), ("complimentary", 1.8), ("affordable", 1.7),
-            ("spotless", 2.5), ("resort", 1.3), ("paradise", 2.8),
-        ] {
-            lex.insert(word, score);
-        }
-        // Negative words (general)
-        for (word, score) in [
-            ("bad", -2.5), ("terrible", -3.4), ("awful", -3.1), ("horrible", -3.2),
-            ("poor", -2.3), ("worst", -3.5), ("dirty", -2.7), ("ugly", -2.2),
-            ("hate", -3.0), ("dislike", -2.0), ("unhappy", -2.5), ("disappointed", -2.5),
-            ("rude", -2.5), ("noisy", -2.0), ("uncomfortable", -2.2), ("broken", -2.3),
-            ("slow", -1.5), ("expensive", -1.8), ("overpriced", -2.5), ("cold", -1.2),
-            ("small", -1.0), ("cramped", -2.0), ("smelly", -2.8), ("annoying", -2.2),
-            ("problem", -1.8), ("issue", -1.5), ("complaint", -2.0), ("angry", -2.7),
-            ("no", -0.5), ("not", -0.5), ("never", -1.0), ("cancel", -1.0),
-        ] {
-            lex.insert(word, score);
-        }
-        // Negative words (hospitality domain)
-        for (word, score) in [
-            ("moldy", -3.0), ("infested", -3.3), ("cockroach", -3.5), ("bedbug", -3.5),
-            ("stained", -2.3), ("musty", -2.2), ("neglected", -2.5), ("rundown", -2.7),
-            ("unsafe", -2.8), ("misleading", -2.4), ("scam", -3.2), ("overbooked", -2.3),
-            ("unresponsive", -2.2), ("unprofessional", -2.5), ("filthy", -3.0),
-            ("dilapidated", -2.8), ("hazardous", -2.9), ("unacceptable", -2.7),
-        ] {
-            lex.insert(word, score);
-        }
-        // Boosters
-        for (word, score) in [
-            ("very", 0.0), ("really", 0.0), ("extremely", 0.0), ("absolutely", 0.0),
-            ("quite", 0.0), ("so", 0.0), ("incredibly", 0.0), ("exceptionally", 0.0),
-        ] {
-            lex.insert(word, score);
-        }
-        lex
+    pub fn new(lexicon: HashMap<String, f64>) -> Self {
+        Self { lexicon }
     }
 }
 
@@ -99,7 +45,7 @@ impl Tool for SentimentTool {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let lexicon = Self::build_lexicon();
+        let lexicon = &self.lexicon;
         let words: Vec<&str> = text.split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
             .filter(|w| !w.is_empty())
@@ -113,11 +59,11 @@ impl Tool for SentimentTool {
 
         for (i, word) in words.iter().enumerate() {
             let lower = word.to_lowercase();
-            if let Some(&score) = lexicon.get(lower.as_str()) {
-                if score == 0.0 { continue; } // booster, skip direct scoring
+            if let Some(score) = lexicon.get(lower.as_str()) {
+                if *score == 0.0 { continue; } // booster, skip direct scoring
 
                 // Apply booster if previous word is an intensifier
-                let mut final_score = score;
+                let mut final_score = *score;
                 if i > 0 {
                     let prev = words[i - 1].to_lowercase();
                     if boosters.contains(&prev.as_str()) {
@@ -183,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_positive_sentiment() {
-        let tool = SentimentTool;
+        let tool = SentimentTool::new(crate::config::load_vader_lexicon().words);
         let input = json!({"text": "This hotel is amazing and the staff is very friendly"});
         let result = tool.execute(&input);
         assert_eq!(result["label"], "positive");
@@ -192,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_negative_sentiment() {
-        let tool = SentimentTool;
+        let tool = SentimentTool::new(crate::config::load_vader_lexicon().words);
         let input = json!({"text": "Terrible experience, the room was dirty and the service was awful"});
         let result = tool.execute(&input);
         assert_eq!(result["label"], "negative");
@@ -201,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_neutral_sentiment() {
-        let tool = SentimentTool;
+        let tool = SentimentTool::new(crate::config::load_vader_lexicon().words);
         let input = json!({"text": "I checked in at noon on Wednesday"});
         let result = tool.execute(&input);
         assert_eq!(result["label"], "neutral");

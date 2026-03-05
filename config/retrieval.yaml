@@ -1,0 +1,15 @@
+rag:
+  rrf_constant: 60
+  vector_k: 6
+  bm25_k: 6
+  max_context_chars: 1500
+  grounding_threshold: 0.4
+
+retrieval:
+  top_k: 10
+  result_limit: 5
+  scoring_weights:
+    exact_doc: 1.0
+    exact_title: 2.0
+    token_doc: 0.5
+    token_title: 1.0
