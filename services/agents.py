@@ -394,7 +394,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         if (
             _is_yes(t)
             or _is_no(t)
-            or _parse_selection_index(t) is not None
+            or nlp_engine.has_cardinal_extraction(t)
             or nlp_engine.wants_previous_results_sync(tl)
         ):
             return "confirmation"
