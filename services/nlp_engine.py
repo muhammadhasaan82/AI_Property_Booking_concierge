@@ -601,6 +601,146 @@ def extract_dates(text: str) -> List[str]:
             if ent.label_ == "DATE":
                 results.append(ent.text)
 
+
+def wants_previous_results_sync(text: str) -> bool:
+    """Semantic detection: does user want to return to previous search results?"""
+    if not text or not text.strip():
+        return False
+    
+    model = _get_st_model()
+    if model is None:
+        # Fallback keyword logic
+        tl = text.lower()
+        _prev_cfg = _get_catalog().previous_results_prototypes
+        return any(p in tl for p in _prev_cfg.fallback_keywords)
+
+    import numpy as np
+    _prev_cfg = _get_catalog().previous_results_prototypes
+    prototypes = _prev_cfg.prototypes
+    
+    text_vec = model.encode([text], convert_to_numpy=True)[0]
+    proto_vecs = model.encode(prototypes, convert_to_numpy=True)
+    
+    # Compute similarity against all prototypes
+    scores = np.dot(proto_vecs, text_vec) / (np.linalg.norm(proto_vecs, axis=1) * np.linalg.norm(text_vec) + 1e-8)
+    threshold = _get_catalog().previous_results_prototypes.threshold
+    return float(np.max(scores)) > threshold
+
+
+def detect_faq_intent(text: str) -> bool:
+    """Detect FAQ/policy questions using semantic classification."""
+    if not text or not text.strip():
+        return False
+    tl = text.strip().lower()
+
+    # Semantic classification
+    all_intents = list(_get_catalog().intents.keys())
+    intent = classify_intent_sync(tl, all_intents)
+    if intent == "faq":
+        threshold = _get_catalog().intents["faq"].threshold if "faq" in _get_catalog().intents else 0.50
+        conf = _semantic_confidence(tl, "faq")
+        if conf >= threshold:
+            return True
+
+    # Strong trigger keywords (policy/terms are always FAQ — regardless of booking context)
+    vocab = _get_vocab()
+    if any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in vocab.faq_strong_keywords):
+        return True
+
+    # Broader keyword + question pattern check
+    has_faq_seed = any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in vocab.faq_seeds)
+    has_question = (
+        "?" in tl
+        or any(tl.startswith(q) for q in vocab.faq_question_starts)
+        or any(cue in tl for cue in vocab.faq_question_cues)
+    )
+    return has_faq_seed and has_question
+
+
+# ─────────────────────────────────────────────────────────────────────
+# NER Extraction (spaCy-based with fallback)
+# ─────────────────────────────────────────────────────────────────────
+
+def extract_person_name(text: str) -> Optional[str]:
+    """Extract person name via spaCy PERSON NER, with regex fallback."""
+    if not text:
+        return None
+
+    t_lower = text.lower().strip()
+    # Guard: skip if text looks like a search query
+    vocab = _get_vocab()
+    if any(term in t_lower for term in vocab.name_search_guards):
+        return None
+
+    nlp = _get_spacy()
+    if nlp:
+        doc = nlp(text)
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                name = ent.text.strip().rstrip('.').strip()
+                if len(name) >= 2:
+                    return name
+
+    # Regex fallback — STRICT to prevent capturing conversational sentences
+    # Guard: reject text that contains common conversational/functional words
+    words = set(re.findall(r"[a-z]+", t_lower))
+    _has_conversational = bool(words & set(vocab.name_conversational_guards))
+
+    # Explicit "my name is ..." / "I am ..." patterns — always safe
+    for pat_str in vocab.name_explicit_patterns:
+        m = re.search(pat_str, text, re.I)
+        if m:
+            cand = m.group(1).strip().rstrip('.').strip()
+            # Limit explicit captures to 1-3 meaningful words
+            if len(cand.split()) <= 3 and len(cand) >= 2 and not _looks_like_email_username(cand):
+                return cand
+
+    # Full-string fallback — ONLY if no conversational words detected
+    # and text is very short (1-3 words, looks like a raw name)
+    if not _has_conversational:
+        stripped = text.strip()
+        word_count = len(stripped.split())
+        if 1 <= word_count <= 3:
+            _NAME_FULL_PAT = re.compile(r"^([A-Za-z][A-Za-z .'-]{1,60})$", re.I)
+            m = _NAME_FULL_PAT.match(stripped)
+            if m:
+                cand = m.group(1).strip().rstrip('.').strip()
+                if len(cand) >= 2 and not _looks_like_email_username(cand):
+                    return cand
+
+    return None
+
+
+def _looks_like_email_username(s: str) -> bool:
+    if not s:
+        return False
+    common = set(_get_vocab().email_username_common)
+    return (len(s) <= 3 or s.lower() in common or
+            bool(re.search(r'\d', s)) or
+            bool(re.search(r"[^a-zA-Z\s\-.'']", s)))
+
+
+def extract_dates(text: str) -> List[str]:
+    """Extract dates from text using spaCy DATE NER + regex fallback."""
+    results: List[str] = []
+    if not text:
+        return results
+
+    # Primary: ISO date regex (always reliable for YYYY-MM-DD)
+    iso_dates = re.findall(r"\b(\d{4}-\d{1,2}-\d{1,2})\b", text)
+    results.extend(iso_dates)
+
+    if results:
+        return results
+
+    # spaCy DATE entity extraction (for natural language dates)
+    nlp = _get_spacy()
+    if nlp:
+        doc = nlp(text)
+        for ent in doc.ents:
+            if ent.label_ == "DATE":
+                results.append(ent.text)
+
     return results
 
 
@@ -609,6 +749,11 @@ def extract_cardinal(text: str) -> Optional[int]:
     if not text:
         return None
     tl = text.strip().lower()
+    
+    if tl.isdigit():
+        val = int(tl)
+        return val if val >= 1 else None
+        
     vocab = _get_vocab()
     has_selection_context = any(
         re.search(rx, tl) is not None for rx in vocab.selection_context_patterns
