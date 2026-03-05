@@ -66,60 +66,33 @@ def _init_tracer() -> None:
         _TRACER_INIT_DONE = True
 
 
-class _Span(ContextDecorator):
-    _counter = 0
-    _lock = threading.Lock()
+tracer = trace.get_tracer(__name__)
 
+class _Span(ContextDecorator):
     def __init__(self, name: str, attributes: Optional[Dict[str, Any]] = None):
         self.name = name
         self.attributes = attributes or {}
-        self.start_time: float = 0.0
-        self.end_time: float = 0.0
-        self.duration_ms: float = 0.0
-        self._otel_cm = None
-        self._otel_span = None
-        with _Span._lock:
-            _Span._counter += 1
-            self.span_id = _Span._counter
+        self.span_ctx = None
+        self.current_span = None
 
     def __enter__(self):
-        _init_tracer()
-        self.start_time = time.perf_counter()
-
-        if _OTEL_AVAILABLE and _TRACER is not None:
-            self._otel_cm = _TRACER.start_as_current_span(self.name)
-            self._otel_span = self._otel_cm.__enter__()
-            self._otel_span.set_attribute("span_id", self.span_id)
-            for key, value in self.attributes.items():
-                self._otel_span.set_attribute(key, _safe_attr_value(value))
-        else:
-            kv = " ".join(f"{k}={v}" for k, v in self.attributes.items())
-            logger.debug("span=%s id=%d %s", self.name, self.span_id, kv)
-
+        self.span_ctx = tracer.start_as_current_span(self.name)
+        self.current_span = self.span_ctx.__enter__()
+        for k, v in self.attributes.items():
+            self.current_span.set_attribute(k, _safe_attr_value(v))
         return self
 
-    def __exit__(self, exc_type, exc, tb):
-        self.end_time = time.perf_counter()
-        self.duration_ms = (self.end_time - self.start_time) * 1000.0
-
-        if self._otel_span is not None:
-            self._otel_span.set_attribute("duration_ms", self.duration_ms)
-            self._otel_span.set_attribute("status", "ok" if exc is None else "error")
-            if exc is not None:
-                self._otel_span.record_exception(exc)
-            self._otel_cm.__exit__(exc_type, exc, tb)
-        else:
-            status = "ok" if exc is None else f"error={exc}"
-            logger.debug("span=%s id=%d duration_ms=%.1f %s", self.name, self.span_id, self.duration_ms, status)
-
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type:
+            self.current_span.record_exception(exc_value)
+        self.span_ctx.__exit__(exc_type, exc_value, traceback)
         return False
 
     async def __aenter__(self):
         return self.__enter__()
 
-    async def __aexit__(self, exc_type, exc, tb):
-        return self.__exit__(exc_type, exc, tb)
-
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        return self.__exit__(exc_type, exc_value, traceback)
 
 def span(name: str, attributes: Optional[Dict[str, Any]] = None) -> _Span:
     return _Span(name=name, attributes=attributes)
