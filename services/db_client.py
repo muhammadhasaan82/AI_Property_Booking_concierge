@@ -35,8 +35,8 @@ def build_conninfo(conninfo: Optional[str] = None) -> str:
     if conninfo:
         return conninfo
 
-    db_url = os.getenv("SUPABASE_DB_URL") or os.getenv("POSTGRES_URL")
-    if db_url:
+    db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or os.getenv("POSTGRES_URL")
+    if db_url and db_url != "your_supabase_connection_string_here":
         return db_url
 
     host = os.getenv("SUPABASE_DB_HOST", "127.0.0.1")
