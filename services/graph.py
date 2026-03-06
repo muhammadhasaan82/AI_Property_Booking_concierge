@@ -59,6 +59,8 @@ def node_triage(state: ChatState) -> ChatState:
                 SK.awaiting_unavailable_city_choice,
                 SK.awaiting_city_selection,
                 SK.awaiting_property_type_choice,
+                SK.receipt_shown,
+                SK.awaiting_selection_confirm,
             ]),
         }
 
