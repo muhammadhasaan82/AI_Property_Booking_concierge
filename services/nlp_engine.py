@@ -890,6 +890,77 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
     return None
 
 
+def extract_cardinal(text: str) -> Optional[int]:
+    """Extract ordinal/cardinal number from text for selection index."""
+    if not text:
+        return None
+    tl = text.strip().lower()
+    
+    # --- NATIVE STRUCTURAL FAST-PATH ---
+    if tl.isdigit():
+        val = int(tl)
+        return val if val >= 1 else None
+        
+    import re
+    fallback_m = re.search(r'\b(?:option|number|opt|choose|select|pick|go with)\s*(\d+)\b', tl)
+    if fallback_m:
+        val = int(fallback_m.group(1))
+        return val if val >= 1 else None
+    # -----------------------------------
+
+    vocab = _get_vocab()
+    has_selection_context = any(
+        re.search(rx, tl) is not None for rx in vocab.selection_context_patterns
+    )
+
+    # Regex patterns for explicit selection
+    for rx in vocab.selection_patterns:
+        m = re.search(rx, tl)
+        if m:
+            val = int(m.group(1))
+            return val if val >= 1 else None
+
+    # Ordinal words
+    ordinals = {str(k).lower(): int(v) for k, v in vocab.selection_ordinals.items()}
+    for word, idx in ordinals.items():
+        rendered = [tpl.format(word=word) for tpl in vocab.selection_ordinal_templates]
+        if (
+            tl in set(rendered)
+            or (has_selection_context and re.search(rf"\b{re.escape(word)}\b", tl))
+        ):
+            return idx
+
+    # Cardinal words
+    cardinals = {str(k).lower(): int(v) for k, v in vocab.selection_cardinals.items()}
+    if tl in cardinals:
+        return cardinals[tl]
+    if any(re.search(rx, tl) for rx in vocab.selection_referential_patterns):
+        return None
+    if vocab.selection_cardinal_context_pattern and cardinals:
+        cardinals_alt = "|".join(re.escape(w) for w in cardinals.keys())
+        rx = vocab.selection_cardinal_context_pattern.replace("{cardinals}", cardinals_alt)
+        m = re.search(rx, tl)
+        if m:
+            return cardinals.get(m.group(1))
+
+    # spaCy ORDINAL/CARDINAL fallback
+    nlp = _get_spacy()
+    if nlp and has_selection_context:
+        doc = nlp(text)
+        entity_labels = tuple(_get_vocab().selection_entity_labels)
+        for ent in doc.ents:
+            if ent.label_ in entity_labels:
+                try:
+                    val = int(ent.text)
+                    if val >= 1:
+                        return val
+                except ValueError:
+                    mapped = ordinals.get(ent.text.lower()) or cardinals.get(ent.text.lower())
+                    if mapped:
+                        return mapped
+
+    return None
+
 def has_cardinal_extraction(text: str) -> bool:
     """Return True when the utterance contains a valid selection cardinal."""
     return extract_cardinal(text) is not None
