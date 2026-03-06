@@ -312,7 +312,7 @@ def extract_filters(user_text: str, existing_filters: Optional[Dict[str, Any]] =
 
 def extract_property_type(user_text: str) -> Optional[str]:
     """
-    Extract (with typo tolerance) a property type: condo, loft, apartment, house, studio, villa, townhouse.
+    Extract a property type using dynamically loaded config and dataset vocabulary.
     """
     _ensure_vocab_loaded()
     t = _norm(user_text)
