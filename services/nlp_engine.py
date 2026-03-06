@@ -753,6 +753,13 @@ def extract_cardinal(text: str) -> Optional[int]:
     if tl.isdigit():
         val = int(tl)
         return val if val >= 1 else None
+
+    # Catch explicit selection phrases hidden inside sentences
+    import re
+    fallback_m = re.search(r'\b(?:option|number|opt|choose|select|pick|go with)\s*(\d+)\b', tl)
+    if fallback_m:
+        val = int(fallback_m.group(1))
+        return val if val >= 1 else None
         
     vocab = _get_vocab()
     has_selection_context = any(
