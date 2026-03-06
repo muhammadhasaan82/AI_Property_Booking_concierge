@@ -744,79 +744,76 @@ def extract_dates(text: str) -> List[str]:
     return results
 
 
-def extract_cardinal(text: str) -> Optional[int]:
-    """Extract ordinal/cardinal number from text for selection index."""
+def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Use LLM structured output to classify intent with minimal hardcoded rules."""
+    if not (OPENAI_API_KEY and LLM_STRUCTURED and SOFT_INTENT_ROUTER):
+        return None
+
+    text = (user_text or "").strip()
     if not text:
         return None
-    tl = text.strip().lower()
 
-    # --- NATIVE STRUCTURAL FAST-PATH ---
-    # Catch pure standalone digits
-    if tl.isdigit():
-        val = int(tl)
-        return val if val >= 1 else None
-        
-    # Catch explicit selection phrases missing from YAML
-    import re
-    fallback_m = re.search(r'\b(?:option|number|opt|choose|select|pick|go with)\s*(\d+)\b', tl)
-    if fallback_m:
-        val = int(fallback_m.group(1))
-        return val if val >= 1 else None
-    # -----------------------------------
-
-    vocab = _get_vocab()
-    has_selection_context = any(
-        re.search(rx, tl) is not None for rx in vocab.selection_context_patterns
+    active_filters = filters or {}
+    
+    # 1. Build the dynamic system prompt
+    system_prompt = (
+        "You are an intent classifier for a hotel booking chatbot. "
+        "Classify the user's message into ONE intent. Return strict JSON: {intent, confidence, brief_reason}. "
+        "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
+        "status_update, payment_link, handoff, availability, end.\n\n"
+        "CRITICAL RULES:\n"
+        "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, etc. A policy question always overrides booking context.\n"
+        "- 'confirmation' = user is selecting a numbered option, providing booking details, or affirming/declining a step.\n"
+        "- 'property_search' = user is looking for a place or asking about properties.\n"
+        "- 'greeting' = ONLY pure greetings with NO other intent.\n"
     )
 
-    # Regex patterns for explicit selection
-    for rx in vocab.selection_patterns:
-        m = re.search(rx, tl)
-        if m:
-            val = int(m.group(1))
-            return val if val >= 1 else None
+    # 2. INJECT STATE DIRECTLY INTO SYSTEM PROMPT (The Super Soft-Coded Fix)
+    has_last_results = bool(active_filters.get("last_results"))
+    if has_last_results:
+        count = len(active_filters.get("last_results") or [])
+        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You just showed the user a numbered list of {count} properties. If their message is a number (e.g. '1', '{count}'), an ordinal, or a selection phrase like 'option 7', they are making a selection. You MUST classify this intent strictly as 'confirmation'. Do NOT classify as property_search."
 
-    # Ordinal words
-    ordinals = {str(k).lower(): int(v) for k, v in vocab.selection_ordinals.items()}
-    for word, idx in ordinals.items():
-        rendered = [tpl.format(word=word) for tpl in vocab.selection_ordinal_templates]
-        if (
-            tl in set(rendered)
-            or (has_selection_context and re.search(rf"\b{re.escape(word)}\b", tl))
-        ):
-            return idx
+    if active_filters.get(SK.awaiting_field):
+        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get(SK.awaiting_field)}'. Treat their input as a 'confirmation' of this data."
 
-    # Cardinal words
-    cardinals = {str(k).lower(): int(v) for k, v in vocab.selection_cardinals.items()}
-    # Standalone cardinal replies like "one" or "two" are valid.
-    if tl in cardinals:
-        return cardinals[tl]
-    # Guard against referential phrases like "this one" / "that one".
-    if any(re.search(rx, tl) for rx in vocab.selection_referential_patterns):
+    try:
+        valid_types = get_vocabulary().seed_property_types
+        if valid_types:
+            system_prompt += f"\n\nValid property types in our database: {', '.join(valid_types)}."
+    except Exception:
+        pass
+
+    # 3. Send ONLY the user text, no confusing JSON context block
+    payload: Dict[str, Any] = {
+        "model": OPENAI_CHAT_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text}, 
+        ],
+    }
+
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            r = client.post("https://api.openai.com/v1/chat/completions", headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            }, json=payload)
+        if r.status_code != 200:
+            return None
+        body = r.json()
+        content = (((body or {}).get("choices") or [{}])[0] or {}).get("message", {}).get("content", "")
+        if not content:
+            return None
+        parsed = json.loads(content)
+        intent = str(parsed.get("intent", "")).strip()
+        confidence = float(parsed.get("confidence", 0.0) or 0.0)
+        if intent in _ALLOWED_INTENTS and confidence >= 0.45:
+            return intent
+    except Exception:
         return None
-    if vocab.selection_cardinal_context_pattern and cardinals:
-        cardinals_alt = "|".join(re.escape(w) for w in cardinals.keys())
-        rx = vocab.selection_cardinal_context_pattern.replace("{cardinals}", cardinals_alt)
-        m = re.search(rx, tl)
-        if m:
-            return cardinals.get(m.group(1))
-
-    # spaCy ORDINAL/CARDINAL fallback
-    nlp = _get_spacy()
-    if nlp and has_selection_context:
-        doc = nlp(text)
-        entity_labels = tuple(_get_vocab().selection_entity_labels)
-        for ent in doc.ents:
-            if ent.label_ in entity_labels:
-                try:
-                    val = int(ent.text)
-                    if val >= 1:
-                        return val
-                except ValueError:
-                    mapped = ordinals.get(ent.text.lower()) or cardinals.get(ent.text.lower())
-                    if mapped:
-                        return mapped
-
     return None
 
 
