@@ -100,6 +100,15 @@ class TestExtractCardinal:
     def test_cardinals(self, text, expected):
         assert nlp_engine.extract_cardinal(text) == expected
 
+    def test_structural_digit_fast_path(self):
+        assert nlp_engine.extract_cardinal("9") == 9
+        assert nlp_engine.has_cardinal_extraction("9") is True
+
+    def test_structural_digit_fast_path_without_spacy(self, monkeypatch):
+        monkeypatch.setattr(nlp_engine, "_get_spacy", lambda: None)
+        assert nlp_engine.extract_cardinal("9") == 9
+        assert nlp_engine.extract_cardinal("option 9") == 9
+
     def test_none(self):
         assert nlp_engine.extract_cardinal("hello world") is None
 

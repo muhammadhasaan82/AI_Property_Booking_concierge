@@ -60,6 +60,66 @@ _ALLOWED_INTENTS = {
 }
 
 
+def _build_llm_router_system_prompt(context: Dict[str, Any]) -> str:
+    """Build the intent-router system prompt from dynamic state and vocabulary."""
+    base_system = (
+        "You are an intent classifier for a hotel booking chatbot. "
+        "Classify the user's message into ONE intent. Return strict JSON: {intent, confidence, brief_reason}. "
+        "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
+        "status_update, payment_link, handoff, availability, end.\n\n"
+        "CRITICAL RULES:\n"
+        "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, smoking, check-in time, "
+        "wifi password, security deposit, amenities, or any property/platform question. "
+        "Classify as 'faq' EVEN IF the user is mid-booking. A policy question always overrides booking context.\n"
+        "- 'confirmation' = user is selecting a numbered option, providing booking details "
+        "(name, phone, email, dates, guests), or affirming/declining a booking step "
+        "(yes/no in booking context).\n"
+        "- If the message is only a number and there is NO active property list in context, "
+        "do NOT classify it as 'confirmation'.\n"
+        "- 'property_search' = user is looking for a place or asking about properties.\n"
+        "- 'greeting' = ONLY pure greetings like 'hi', 'hello', 'hey', 'good morning' with NO other intent.\n"
+        "- If the message contains ANY reference to selecting an option number, it is 'confirmation', NOT 'greeting'.\n"
+        "- Words like 'sure', 'ok', 'go ahead' combined with option/number references = 'confirmation'.\n"
+    )
+
+    prompt_sections = [base_system]
+
+    state_lines = [
+        "[ACTIVE STATE]",
+        f"- has_selected_property: {bool(context.get('has_selected_property'))}",
+        f"- has_booking_progress: {bool(context.get('has_booking_progress'))}",
+        f"- has_last_results: {bool(context.get('has_last_results'))}",
+        f"- last_results_count: {int(context.get('last_results_count') or 0)}",
+        f"- awaiting_field: {context.get(SK.awaiting_field) or 'none'}",
+        f"- receipt_shown: {bool(context.get(SK.receipt_shown))}",
+    ]
+    prompt_sections.append("\n".join(state_lines))
+
+    property_types = [pt for pt in get_vocabulary().seed_property_types if pt]
+    if property_types:
+        prompt_sections.append(
+            "Valid property types in our database: " + ", ".join(property_types) + "."
+        )
+
+    if context.get("has_last_results"):
+        count = int(context.get("last_results_count") or 0)
+        prompt_sections.append(
+            "[CRITICAL STATE OVERRIDE]: You just showed the user a numbered list of "
+            f"{count} properties. If their message is a number (for example '1' or '{count}') "
+            "or an ordinal, they are making a selection. You MUST classify this intent strictly "
+            "as 'confirmation'. Do NOT classify it as 'property_search'."
+        )
+
+    awaiting_field = context.get(SK.awaiting_field)
+    if awaiting_field:
+        prompt_sections.append(
+            "[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide "
+            f"their '{awaiting_field}'. Treat their input as a 'confirmation' of this data."
+        )
+
+    return "\n\n".join(prompt_sections)
+
+
 def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """Use LLM structured output to classify intent with minimal hardcoded rules."""
     if not (OPENAI_API_KEY and LLM_STRUCTURED and SOFT_INTENT_ROUTER):
@@ -77,6 +137,7 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
         SK.awaiting_field: (filters or {}).get(SK.awaiting_field),
         SK.receipt_shown: bool((filters or {}).get(SK.receipt_shown)),
     }
+    system_prompt = _build_llm_router_system_prompt(context)
 
     payload: Dict[str, Any] = {
         "model": OPENAI_CHAT_MODEL,
@@ -85,29 +146,11 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "You are an intent classifier for a hotel booking chatbot. "
-                    "Classify the user's message into ONE intent. Return strict JSON: {intent, confidence, brief_reason}. "
-                    "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
-                    "status_update, payment_link, handoff, availability, end.\n\n"
-                    "CRITICAL RULES:\n"
-                    "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, smoking, check-in time, "
-                    "wifi password, security deposit, amenities, or any property/platform question. "
-                    "Classify as 'faq' EVEN IF the user is mid-booking. A policy question always overrides booking context.\n"
-                    "- 'confirmation' = user is selecting a numbered option (e.g. 'option 3', 'go for number 5', "
-                    "'I will take the second one'), providing booking details (name, phone, email, dates, guests), "
-                    "or affirming/declining a booking step (yes/no in booking context).\n"
-                    "- If context says the user is currently viewing a list of properties, any numeric reply or selection phrase is 'confirmation'.\n"
-                    "- If the message is only a number and there is NO active property list in context, do NOT classify it as 'confirmation'.\n"
-                    "- 'property_search' = user is looking for a place or asking about properties. If they say 'hello I need a loft in NYC', it is 'property_search', NOT 'greeting'.\n"
-                    "- 'greeting' = ONLY pure greetings like 'hi', 'hello', 'hey', 'good morning' with NO other intent.\n"
-                    "- If the message contains ANY reference to selecting an option number, it is 'confirmation', NOT 'greeting'.\n"
-                    "- Words like 'sure', 'ok', 'go ahead' combined with option/number references = 'confirmation'.\n"
-                ),
+                "content": system_prompt,
             },
             {
                 "role": "user",
-                "content": json.dumps({"message": text, "context": context}, ensure_ascii=False),
+                "content": text,
             },
         ],
     }

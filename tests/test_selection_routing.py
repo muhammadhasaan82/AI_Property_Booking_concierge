@@ -12,3 +12,8 @@ def test_numeric_selection_routes_confirmation_only_with_active_results(monkeypa
 def test_standalone_number_without_results_falls_back_to_search(monkeypatch):
     monkeypatch.setattr(agents, "_llm_route_intent", lambda text, filters=None: None)
     assert agents.triage_intent("9", {}) == "property_search"
+
+
+def test_active_results_policy_beats_bad_llm_selection_route(monkeypatch):
+    monkeypatch.setattr(agents, "_llm_route_intent", lambda text, filters=None: "property_search")
+    assert agents.triage_intent("9", {"last_results": [{"id": "p1"}]}) == "confirmation"
