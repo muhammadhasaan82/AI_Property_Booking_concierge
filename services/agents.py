@@ -129,6 +129,77 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
     if not text:
         return None
 
+    active_filters = filters or {}
+    
+    # 1. Build the dynamic system prompt
+    system_prompt = (
+        "You are an intent classifier for a hotel booking chatbot. "
+        "Classify the user's message into ONE intent. Return strict JSON: {intent, confidence, brief_reason}. "
+        "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
+        "status_update, payment_link, handoff, availability, end.\n\n"
+        "CRITICAL RULES:\n"
+        "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, etc. A policy question always overrides booking context.\n"
+        "- 'confirmation' = user is selecting a numbered option, providing booking details, or affirming/declining a step.\n"
+        "- 'property_search' = user is looking for a place or asking about properties.\n"
+        "- 'greeting' = ONLY pure greetings with NO other intent.\n"
+    )
+
+    # 2. INJECT STATE DIRECTLY INTO SYSTEM PROMPT (The Super Soft-Coded Fix)
+    has_last_results = bool(active_filters.get("last_results"))
+    if has_last_results:
+        count = len(active_filters.get("last_results") or [])
+        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You just showed the user a numbered list of {count} properties. If their message contains a number (e.g. '1', '{count}'), an ordinal, or a phrase like 'option 6' or 'show me option 7', they are making a selection. You MUST classify this intent strictly as 'confirmation'. Do NOT classify as property_search."
+
+    if active_filters.get(SK.awaiting_field):
+        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get(SK.awaiting_field)}'. Treat their input as a 'confirmation' of this data."
+
+    try:
+        valid_types = get_vocabulary().seed_property_types
+        if valid_types:
+            system_prompt += f"\n\nValid property types in our database: {', '.join(valid_types)}."
+    except Exception:
+        pass
+
+    # 3. Send ONLY the user text, no confusing JSON context block
+    payload: Dict[str, Any] = {
+        "model": OPENAI_CHAT_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text}, 
+        ],
+    }
+
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            r = client.post("https://api.openai.com/v1/chat/completions", headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            }, json=payload)
+        if r.status_code != 200:
+            return None
+        body = r.json()
+        content = (((body or {}).get("choices") or [{}])[0] or {}).get("message", {}).get("content", "")
+        if not content:
+            return None
+        parsed = json.loads(content)
+        intent = str(parsed.get("intent", "")).strip()
+        confidence = float(parsed.get("confidence", 0.0) or 0.0)
+        if intent in _ALLOWED_INTENTS and confidence >= 0.45:
+            return intent
+    except Exception:
+        return None
+    return None
+    
+    """Use LLM structured output to classify intent with minimal hardcoded rules."""
+    if not (OPENAI_API_KEY and LLM_STRUCTURED and SOFT_INTENT_ROUTER):
+        return None
+
+    text = (user_text or "").strip()
+    if not text:
+        return None
+
     context = {
         "has_selected_property": bool((filters or {}).get(SK.selected_property)),
         "has_booking_progress": any((filters or {}).get(k) for k in config.REQUIRED_FIELDS),
