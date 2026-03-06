@@ -1397,7 +1397,8 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
     parsed_guests = _parse_guests(user_text)
 
     # Fast-path: if user explicitly asked to change dates, immediately route to date prompts
-    if _wants_modification(user_text):
+    is_answering_date = persisted.get(SK.awaiting_field) in ["check_in", "check_out"] and parsed_dates
+    if _wants_modification(user_text) and not is_answering_date:
         try:
             requested_now = _detect_requested_fields(user_text)
         except Exception:
@@ -1442,7 +1443,14 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         just_applied_field_update = True
 
     # Global branch: user explicitly wants to modify requirements (even if receipt not visible)
-    if _wants_modification(user_text):
+    is_answering_prompt = (
+        (persisted.get(SK.awaiting_field) in ["check_in", "check_out"] and parsed_dates) or
+        (persisted.get(SK.awaiting_field) == "guests" and parsed_guests is not None) or
+        (persisted.get(SK.awaiting_field) == "name" and parsed_name) or
+        (persisted.get(SK.awaiting_field) == "phone" and parsed_phone) or
+        (persisted.get(SK.awaiting_field) == "email" and parsed_email)
+    )
+    if _wants_modification(user_text) and not is_answering_prompt:
         requested = _detect_requested_fields(user_text)
         if not requested:
             persisted[SK.awaiting_field] = "modification"
