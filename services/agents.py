@@ -191,7 +191,7 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
     except Exception:
         return None
     return None
-    
+
     """Use LLM structured output to classify intent with minimal hardcoded rules."""
     if not (OPENAI_API_KEY and LLM_STRUCTURED and SOFT_INTENT_ROUTER):
         return None
@@ -495,6 +495,12 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     t = user_text or ""
     active_filters = filters or {}
     tl = t.lower().strip()
+
+    # --- IRONCLAD SELECTION GUARD ---
+    # If the user is looking at a list and types a number, it is 100% a confirmation.
+    if active_filters.get("last_results") and nlp_engine.has_cardinal_extraction(t):
+        return "confirmation"
+    # --------------------------------
 
     # Keep strict deterministic guards for critical intents.
     if _is_greeting(t):
