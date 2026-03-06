@@ -101,8 +101,8 @@ def node_triage(state: ChatState) -> ChatState:
             if cond.is_safe is not None and cond.is_safe != ctx["is_safe"]: match = False
             if cond.intent is not None and cond.intent != ctx["intent"]: match = False
             if cond.intent_in is not None and ctx["intent"] not in cond.intent_in: match = False
-            if cond.filter_key is not None and cond.filter_key not in ctx["filter_keys"]: match = False
-            if cond.any_filter_key is not None and not any(k in ctx["filter_keys"] for k in cond.any_filter_key): match = False
+            if cond.filter_key is not None and not filters.get(cond.filter_key): match = False
+            if cond.any_filter_key is not None and not any(filters.get(k) for k in cond.any_filter_key): match = False
             if cond.has_context_key is not None and not filters.get(cond.has_context_key): match = False
             if cond.lacks_context_key is not None and filters.get(cond.lacks_context_key): match = False
             if cond.has_booking_context is not None and cond.has_booking_context != ctx["has_booking_context"]: match = False
