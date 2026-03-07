@@ -519,6 +519,10 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         ):
             return "confirmation"
 
+    # Master Shield for Booking IDs (UUIDs)
+    if re.search(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", user_text):
+        return "status_update"
+    
     # Master Shield for Input Fields
     if active_filters.get(SK.awaiting_field) in ["name", "phone", "email", "guests"]:
         return "confirmation"
