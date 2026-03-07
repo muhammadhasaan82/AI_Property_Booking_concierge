@@ -164,13 +164,15 @@ def _ensure_vocab_loaded() -> None:
 def _fuzzy_property_type(text: str) -> Optional[str]:
     cutoff = _nlp_thresholds().fuzzy_match_low
     tokens = re.findall(r"[a-zA-Z]+", text)
-    candidates = set(tokens + text.split())
+    candidates = set(tokens)
     for tok in candidates:
         tok_n = _norm(tok)
-        if not tok_n:
+        # Ignore extremely short words like 'a', 'in', 'is' to prevent false positive substring matches
+        if not tok_n or len(tok_n) < 4:
             continue
         for p in PROPERTY_TYPES:
-            if p in tok_n or tok_n in p:
+            # Only match if the property type is in the user's word (e.g. 'townhouse' in 'townhouses')
+            if p in tok_n:
                 return p
         match = difflib.get_close_matches(tok_n, PROPERTY_TYPES, n=1, cutoff=cutoff)
         if match:
