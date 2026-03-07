@@ -2374,7 +2374,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         # Extract the actual property types the vector store retrieved
         retrieved_types = {str(r.get("property_type", "")).lower() for r in results[:5] if r.get("property_type")}
         
-        # If the vector store substituted an unavailable word (like 'hotel') for available types
+        # If the vector store substituted an unavailable word (like 'resort') for available types
         # the retrieved types won't exist in the user's prompt. We catch this dynamically!
         if retrieved_types and not any(rt in user_tl for rt in retrieved_types):
             import services.config as config
@@ -2387,11 +2387,6 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
                 f"Which of these would you prefer?"
             )
             return {"results": [], "reply": reply, "filters": extracted}
-
-    # If city is known/requested but no listings, trigger unavailable-city flow.
-    if requested_city and not results:
-        extracted[SK.awaiting_unavailable_city_choice] = True
-        return {"results": [], "reply": _unavailable_city_reply(), "filters": extracted}
 
     # If city is known/requested but no listings, trigger unavailable-city flow.
     if requested_city and not results:
