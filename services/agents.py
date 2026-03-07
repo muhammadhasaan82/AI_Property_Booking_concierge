@@ -531,6 +531,10 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if active_filters.get(SK.receipt_shown) and (_is_yes(t) or _is_no(t)):
         return "confirmation"
 
+    # Master Shield for Active Cancellations
+    if ("cancel" in tl or "delete" in tl) and "policy" not in tl:
+        return "status_update"
+
     policy_route = _apply_contextual_triage_policies(t, active_filters)
     if policy_route:
         return policy_route
