@@ -193,3 +193,40 @@ async def update_booking_status(booking_id: str, current_status: str, new_status
         return {"ok": False, "error": str(exc)}
 
     return {"ok": False, "error": "not found"}
+
+
+async def delete_booking(booking_id: str) -> Dict[str, Any]:
+    """Hard delete a booking from the database."""
+    if not booking_id:
+        return {"ok": False, "error": "booking_id required"}
+
+    # Remove from mock memory if testing locally
+    if booking_id in _BOOKINGS:
+        del _BOOKINGS[booking_id]
+        return {"ok": True}
+
+    # Remove from Postgres database
+    try:
+        from . import db_client
+        rowcount = await db_client.execute(
+            """
+            delete from public.bookings
+            where id = %s;
+            """,
+            (booking_id,)
+        )
+        
+        # Also clean up the successful_bookings table to be thorough
+        await db_client.execute(
+            """
+            delete from public.successful_bookings
+            where booking_id = %s;
+            """,
+            (booking_id,)
+        )
+        
+        if rowcount > 0:
+            return {"ok": True}
+        return {"ok": False, "error": "booking not found"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}

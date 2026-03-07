@@ -548,6 +548,9 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         faq_hit = any(w in t.lower() for w in _vocab().faq_fallback_keywords)
 
     if faq_hit:
+        # Prevent FAQ from hijacking active cancellation requests
+        if "cancel" in t.lower() and "booking" in t.lower() and "policy" not in t.lower():
+            return "status_update"
         return "faq"
 
     # Status checks come after FAQ so policy questions like "refund/check-in policy"
@@ -2134,7 +2137,18 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
     # If we don't have an id yet, request it clearly
     if not booking_id:
+        if "cancel" in user_text.lower():
+            return {"reply": "I can help you cancel that. Please provide your Booking ID."}
         return {"reply":"Please provide your Booking ID (e.g., 57015107-d414-409c-843e-b6a6b15d9b59)."}
+
+    # 🛑 MASTER SHIELD: Intercept Cancellation Requests 🛑
+    if "cancel" in user_text.lower() or "delete" in user_text.lower():
+        from .booking import delete_booking
+        res = await delete_booking(booking_id)
+        if res.get("ok"):
+            return {"tool_result": {"ok": True, "deleted": True}, "reply": f"✅ Booking `{booking_id}` has been successfully cancelled and completely removed from our database."}
+        else:
+            return {"tool_result": {"ok": False}, "reply": f"Sorry, I couldn't delete the booking: {res.get('error')}"}
 
     # Follow-up after showing status
     if action == "followup":
