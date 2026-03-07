@@ -14,7 +14,9 @@ sentence-transformers are unavailable.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import logging
+import os
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,6 +31,34 @@ _vader_analyzer = None
 _spacy_nlp = None
 _st_model = None
 _intent_embeddings: Optional[Dict[str, Any]] = None
+RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
+
+
+@contextmanager
+def _local_model_load(enabled: bool):
+    if not enabled:
+        yield
+        return
+
+    keys = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE")
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in keys:
+            os.environ[key] = "1"
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _is_local_model_reference(model_name: str) -> bool:
+    try:
+        return os.path.exists(os.path.expanduser(model_name))
+    except OSError:
+        return False
 
 # ─────────────────────────────────────────────────────────────────────
 # Config-driven prototypes (loaded from config/intent_catalog.yaml)
@@ -112,9 +142,15 @@ def _get_st_model():
     global _st_model
     if _st_model is None:
         try:
+            model_name = "BAAI/bge-small-en-v1.5"
+            if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(model_name):
+                _st_model = False
+                return None
+
             from sentence_transformers import SentenceTransformer
-            _st_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
-            logger.info("[nlp_engine] sentence-transformers BAAI/bge-small-en-v1.5 loaded")
+            with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+                _st_model = SentenceTransformer(model_name)
+            logger.info("[nlp_engine] sentence-transformers %s loaded", model_name)
         except Exception as exc:  # noqa: BLE001 - degrade gracefully in restricted envs
             logger.warning(
                 "[nlp_engine] sentence-transformers unavailable (%s), falling back to keyword matching",
