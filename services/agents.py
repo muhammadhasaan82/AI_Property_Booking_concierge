@@ -837,14 +837,6 @@ def greeting_agent(filters: Dict[str, Any], user_text: str = "") -> Dict[str, An
     if budget: parts.append(f"budget ${budget}")
     hint=f" (noted: {', '.join(parts)})" if parts else ""
 
-    name = clean_filters.get("name")
-    # Do not parse greetings like "hello" as names.
-    if user_text and not _is_greeting(user_text):
-        name = _parse_name(user_text) or name
-    if name:
-        clean_filters["name"] = name
-        return {"reply": f"Hi {name.title()}! 👋 I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
-
     return {"reply": f"Hi there! 👋 I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
 
 async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
