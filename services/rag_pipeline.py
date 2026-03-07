@@ -17,6 +17,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -38,6 +39,34 @@ else:
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 EMBED_NORMALIZE = True
+RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
+
+
+@contextmanager
+def _local_model_load(enabled: bool):
+    if not enabled:
+        yield
+        return
+
+    keys = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE")
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in keys:
+            os.environ[key] = "1"
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _is_local_model_reference(model_name: str) -> bool:
+    try:
+        return Path(model_name).expanduser().exists()
+    except OSError:
+        return False
 
 
 def _rag_thresholds():
@@ -68,8 +97,14 @@ def _get_cross_encoder():
         with _cross_encoder_lock:
             if _cross_encoder is None:
                 try:
+                    model_name = "cross-encoder/ms-marco-MiniLM-L6-v2"
+                    if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(model_name):
+                        return None
+
                     from sentence_transformers import CrossEncoder
-                    _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L6-v2")
+
+                    with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+                        _cross_encoder = CrossEncoder(model_name)
                 except Exception as e:
                     logger.warning("Cross-encoder unavailable: %s", e)
     return _cross_encoder

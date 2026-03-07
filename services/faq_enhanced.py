@@ -4,6 +4,7 @@ Handles company policy questions using semantic search
 """
 
 from __future__ import annotations
+from contextlib import contextmanager
 import os
 import re
 from pathlib import Path
@@ -45,6 +46,63 @@ OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 # Initialize ChromaDB path
 CHROMA_PATH = Path(__file__).parent.parent / "chroma_faq"
 CHROMA_PATH.mkdir(exist_ok=True)
+EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
+
+
+@contextmanager
+def _local_model_load(enabled: bool):
+    if not enabled:
+        yield
+        return
+
+    keys = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE")
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in keys:
+            os.environ[key] = "1"
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _is_local_model_reference(model_name: str) -> bool:
+    try:
+        return Path(model_name).expanduser().exists()
+    except OSError:
+        return False
+
+
+class _SentenceTransformerEmbeddings:
+    """Minimal LangChain-compatible embeddings adapter."""
+
+    def __init__(self, model_name: str, *, device: str = "cpu", normalize_embeddings: bool = True):
+        try:
+            from sentence_transformers import SentenceTransformer
+        except Exception as exc:  # noqa: BLE001 - optional dependency in some envs
+            raise ImportError("sentence-transformers is unavailable") from exc
+
+        with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+            self._model = SentenceTransformer(model_name, device=device)
+        self._normalize_embeddings = normalize_embeddings
+
+    @staticmethod
+    def _as_list(vector: Any) -> List[float]:
+        if hasattr(vector, "tolist"):
+            return vector.tolist()
+        return list(vector)
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        vectors = self._model.encode(texts, normalize_embeddings=self._normalize_embeddings)
+        return [self._as_list(vector) for vector in vectors]
+
+    def embed_query(self, text: str) -> List[float]:
+        vector = self._model.encode(text, normalize_embeddings=self._normalize_embeddings)
+        return self._as_list(vector)
 
 # ---------------------------------------------------------------------------
 # FAQService class — replaces global state with dependency injection
@@ -62,6 +120,7 @@ class FAQService:
         self._chroma_path.mkdir(exist_ok=True)
         self._vector_store: Optional[Chroma] = None
         self._embeddings = None
+        self._documents: List[Document] = []
         self._healthy = False
 
     @property
@@ -85,36 +144,141 @@ class FAQService:
             logger.error("Error loading PDF: %s", e)
             return ""
 
-    def process_policy_document(self, pdf_path: str, force_reload: bool = False) -> Chroma:
-        if self._embeddings is None:
-            if HuggingFaceBgeEmbeddings is None:
-                raise ImportError(
-                    "HuggingFaceBgeEmbeddings is unavailable. Install langchain-huggingface "
-                    "or langchain-community with sentence-transformers support."
-                )
-            device = "cpu"
-            try:
-                import torch  # type: ignore
+    @staticmethod
+    def _detect_device() -> str:
+        device = "cpu"
+        try:
+            import torch  # type: ignore
 
-                if torch.cuda.is_available():
-                    device = "cuda"
-            except Exception:
-                device = "cpu"
-            self._embeddings = HuggingFaceBgeEmbeddings(
-                model_name="BAAI/bge-small-en-v1.5",
-                model_kwargs={"device": device},
-                encode_kwargs={"normalize_embeddings": True},
+            if torch.cuda.is_available():
+                device = "cuda"
+        except Exception:
+            device = "cpu"
+        return device
+
+    @staticmethod
+    def _build_documents_from_text(pdf_text: str) -> List[Document]:
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, chunk_overlap=200,
+            length_function=len, separators=["\n\n", "\n", ". ", " ", ""],
+        )
+        chunks = text_splitter.split_text(pdf_text)
+        documents = []
+        for i, chunk in enumerate(chunks):
+            page_match = re.search(r"\[Page (\d+)\]", chunk)
+            page_num = page_match.group(1) if page_match else "Unknown"
+            clean_chunk = re.sub(r"\[Page \d+\]", "", chunk).strip()
+            if not clean_chunk:
+                continue
+            doc = Document(
+                page_content=clean_chunk,
+                metadata={"source": "Company Policy", "page": page_num, "chunk_index": i, "document": "company_policy.pdf"},
+            )
+            documents.append(doc)
+        return documents
+
+    def _ensure_embeddings(self):
+        if self._embeddings is not None:
+            return self._embeddings
+
+        if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(EMBED_MODEL):
+            raise ImportError(
+                f"Embedding model '{EMBED_MODEL}' is not a local path. "
+                "Set RAG_LOCAL_MODELS_ONLY=0 to allow remote model downloads."
             )
 
+        device = self._detect_device()
+        backend_error: Exception | None = None
+
+        if HuggingFaceBgeEmbeddings is not None:
+            try:
+                with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+                    self._embeddings = HuggingFaceBgeEmbeddings(
+                        model_name=EMBED_MODEL,
+                        model_kwargs={"device": device},
+                        encode_kwargs={"normalize_embeddings": True},
+                    )
+                return self._embeddings
+            except Exception as exc:  # noqa: BLE001 - fallback to direct sentence-transformers adapter
+                backend_error = exc
+                logger.warning("BGE embedding backend unavailable, falling back: %s", exc)
+
+        try:
+            self._embeddings = _SentenceTransformerEmbeddings(
+                EMBED_MODEL,
+                device=device,
+                normalize_embeddings=True,
+            )
+            return self._embeddings
+        except Exception as exc:  # noqa: BLE001 - final fallback is lexical retrieval
+            backend_error = exc
+            logger.warning("SentenceTransformer embedding backend unavailable: %s", exc)
+
+        raise ImportError(
+            "No FAQ embedding backend is available. Install langchain-huggingface or ensure "
+            "sentence-transformers is installed."
+        ) from backend_error
+
+    def _keyword_retrieve(self, query: str, k: int) -> List[Tuple[Document, float]]:
+        docs = list(self._documents)
+        if not docs and self._vector_store is not None:
+            try:
+                payload = self._vector_store._collection.get(include=["documents", "metadatas"])
+                raw_docs = payload.get("documents", []) or []
+                metadatas = payload.get("metadatas", []) or []
+                docs = [
+                    Document(page_content=text, metadata=metadatas[idx] or {})
+                    for idx, text in enumerate(raw_docs)
+                    if text
+                ]
+            except Exception as exc:  # noqa: BLE001 - store introspection is best effort
+                logger.warning("Could not load lexical FAQ corpus from Chroma: %s", exc)
+
+        if not docs:
+            return []
+
+        ranked: List[Tuple[int, float]] = []
+        try:
+            from .rag_pipeline import bm25_search
+
+            ranked = bm25_search(query, [doc.page_content for doc in docs], k=max(k, 1))
+        except Exception as exc:  # noqa: BLE001 - final fallback uses token overlap
+            logger.warning("BM25 FAQ retrieval failed, using token overlap: %s", exc)
+
+        if not ranked:
+            tokens = {token for token in re.findall(r"[a-z0-9]+", query.lower()) if len(token) > 2}
+            scored = []
+            for idx, doc in enumerate(docs):
+                content = doc.page_content.lower()
+                overlap = sum(1 for token in tokens if token in content)
+                if overlap:
+                    scored.append((idx, float(overlap)))
+            ranked = sorted(scored, key=lambda item: item[1], reverse=True)[: max(k, 1)]
+
+        total = max(len(ranked), 1)
+        results: List[Tuple[Document, float]] = []
+        for rank, (idx, _score) in enumerate(ranked[: max(k, 1)]):
+            if idx >= len(docs):
+                continue
+            results.append((docs[idx], max(0.0, 1.0 - (rank / total))))
+        return results
+
+    def process_policy_document(self, pdf_path: str, force_reload: bool = False) -> Optional[Chroma]:
         if self._vector_store is not None and not force_reload:
             return self._vector_store
 
         persist_directory = str(self._chroma_path)
-        if os.path.exists(persist_directory) and not force_reload:
+        embeddings = None
+        try:
+            embeddings = self._ensure_embeddings()
+        except Exception as exc:  # noqa: BLE001 - lexical fallback keeps FAQ usable
+            logger.warning("Embeddings unavailable, using lexical FAQ retrieval: %s", exc)
+
+        if embeddings is not None and os.path.exists(persist_directory) and not force_reload:
             try:
                 self._vector_store = Chroma(
                     persist_directory=persist_directory,
-                    embedding_function=self._embeddings,
+                    embedding_function=embeddings,
                     collection_name="company_policies",
                 )
                 self._healthy = True
@@ -127,31 +291,29 @@ class FAQService:
         pdf_text = self.load_pdf_document(pdf_path)
         if not pdf_text:
             raise ValueError("Could not extract text from PDF")
+        self._documents = self._build_documents_from_text(pdf_text)
+        logger.info("Created %d document chunks", len(self._documents))
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, chunk_overlap=200,
-            length_function=len, separators=["\n\n", "\n", ". ", " ", ""],
-        )
-        chunks = text_splitter.split_text(pdf_text)
-        documents = []
-        for i, chunk in enumerate(chunks):
-            page_match = re.search(r'\[Page (\d+)\]', chunk)
-            page_num = page_match.group(1) if page_match else "Unknown"
-            clean_chunk = re.sub(r'\[Page \d+\]', '', chunk).strip()
-            doc = Document(
-                page_content=clean_chunk,
-                metadata={"source": "Company Policy", "page": page_num, "chunk_index": i, "document": "company_policy.pdf"},
+        if embeddings is None:
+            self._vector_store = None
+            self._healthy = bool(self._documents)
+            return None
+
+        try:
+            self._vector_store = Chroma.from_documents(
+                documents=self._documents,
+                embedding=embeddings,
+                persist_directory=persist_directory,
+                collection_name="company_policies",
             )
-            documents.append(doc)
-        logger.info("Created %d document chunks", len(documents))
-
-        self._vector_store = Chroma.from_documents(
-            documents=documents, embedding=self._embeddings,
-            persist_directory=persist_directory, collection_name="company_policies",
-        )
-        self._healthy = True
-        logger.info("Vector store created and persisted")
-        return self._vector_store
+            self._healthy = True
+            logger.info("Vector store created and persisted")
+            return self._vector_store
+        except Exception as exc:  # noqa: BLE001 - do not take FAQ offline if vector indexing fails
+            logger.warning("Vector store creation failed, using lexical FAQ retrieval: %s", exc)
+            self._vector_store = None
+            self._healthy = bool(self._documents)
+            return None
 
     # --- Semantic search (enhanced with full RAG pipeline) ---
 
@@ -168,7 +330,7 @@ class FAQService:
         if cached is not None:
             return cached  # (answer, sources) tuple
 
-        if self._vector_store is None:
+        if self._vector_store is None and not self._documents:
             pdf_path = Path(__file__).parent.parent / "Company policy.pdf"
             if not pdf_path.exists():
                 return "Company policy document not found. Please ensure the PDF is uploaded.", []
@@ -179,11 +341,18 @@ class FAQService:
 
         # --- Hybrid retrieval (vector + BM25 via RRF) ---
         rag_cfg = get_retrieval_config().rag
-        hybrid_results = hybrid_retrieve(self._vector_store, rewritten, k=rag_cfg.vector_k)
+        hybrid_results: List[Tuple[Document, float]] = []
+        if self._vector_store is not None:
+            hybrid_results = hybrid_retrieve(self._vector_store, rewritten, k=rag_cfg.vector_k)
 
         if not hybrid_results:
-            # Fallback to plain vector search
-            hybrid_results = self._vector_store.similarity_search_with_score(rewritten, k=k)
+            if self._vector_store is not None:
+                try:
+                    hybrid_results = self._vector_store.similarity_search_with_score(rewritten, k=k)
+                except Exception as exc:
+                    logger.warning("Vector similarity search unavailable, using lexical FAQ retrieval: %s", exc)
+            if not hybrid_results:
+                hybrid_results = self._keyword_retrieve(rewritten, k=max(k, rag_cfg.bm25_k))
 
         # Keep top candidates by rank. Raw scores differ by retriever type
         # (RRF, cosine distance, etc.), so rank is more stable than absolute thresholds.
@@ -269,7 +438,7 @@ def load_pdf_document(pdf_path: str) -> str:
     return FAQService.load_pdf_document(pdf_path)
 
 
-def process_policy_document(pdf_path: str, force_reload: bool = False) -> Chroma:
+def process_policy_document(pdf_path: str, force_reload: bool = False) -> Optional[Chroma]:
     return _faq_service.process_policy_document(pdf_path, force_reload)
 
 
@@ -373,6 +542,16 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         
     except Exception as e:
         logger.error("Error in FAQ agent: %s", e)
+        fallback_answer = best_effort_policy_answer(user_text)
+        if fallback_answer:
+            return {
+                "reply": fallback_answer,
+                "tool_result": {
+                    "ok": True,
+                    "confidence": "fallback",
+                    "fallback": "lexical",
+                },
+            }
         return {
             "reply": "I'm having trouble accessing the policy information right now. Please try again or contact support directly.",
             "tool_result": {
@@ -386,6 +565,24 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
 def initialize_faq_system():
     """Initialize the FAQ system with the company policy document."""
     return _faq_service.initialize()
+
+
+def best_effort_policy_answer(question: str) -> Optional[str]:
+    pdf_path = Path(__file__).parent.parent / "Company policy.pdf"
+    if pdf_path.exists():
+        text = load_pdf_document(str(pdf_path))
+        if text:
+            answer = extract_key_sentences(text, question)
+            if answer:
+                return answer
+
+    try:
+        from .faq import faq_lookup
+
+        return faq_lookup(question)
+    except Exception as exc:  # noqa: BLE001 - FAQ table may be offline too
+        logger.warning("Basic FAQ fallback failed: %s", exc)
+        return None
 
 
 def generate_concise_answer(question: str, context: str) -> str:

@@ -1,5 +1,6 @@
 # services/retrieval.py
 from __future__ import annotations
+from contextlib import contextmanager
 import os
 import json
 import threading
@@ -11,6 +12,34 @@ from services.dynamic_config import get_retrieval_config
 CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "thenlper/gte-small")  # e.g., 'BAAI/bge-small-en-v1.5'
 CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "properties")
+RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
+
+
+@contextmanager
+def _local_model_load(enabled: bool):
+    if not enabled:
+        yield
+        return
+
+    keys = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE")
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in keys:
+            os.environ[key] = "1"
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _is_local_model_reference(model_name: str) -> bool:
+    try:
+        return Path(model_name).expanduser().exists()
+    except OSError:
+        return False
 
 # ---------- Lazy imports / feature flags ----------
 _HAS_VECTOR = True
@@ -90,7 +119,13 @@ def _init_vector_mode() -> bool:
                 metadata={"hnsw:space": "cosine"},
             )
         if _embedder is None:
-            _embedder = SentenceTransformer(EMBED_MODEL)
+            if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(EMBED_MODEL):
+                raise RuntimeError(
+                    f"Embedding model '{EMBED_MODEL}' is not local. "
+                    "Set RAG_LOCAL_MODELS_ONLY=0 to allow remote model downloads."
+                )
+            with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+                _embedder = SentenceTransformer(EMBED_MODEL)
         return True
     except Exception as e:
         print(f"[retrieval] Disable vector mode due to init error: {e}")
