@@ -1438,13 +1438,17 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
                 persisted["name"] = cand
                 persisted[SK.awaiting_field] = None
                 just_applied_field_update = True
-    elif awaited == "guests" and parsed_guests is not None:
-        try:
-            persisted["guests"] = int(parsed_guests)
-        except Exception:
-            persisted["guests"] = parsed_guests
-        persisted[SK.awaiting_field] = None
-        just_applied_field_update = True
+    elif awaited == "guests":
+        cand = user_text.strip()
+        if parsed_guests is not None:
+            try: persisted["guests"] = int(parsed_guests)
+            except Exception: persisted["guests"] = parsed_guests
+            persisted[SK.awaiting_field] = None
+            just_applied_field_update = True
+        elif cand.isdigit():
+            persisted["guests"] = int(cand)
+            persisted[SK.awaiting_field] = None
+            just_applied_field_update = True
 
     # Global branch: user explicitly wants to modify requirements (even if receipt not visible)
     if _wants_modification(user_text) and not is_answering_prompt:
