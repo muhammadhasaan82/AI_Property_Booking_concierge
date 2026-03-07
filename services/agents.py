@@ -948,7 +948,8 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         }
 
     # Global branch: user explicitly asks to search different properties
-    if _wants_property_search_request(user_text):
+    is_answering = persisted.get(SK.awaiting_field) in ["check_in", "check_out"] and _parse_dates(user_text)
+    if _wants_property_search_request(user_text) and not is_answering:
         keep_keys = [
             "location","city","budget","amenities","beds",
             "results_index_map","last_results","results",
@@ -1791,7 +1792,8 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             return confirmation_helpers._try_show_receipt(persisted)
 
         # Branch: user wants to search different properties after seeing receipt
-        if _wants_property_search_request(user_text):
+        is_answering = persisted.get(SK.awaiting_field) in ["check_in", "check_out"] and _parse_dates(user_text)
+        if _wants_property_search_request(user_text) and not is_answering:
             # Keep search-related filters and last results; clear booking-only flags
             keep_keys = [
                 "location","city","budget","amenities","beds",
@@ -1814,7 +1816,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
 
 
     # Branch: user explicitly wants to modify requirements
-    if _wants_modification(user_text):
+    if _wants_modification(user_text) and not _parse_dates(user_text):
         requested = _detect_requested_fields(user_text)
         # If user didn't specify which field, ask a focused clarification
         if not requested:
