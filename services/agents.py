@@ -519,6 +519,10 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         ):
             return "confirmation"
 
+    # Master Shield for Input Fields
+    if active_filters.get(SK.awaiting_field) in ["name", "phone", "email"]:
+        return "confirmation"
+
     if _is_ack(t):
         return "confirmation"
 
