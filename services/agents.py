@@ -2368,6 +2368,31 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
             property_type=prop_type,
         )
 
+    # 🛑 INTENSELY SOFT-CODED SHIELD: Vector Store Semantic Mismatch 🛑
+    if results and not prop_type:
+        user_tl = (user_text or "").lower()
+        # Extract the actual property types the vector store retrieved
+        retrieved_types = {str(r.get("property_type", "")).lower() for r in results[:5] if r.get("property_type")}
+        
+        # If the vector store substituted an unavailable word (like 'hotel') for available types
+        # the retrieved types won't exist in the user's prompt. We catch this dynamically!
+        if retrieved_types and not any(rt in user_tl for rt in retrieved_types):
+            import services.config as config
+            available_list = ", ".join(p.title() for p in sorted(config.SEED_PROPERTY_TYPES))
+            extracted[SK.awaiting_property_type_choice] = True
+            
+            reply = (
+                f"To help me find the perfect match, could you specify the type of property you are looking for? "
+                f"Our available private rentals include: **{available_list}**.\n\n"
+                f"Which of these would you prefer?"
+            )
+            return {"results": [], "reply": reply, "filters": extracted}
+
+    # If city is known/requested but no listings, trigger unavailable-city flow.
+    if requested_city and not results:
+        extracted[SK.awaiting_unavailable_city_choice] = True
+        return {"results": [], "reply": _unavailable_city_reply(), "filters": extracted}
+
     # If city is known/requested but no listings, trigger unavailable-city flow.
     if requested_city and not results:
         extracted[SK.awaiting_unavailable_city_choice] = True
