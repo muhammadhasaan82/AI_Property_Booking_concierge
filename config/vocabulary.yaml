@@ -428,6 +428,12 @@ nlp_fallback:
     - "other propert"
     - "different propert"
     - "more propert"
+    - "show other"       # <-- ADDED
+    - "different one"    # <-- ADDED
+    - "something else"   # <-- ADDED
+    - "go back"          # <-- ADDED
+    - "back to list"     # <-- ADDED
+    - "instead"          # <-- ADDED
     - "other option"
     - "different option"
     - "more option"
