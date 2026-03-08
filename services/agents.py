@@ -498,20 +498,30 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     active_filters = filters or {}
     tl = t.lower().strip()
 
-    # --- IRONCLAD SELECTION GUARD ---
-    # If the user is looking at a list and types a number, it is 100% a confirmation.
+    # 1. --- IRONCLAD SELECTION GUARD ---
     if active_filters.get("last_results") and nlp_engine.has_cardinal_extraction(t):
         return "confirmation"
-    # --------------------------------
 
-    # Keep strict deterministic guards for critical intents.
-    if _is_greeting(t):
-        return "greeting"
+    # 2. 🛑 GLOBAL CONTEXT PRESERVER SHIELD (Soft-Coded via NLP Engine) 🛑
+    # Dynamically prevents short acknowledgments, greetings, or 2-letter gibberish from wiping active flows.
+    is_useless_or_greeting = _is_ack(t) or _is_greeting(t) or len(re.sub(r"[^\w]", "", tl)) <= 2
+    
+    if is_useless_or_greeting:
+        if active_filters.get(SK.awaiting_field) == "booking_id":
+            return "status_update"
+        if active_filters.get(SK.awaiting_field) or active_filters.get(SK.awaiting_selection_confirm) or active_filters.get(SK.receipt_shown) or active_filters.get(SK.awaiting_post_mod_choice):
+            return "confirmation"
+        if active_filters.get(SK.awaiting_city_selection) or active_filters.get(SK.awaiting_property_type_choice) or active_filters.get(SK.awaiting_unavailable_city_choice):
+            return "property_search"
+        # If not in an active flow and it's a greeting, process as greeting
+        if _is_greeting(t):
+            return "greeting"
+
+    # Keep strict deterministic guard for end.
     if _is_end(t):
         return "end"
 
-    # If user is currently deciding on a selected property, keep follow-up
-    # turns in confirmation for yes/no, reselection, or "back to list" requests.
+    # If user is currently deciding on a selected property...
     if active_filters.get(SK.awaiting_selection_confirm):
         if (
             _is_yes(t)
@@ -524,18 +534,19 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     # Master Shield for Booking IDs (UUIDs)
     if re.search(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", user_text):
         return "status_update"
-    
+        
+    # Master Shield for Active Cancellations
+    if ("cancel" in tl or "delete" in tl) and "policy" not in tl:
+        return "status_update"
+
     # Master Shield for Input Fields
-    if active_filters.get(SK.awaiting_field) in ["name", "phone", "email", "guests"]:
+    _conf_fields = {"name", "phone", "email", "guests", "check_in", "check_out", "modification_choice", "modification"}
+    if active_filters.get(SK.awaiting_field) in _conf_fields:
         return "confirmation"
 
     # Master Shield for Receipt
     if active_filters.get(SK.receipt_shown) and (_is_yes(t) or _is_no(t)):
         return "confirmation"
-
-    # Master Shield for Active Cancellations
-    if ("cancel" in tl or "delete" in tl) and "policy" not in tl:
-        return "status_update"
 
     policy_route = _apply_contextual_triage_policies(t, active_filters)
     if policy_route:
@@ -2143,9 +2154,14 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
     # If we don't have an id yet, request it clearly
     if not booking_id:
+        # Inject the awaiting flag into the filters so triage_intent can preserve context
+        filters = {**args, SK.awaiting_field: "booking_id"}
         if "cancel" in user_text.lower():
-            return {"reply": "I can help you cancel that. Please provide your Booking ID."}
-        return {"reply":"Please provide your Booking ID (e.g., 57015107-d414-409c-843e-b6a6b15d9b59)."}
+            return {"reply": "I can help you cancel that. Please provide your Booking ID.", "filters": filters}
+        return {"reply":"Please provide your Booking ID (e.g., 57015107-d414-409c-843e-b6a6b15d9b59).", "filters": filters}
+    else:
+        # Clear the flag once we have the ID
+        args[SK.awaiting_field] = None
 
     # 🛑 MASTER SHIELD: Intercept Cancellation Requests 🛑
     if "cancel" in user_text.lower() or "delete" in user_text.lower():
