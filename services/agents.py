@@ -535,9 +535,9 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if re.search(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", user_text):
         return "status_update"
         
-    # 1. Master Shield for Active Cancellations (Soft-Coded via NLP Engine)
-    # Uses your vocabulary's keywords (cancel, status, etc.) but ignores policy questions.
-    if _is_status_query(t) and "policy" not in tl:
+    # 1. Master Shield for Active Cancellations
+    # Deterministic check ensures cancellation actions bypass the FAQ entirely.
+    if ("cancel" in tl or "delete" in tl) and "policy" not in tl:
         return "status_update"
 
     # 2. ðŸ›‘ SHIELD: Generic Location Inquiry (Soft-Coded) ðŸ›‘
