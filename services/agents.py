@@ -2280,15 +2280,23 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         extracted["location"] = city_pick
         extracted["city"] = city_pick
         extracted[SK.awaiting_city_selection] = False
-        extracted[SK.awaiting_property_type_choice] = True
-        return {
-            "results": [],
-            "filters": extracted,
-            "reply": (
-                "Great choice. What property type would you like in that city "
-                "(loft, apartment, condo, house, studio, villa, townhouse, or any)?"
-            ),
-        }
+        
+        # 🛑 SHIELD: If user already provided the property type, skip the prompt and search! 🛑
+        if prop_type or any(p in user_tl for p in _nlp_fallback().property_type_any_phrases):
+            if prop_type:
+                extracted["property_type"] = prop_type
+            extracted[SK.awaiting_property_type_choice] = False
+            # (By not returning here, the code naturally falls through to execute the search!)
+        else:
+            extracted[SK.awaiting_property_type_choice] = True
+            return {
+                "results": [],
+                "filters": extracted,
+                "reply": (
+                    "Great choice. What property type would you like in that city "
+                    "(loft, apartment, condo, house, studio, villa, townhouse, or any)?"
+                ),
+            }
 
     # Step 3: ask property type after city selection, then search
     if clean_filters.get(SK.awaiting_property_type_choice):
