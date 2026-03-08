@@ -1,4 +1,4 @@
-# services/agents.py
+﻿# services/agents.py
 from __future__ import annotations
 from services.confirmation_helpers import _render_receipt
 import os
@@ -333,7 +333,7 @@ def _classify_proceed_or_modify(user_text: str) -> str | None:
     return None
 
 # -----------------------
-# Intent helpers — NLP-powered (delegates to nlp_engine)
+# Intent helpers â€” NLP-powered (delegates to nlp_engine)
 # -----------------------
 # Structural regex (not semantic, kept minimal)
 _DATE_PAT = re.compile(r"\b(\d{4}-\d{1,2}-\d{1,2})\b")
@@ -365,7 +365,7 @@ def _is_end(t: str) -> bool:
     return nlp_engine.is_end_request(t or "")
 
 # -----------------------
-# Selection & slot helpers — NLP-powered
+# Selection & slot helpers â€” NLP-powered
 # -----------------------
 
 def _llm_extract_booking_fields(text: str) -> dict:
@@ -502,7 +502,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if active_filters.get("last_results") and nlp_engine.has_cardinal_extraction(t):
         return "confirmation"
 
-    # 2. 🛑 GLOBAL CONTEXT PRESERVER SHIELD (Soft-Coded via NLP Engine) 🛑
+    # 2. ðŸ›‘ GLOBAL CONTEXT PRESERVER SHIELD (Soft-Coded via NLP Engine) ðŸ›‘
     # Dynamically prevents short acknowledgments, greetings, or 2-letter gibberish from wiping active flows.
     is_useless_or_greeting = _is_ack(t) or _is_greeting(t) or len(re.sub(r"[^\w]", "", tl)) <= 2
     
@@ -540,10 +540,20 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if _is_status_query(t) and "policy" not in tl:
         return "status_update"
 
-    # 2. 🛑 SHIELD: Generic Location Inquiry (Soft-Coded) 🛑
+    # 2. ðŸ›‘ SHIELD: Generic Location Inquiry (Soft-Coded) ðŸ›‘
     # If the user asks about the 'city' category generally, route to search.
     if re.search(r"\b(cit(y|ies)|location|where)\b", tl):
         return "property_search"
+
+    # 🛑 SUPER SHIELD: FAQ / Policy Breakout 🛑
+    # Runs before input fields so users can ask questions mid-booking.
+    try:
+        faq_hit = nlp_engine.detect_faq_intent(t)
+    except Exception:
+        faq_hit = any(w in tl for w in _vocab().faq_fallback_keywords)
+
+    if faq_hit:
+        return "faq"
 
     # Master Shield for Input Fields
     _conf_fields = {"name", "phone", "email", "guests", "check_in", "check_out", "modification_choice", "modification"}
@@ -563,19 +573,6 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if llm_intent:
         return llm_intent
 
-    # ── FAQ detection BEFORE LLM — policy/rule questions must ALWAYS break out
-    # of any flow (confirmation, booking, etc). Run this first, it's fast & free.
-    try:
-        faq_hit = nlp_engine.detect_faq_intent(t)
-    except Exception:
-        faq_hit = any(w in t.lower() for w in _vocab().faq_fallback_keywords)
-
-    if faq_hit:
-        # Prevent FAQ from hijacking active cancellation requests
-        if "cancel" in t.lower() and "booking" in t.lower() and "policy" not in t.lower():
-            return "status_update"
-        return "faq"
-
     # Status checks come after FAQ so policy questions like "refund/check-in policy"
     # are not hijacked by status routing.
     if _is_status_query(t):
@@ -583,7 +580,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         if not any(p in tl for p in _nlp_fallback().status_resume_phrases):
             return "status_update"
 
-    # NLP-driven and keyword fallback routing (secondary pass — catches LLM misses).
+    # NLP-driven and keyword fallback routing (secondary pass â€” catches LLM misses).
     if _looks_like_property_search(t):
         return "property_search"
     if _is_handoff_request(t):
@@ -636,14 +633,14 @@ async def llm_reply_from_results(
         city = (r.get("city") or "").title()
         title = r.get("title") or "Option"
         price = r.get("price_per_night")
-        price_txt = f" — about ${price}/night" if price is not None else ""
-        numbered.append(f"{i}. {title} — {city}{price_txt}")
+        price_txt = f" â€” about ${price}/night" if price is not None else ""
+        numbered.append(f"{i}. {title} â€” {city}{price_txt}")
 
     if not OPENAI_API_KEY:
         if results:
             total_count = len(results)
             shown_count = len(numbered)
-            header = f"Yes—found {total_count} options"
+            header = f"Yesâ€”found {total_count} options"
             if total_count > shown_count:
                 header += f", here are the top {shown_count}:"
             else:
@@ -651,10 +648,10 @@ async def llm_reply_from_results(
             return f"{header}\n\n" + "\n".join(numbered) + "\n\nReply with a number (e.g., 1 or 2) to choose."
         kf = known_filters or {}
         if not (kf.get("location") or kf.get("city")): 
-            return "No match yet—what city should I search in (and a nightly budget)?"
+            return "No match yetâ€”what city should I search in (and a nightly budget)?"
         if not kf.get("budget"): 
-            return "No match yet—what's your target nightly budget (approx)?"
-        return "No match yet—any preferred dates or must-have amenities?"
+            return "No match yetâ€”what's your target nightly budget (approx)?"
+        return "No match yetâ€”any preferred dates or must-have amenities?"
 
     total_count = len(results)
     shown_count = len(numbered)
@@ -663,9 +660,9 @@ async def llm_reply_from_results(
             "Think step by step: First identify which properties match the user's needs, then present them clearly. "
             f"Keep replies very short. Language: {locale}")
             
-    header_instruction = f"Start: 'Yes—found {total_count} options.'"
+    header_instruction = f"Start: 'Yesâ€”found {total_count} options.'"
     if total_count > shown_count:
-        header_instruction = f"Start: 'Yes—found {total_count} options, here are the top {shown_count}.'"
+        header_instruction = f"Start: 'Yesâ€”found {total_count} options, here are the top {shown_count}.'"
             
     style = (f"If results:\n- {header_instruction}\n"
            "- Show ONLY the provided numbered list.\n- End: 'Reply with a number (e.g., 1 or 2) to choose.'\n"
@@ -786,7 +783,7 @@ async def llm_reply_from_results(
     if results:
         total_count = len(results)
         shown_count = len(numbered)
-        header = f"Yes—found {total_count} options"
+        header = f"Yesâ€”found {total_count} options"
         if total_count > shown_count:
             header += f", here are the top {shown_count}:"
         else:
@@ -823,7 +820,7 @@ def _format_property_full(p: Dict[str, Any]) -> str:
     desc = p.get("description") or p.get("summary") or ""
     one_line_desc = (desc.strip().split("\n")[0])[:160] if desc else ""
 
-    s = f"**{title}** — {city}\n"
+    s = f"**{title}** â€” {city}\n"
     if prop_type:
         s += f"- Type: {prop_type}\n"
     if bedrooms is not None:
@@ -848,7 +845,7 @@ def _format_property_brief(p: Dict[str, Any]) -> str:
     city = (p.get("city") or "").title()
     price = p.get("price_per_night", "N/A")
     bedrooms = p.get("bedrooms", "N/A")
-    return f"**{title}** — {city}\n- Bedrooms: {bedrooms}\n- Price: ${price}/night"
+    return f"**{title}** â€” {city}\n- Bedrooms: {bedrooms}\n- Price: ${price}/night"
 
 # -----------------------
 # Agents
@@ -868,11 +865,11 @@ def greeting_agent(filters: Dict[str, Any], user_text: str = "") -> Dict[str, An
     if budget: parts.append(f"budget ${budget}")
     hint=f" (noted: {', '.join(parts)})" if parts else ""
 
-    return {"reply": f"Hi there! 👋 I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
+    return {"reply": f"Hi there! ðŸ‘‹ I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
 
 async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Selection + slot fill → receipt → final yes/no
+    Selection + slot fill â†’ receipt â†’ final yes/no
     - shows a full property card on selection
     - robust single-date handling using `awaiting_field`
     """
@@ -889,7 +886,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             persisted.pop(SK.awaiting_field, None)
             persisted.pop(SK.modifying_dates, None)
             return {
-                "reply": "🎯 Perfect! Creating your booking now...",
+                "reply": "ðŸŽ¯ Perfect! Creating your booking now...",
                 "tool_result": {"ok": True, "ready_for_booking": True},
                 "filters": persisted,
                 "booking_args": {
@@ -911,7 +908,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             # Allow user to still say "search different properties" if they want, but default to modification list
             persisted[SK.awaiting_field] = "modification_choice"
             return {
-                "reply": "No problem, the booking has been cancelled. What would you like to modify — dates, guests, name, phone, email, or property?",
+                "reply": "No problem, the booking has been cancelled. What would you like to modify â€” dates, guests, name, phone, email, or property?",
                 "filters": persisted,
                 "tool_result": {"ok": False, "cancelled": True, "need": ["modification"]}
             }
@@ -954,7 +951,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             persisted.pop(SK.awaiting_post_cancel_choice, None)
             persisted[SK.awaiting_field] = "modification_choice"
             return {
-                "reply": "What would you like to modify — dates, guests, name, phone, email, or property?",
+                "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
                 "filters": persisted,
                 "tool_result": {"ok": False, "need": ["modification"]}
             }
@@ -988,7 +985,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         for k in [SK.recent_selection_index,SK.recent_property_id,SK.selected_property,SK.awaiting_selection_confirm,SK.awaiting_field,SK.receipt_shown]:
             reset.pop(k, None)
         return {
-            "reply": "Sure — let's explore more options. Tell me what you're looking for (city, budget, dates, beds, amenities).",
+            "reply": "Sure â€” let's explore more options. Tell me what you're looking for (city, budget, dates, beds, amenities).",
             "filters": reset,
             "tool_result": {"ok": False, "need": ["restart"]}
         }
@@ -1033,7 +1030,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             return confirmation_helpers._try_show_receipt(persisted)
         # Otherwise, ask for a quick confirmation on the selected property
         return {
-            "reply": f"🏠 Selected:\n\n{card}\n\nWould you like to book this one? (yes/no)",
+            "reply": f"ðŸ  Selected:\n\n{card}\n\nWould you like to book this one? (yes/no)",
             "tool_result":{"ok":False,"need":["booking_confirmation"],"property_id":prop_id},
             "filters": persisted
         }
@@ -1051,9 +1048,9 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             persisted.pop(SK.selected_property, None)
             persisted.pop(SK.recent_property_id, None)
             persisted.pop(SK.recent_selection_index, None)
-            # Fall through — sel block below will handle showing the property card
+            # Fall through â€” sel block below will handle showing the property card
 
-        # FIX A: "no, back to list" / "show other properties" — re-show last results, NOT end session
+        # FIX A: "no, back to list" / "show other properties" â€” re-show last results, NOT end session
         elif _is_no(user_text) or await nlp_engine.wants_previous_results_async(tl):
             last_results = persisted.get("last_results") or persisted.get("results") or []
             idx_map = persisted.get("results_index_map") or {}
@@ -1069,7 +1066,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
                         title = prop.get("title", "Property")
                         city = (prop.get("city") or "").title()
                         price = int(float(prop.get("price_per_night") or 0))
-                        lines.append(f"{num}. {title} — {city} — about ${price}/night")
+                        lines.append(f"{num}. {title} â€” {city} â€” about ${price}/night")
                 if lines:
                     listing = "\n".join(lines)
                     return {
@@ -1077,7 +1074,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
                         "filters": persisted,
                         "tool_result": {"ok": False, "need": ["property_selection"]},
                     }
-            # No cached results — prompt a fresh search
+            # No cached results â€” prompt a fresh search
             return {
                 "reply": "No previous results found. What would you like to search for? (city, property type, budget)",
                 "filters": persisted,
@@ -1129,7 +1126,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
 
             # If a specific field is mentioned, jump straight to that flow
             if requested:
-                # Property → restart search preserving user details
+                # Property â†’ restart search preserving user details
                 if "property" in requested:
                     keep_keys = [
                         "name", "phone", "email", "check_in", "check_out", "guests",
@@ -1203,7 +1200,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             # Otherwise ask a focused clarification
             persisted[SK.awaiting_field] = "modification_choice"
             return {
-                "reply": "What would you like to modify — dates, guests, name, phone, email, or property?",
+                "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
                 "filters": persisted,
                 "tool_result": {"ok": False, "need": ["modification"]}
             }
@@ -1257,7 +1254,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
                 persisted.pop(SK.awaiting_post_mod_choice, None)
                 persisted[SK.awaiting_field] = "modification_choice"
                 return {
-                    "reply": "What would you like to modify — dates, guests, name, phone, email, or property?",
+                    "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
                     "filters": persisted,
                     "tool_result": {"ok": False, "need": ["modification"]}
                 }
@@ -1490,7 +1487,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         if not requested:
             persisted[SK.awaiting_field] = "modification"
             return {
-                "reply": "What would you like to modify — dates, guests, name, phone, email, or property?",
+                "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
                 "filters": persisted,
                 "tool_result": {"ok": False, "need": ["modification"]}
             }
@@ -1501,7 +1498,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             ]
             reset = {k:v for k,v in persisted.items() if k in keep_keys}
             return {
-                "reply": "Sure — which city should I search in?",
+                "reply": "Sure â€” which city should I search in?",
                 "filters": reset,
                 "tool_result": {"ok": False, "need": ["restart"]}
             }
@@ -1521,15 +1518,15 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             persisted["check_in"] = None
             persisted["check_out"] = None
             persisted[SK.awaiting_field] = "check_in"
-            return {"reply": "Sure — what's the new check-in date (YYYY-MM-DD)? Then I'll ask for check-out.", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
+            return {"reply": "Sure â€” what's the new check-in date (YYYY-MM-DD)? Then I'll ask for check-out.", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
         if "check_in" in requested:
             persisted["check_in"] = None
             persisted[SK.awaiting_field] = "check_in"
-            return {"reply": "Got it — what's the new check-in date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
+            return {"reply": "Got it â€” what's the new check-in date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
         if "check_out" in requested:
             persisted["check_out"] = None
             persisted[SK.awaiting_field] = "check_out"
-            return {"reply": "Got it — what's the new check-out date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_out"]}}
+            return {"reply": "Got it â€” what's the new check-out date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_out"]}}
         if "guests" in requested:
             persisted["guests"] = None
             persisted[SK.awaiting_field] = "guests"
@@ -1693,7 +1690,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             requested = _detect_requested_fields(user_text)
             if not requested:
                 return {
-                    "reply": "Please specify what you'd like to modify — dates, guests, name, phone, email, or property?",
+                    "reply": "Please specify what you'd like to modify â€” dates, guests, name, phone, email, or property?",
                     "filters": persisted,
                     "tool_result": {"ok": False, "need": ["modification"]}
                 }
@@ -1731,7 +1728,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
                     persisted["check_in"] = None
                     persisted["check_out"] = None
                     persisted[SK.awaiting_field] = "check_in"
-                    return {"reply": "Sure — what's the new check-in date (YYYY-MM-DD)? Then I'll ask for check-out.", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
+                    return {"reply": "Sure â€” what's the new check-in date (YYYY-MM-DD)? Then I'll ask for check-out.", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
             if "check_in" in requested and "dates" not in requested:
                 if parsed_dates:
                     try:
@@ -1840,7 +1837,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             reset.pop(SK.awaiting_field, None)
             reset.pop(SK.receipt_shown, None)
             return {
-                "reply": "Sure — let's explore more options. Tell me what you're looking for (city, budget, dates, beds, amenities).",
+                "reply": "Sure â€” let's explore more options. Tell me what you're looking for (city, budget, dates, beds, amenities).",
                 "filters": reset,
                 "tool_result": {"ok": False, "need": ["restart"]}
             }
@@ -1853,7 +1850,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         if not requested:
             persisted[SK.awaiting_field] = "modification"
             return {
-                "reply": "What would you like to modify — dates, guests, name, phone, email, or property?",
+                "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
                 "filters": persisted,
                 "tool_result": {"ok": False, "need": ["modification"]}
             }
@@ -1951,10 +1948,10 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"reply": f"To finalize the booking I need: {', '.join(missing).replace('_',' ')}.",
                 "tool_result":{"ok":False,"need":missing}}
 
-    # ──────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Pre-validate via Rust BookingValidatorTool (TOON protocol)
     # If the gateway is unreachable, skip validation and proceed
-    # ──────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         from .rust_client import validate_booking
 
@@ -1974,15 +1971,15 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
             warnings = inner.get("warnings", [])
 
             if not is_valid:
-                error_list = "\n".join(f"• {e}" for e in errors)
+                error_list = "\n".join(f"â€¢ {e}" for e in errors)
                 warn_text = ""
                 if warnings:
-                    warn_text = "\n\n⚠️ Warnings:\n" + "\n".join(f"• {w}" for w in warnings)
+                    warn_text = "\n\nâš ï¸ Warnings:\n" + "\n".join(f"â€¢ {w}" for w in warnings)
                 return {
-                    "reply": f"❌ **Booking validation failed:**\n\n{error_list}{warn_text}\n\nPlease correct the above and try again.",
+                    "reply": f"âŒ **Booking validation failed:**\n\n{error_list}{warn_text}\n\nPlease correct the above and try again.",
                     "tool_result": {"ok": False, "need": ["correction"], "validation_errors": errors, "warnings": warnings},
                 }
-            # Validation passed — log any warnings
+            # Validation passed â€” log any warnings
             if warnings:
                 logger.warning("RUST booking validation warnings: %s", warnings)
             logger.info("RUST booking validated OK via gateway")
@@ -2036,9 +2033,9 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
         if t in prop_title.lower(): ptype=t; break
 
     if r.get("ok"):
-        msg=f"""🎉 **Booking Confirmed!**
+        msg=f"""ðŸŽ‰ **Booking Confirmed!**
 
-✅ Your **{ptype}** has been successfully booked!
+âœ… Your **{ptype}** has been successfully booked!
 
 **Booking Details**
 - Booking ID: {r.get('booking_id','N/A')}
@@ -2047,9 +2044,9 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
 - Check-out: {args.get('check_out')}
 - Guests: {args.get('guests',1)}
 
-📧 A payment link has been sent to your email/WhatsApp.
+ðŸ“§ A payment link has been sent to your email/WhatsApp.
 
-**Thank you for booking with us! Have a wonderful stay!** 🌟
+**Thank you for booking with us! Have a wonderful stay!** ðŸŒŸ
 """
         # Insert booking details row (best-effort)
         try:
@@ -2067,8 +2064,8 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
             total = float(price or 0) * float(nights or 1)
             prop_title = selected.get('title') or 'Property'
             city = (selected.get('city') or '').title()
-            price_txt = f" — about ${int(price)}/night" if price else ""
-            prop_desc = f"{prop_title} — {city}{price_txt}".strip()
+            price_txt = f" â€” about ${int(price)}/night" if price else ""
+            prop_desc = f"{prop_title} â€” {city}{price_txt}".strip()
             booking_code = str(r.get('booking_id'))
             row = {
                 "booking_id": r.get("booking_id"),
@@ -2150,9 +2147,9 @@ def availability_agent(filters: Dict[str, Any]) -> Dict[str, Any]:
 async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Answer booking status questions given a booking_id.
     Behaviors:
-      - If booking_id missing → ask only for booking ID
-      - If user asks status/check-in/check-out → fetch and answer
-      - If user asks to update to check-in/checkout → perform update
+      - If booking_id missing â†’ ask only for booking ID
+      - If user asks status/check-in/check-out â†’ fetch and answer
+      - If user asks to update to check-in/checkout â†’ perform update
     """
     action=(args.get("action") or "").lower()
     nlp_fb = _nlp_fallback()
@@ -2169,12 +2166,12 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
         # Clear the flag once we have the ID
         args[SK.awaiting_field] = None
 
-    # 🛑 MASTER SHIELD: Intercept Cancellation Requests 🛑
+    # ðŸ›‘ MASTER SHIELD: Intercept Cancellation Requests ðŸ›‘
     if "cancel" in user_text.lower() or "delete" in user_text.lower():
         from .booking import delete_booking
         res = await delete_booking(booking_id)
         if res.get("ok"):
-            return {"tool_result": {"ok": True, "deleted": True}, "reply": f"✅ Booking `{booking_id}` has been successfully cancelled and completely removed from our database."}
+            return {"tool_result": {"ok": True, "deleted": True}, "reply": f"âœ… Booking `{booking_id}` has been successfully cancelled and completely removed from our database."}
         else:
             return {"tool_result": {"ok": False}, "reply": f"Sorry, I couldn't delete the booking: {res.get('error')}"}
 
@@ -2203,7 +2200,7 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 "reply": f"Booking {booking_id}: **{s_human}**\n- Check-in: {ci}\n- Check-out: {co}\n\nWould you like to ask anything else or end this chat session? (say 'end' to close)",
             }
 
-        return {"tool_result": r, "reply": f"Sorry—{r.get('error','unable to find that booking')}."}
+        return {"tool_result": r, "reply": f"Sorryâ€”{r.get('error','unable to find that booking')}."}
     # Update flow (explicit request)
     if action in set(nlp_fb.status_check_in_actions):
         new_status = "checked_in"
@@ -2233,7 +2230,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     user_tl = (user_text or "").lower().strip()
     requested_city = extracted.get("city") or extracted.get("location")
 
-    # 🛑 FIX: Define these helpers at the TOP so they are available to the shields below 🛑
+    # ðŸ›‘ FIX: Define these helpers at the TOP so they are available to the shields below ðŸ›‘
     def _city_list_text() -> str:
         cities = get_available_cities()
         if not cities:
@@ -2249,7 +2246,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
             "Would you like to see which cities are available? (yes/no)"
         )
 
-    # 🛑 SOFT-CODED: Generic City List Request 🛑
+    # ðŸ›‘ SOFT-CODED: Generic City List Request ðŸ›‘
     # (Now this can safely call _city_list_text!)
     if re.search(r"\b(city|cities|location|where)\b", user_tl) and not requested_city:
         return {
@@ -2320,7 +2317,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         extracted["city"] = city_pick
         extracted[SK.awaiting_city_selection] = False
         
-        # 🛑 SHIELD: If user already provided the property type, skip the prompt and search! 🛑
+        # ðŸ›‘ SHIELD: If user already provided the property type, skip the prompt and search! ðŸ›‘
         if prop_type or any(p in user_tl for p in _nlp_fallback().property_type_any_phrases):
             if prop_type:
                 extracted["property_type"] = prop_type
@@ -2415,7 +2412,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
             property_type=prop_type,
         )
 
-    # 🛑 INTENSELY SOFT-CODED SHIELD: Vector Store Semantic Mismatch 🛑
+    # ðŸ›‘ INTENSELY SOFT-CODED SHIELD: Vector Store Semantic Mismatch ðŸ›‘
     if results and not prop_type:
         user_tl = (user_text or "").lower()
         # Extract the actual property types the vector store retrieved
@@ -2466,7 +2463,8 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
 
 def handoff_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     city=filters.get("location") or filters.get("city")
-    return {"reply": f"Okay — I'll connect you with a human specialist{f' about {city.title()}' if city else ''}. "
+    return {"reply": f"Okay â€” I'll connect you with a human specialist{f' about {city.title()}' if city else ''}. "
                      "Please share your email or phone number and a preferred time.",
             "tool_result":{"handoff":True}}
+
 
