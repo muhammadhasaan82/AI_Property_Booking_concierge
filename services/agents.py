@@ -528,6 +528,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
             or _is_no(t)
             or nlp_engine.has_cardinal_extraction(t)
             or nlp_engine.wants_previous_results_sync(tl)
+            or nlp_engine.wants_property_search_request(tl)
         ):
             return "confirmation"
 
@@ -1051,7 +1052,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             # Fall through â€” sel block below will handle showing the property card
 
         # FIX A: "no, back to list" / "show other properties" â€” re-show last results, NOT end session
-        elif _is_no(user_text) or await nlp_engine.wants_previous_results_async(tl):
+        elif _is_no(user_text) or await nlp_engine.wants_previous_results_async(tl) or nlp_engine.wants_property_search_request(tl):
             last_results = persisted.get("last_results") or persisted.get("results") or []
             idx_map = persisted.get("results_index_map") or {}
             for k in [SK.recent_property_id, SK.recent_selection_index, SK.selected_property, SK.awaiting_selection_confirm, SK.awaiting_field]:
