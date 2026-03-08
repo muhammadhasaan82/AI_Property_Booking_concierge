@@ -535,9 +535,15 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if re.search(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", user_text):
         return "status_update"
         
-    # Master Shield for Active Cancellations
-    if ("cancel" in tl or "delete" in tl) and "policy" not in tl:
+    # 1. Master Shield for Active Cancellations (Soft-Coded via NLP Engine)
+    # Uses your vocabulary's keywords (cancel, status, etc.) but ignores policy questions.
+    if _is_status_query(t) and "policy" not in tl:
         return "status_update"
+
+    # 2. 🛑 SHIELD: Generic Location Inquiry (Soft-Coded) 🛑
+    # If the user asks about the 'city' category generally, route to search.
+    if re.search(r"\b(cit(y|ies)|location|where)\b", tl):
+        return "property_search"
 
     # Master Shield for Input Fields
     _conf_fields = {"name", "phone", "email", "guests", "check_in", "check_out", "modification_choice", "modification"}
@@ -2225,6 +2231,21 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     extracted = extract_filters(user_text, clean_filters)
     prop_type = extract_property_type(user_text)
     user_tl = (user_text or "").lower().strip()
+    requested_city = extracted.get("city") or extracted.get("location")
+
+    # 🛑 SOFT-CODED: Generic City List Request 🛑
+    # If they mentioned 'city' but the extractor found no specific city name, show the list.
+    if re.search(r"\b(city|cities|location|where)\b", user_tl) and not requested_city:
+        return {
+            "results": [],
+            "filters": extracted,
+            "reply": (
+                "We have properties available in many locations! "
+                "Here are all the cities where you can currently book:\n\n"
+                f"{_city_list_text()}\n\n"
+                "Which city would you like to search in?"
+            ),
+        }
 
     def _city_list_text() -> str:
         cities = get_available_cities()
