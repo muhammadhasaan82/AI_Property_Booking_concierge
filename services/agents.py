@@ -2233,8 +2233,24 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     user_tl = (user_text or "").lower().strip()
     requested_city = extracted.get("city") or extracted.get("location")
 
+    # 🛑 FIX: Define these helpers at the TOP so they are available to the shields below 🛑
+    def _city_list_text() -> str:
+        cities = get_available_cities()
+        if not cities:
+            return "San Diego, New York, Miami"
+        lines = []
+        for i in range(0, len(cities), 5):
+            lines.append(", ".join(cities[i:i + 5]))
+        return "\n".join(lines)
+
+    def _unavailable_city_reply() -> str:
+        return (
+            "Unfortunately, there's no availability for that city or location right now. "
+            "Would you like to see which cities are available? (yes/no)"
+        )
+
     # 🛑 SOFT-CODED: Generic City List Request 🛑
-    # If they mentioned 'city' but the extractor found no specific city name, show the list.
+    # (Now this can safely call _city_list_text!)
     if re.search(r"\b(city|cities|location|where)\b", user_tl) and not requested_city:
         return {
             "results": [],
@@ -2246,22 +2262,6 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
                 "Which city would you like to search in?"
             ),
         }
-
-    def _city_list_text() -> str:
-        cities = get_available_cities()
-        if not cities:
-            return "San Diego, New York, Miami"
-        # wrap into lines of 5 cities for readability
-        lines = []
-        for i in range(0, len(cities), 5):
-            lines.append(", ".join(cities[i:i + 5]))
-        return "\n".join(lines)
-
-    def _unavailable_city_reply() -> str:
-        return (
-            "Unfortunately, there's no availability for that city or location right now. "
-            "Would you like to see which cities are available? (yes/no)"
-        )
 
     # Step 1: follow-up after unavailable city prompt
     if clean_filters.get(SK.awaiting_unavailable_city_choice):
