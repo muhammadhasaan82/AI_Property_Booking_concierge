@@ -1946,8 +1946,18 @@ def _need_booking_fields(args: Dict[str, Any]) -> List[str]:
 async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
     missing=_need_booking_fields(args)
     if missing:
-        return {"reply": f"To finalize the booking I need: {', '.join(missing).replace('_',' ')}.",
-                "tool_result":{"ok":False,"need":missing}}
+        if "property_id" in missing:
+            return {
+                "reply": "It looks like you don't have an active booking in progress right now. Would you like me to help you find a property?",
+                "filters": args
+            }
+        else:
+            field_name = missing[0].replace("_", " ")
+            args[SK.awaiting_field] = missing[0]
+            return {
+                "reply": f"We are almost done with your booking! I just need your {field_name}.",
+                "filters": args
+            }
 
     # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Pre-validate via Rust BookingValidatorTool (TOON protocol)
