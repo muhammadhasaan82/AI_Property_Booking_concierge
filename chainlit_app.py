@@ -18,7 +18,8 @@ from services.state_keys import SK
 async def on_chat_resume(thread):
     past_thread_id = thread.get("id")
     cl.user_session.set("past_thread_id", past_thread_id)
-    await cl.context.emitter.send_toast(message="Chat session restored from memory.", type="info")
+    # Toast not available in Chainlit 1.1.x - show as message instead
+    await cl.Message(content="🔄 Chat session restored from memory.").send()
 
 # ---------------------------------------------------------------------------
 # EXACT UI REPLICATION: Settings Pop-up & Toasts (From reference file)
@@ -31,8 +32,8 @@ async def on_chat_start():
     cl.user_session.set("status_args", {})
     cl.user_session.set("payment_args", {})
 
-    # UI feature: Slide-down warning toast
-    await cl.context.emitter.send_toast(message="Please set up your Guest Profile in Settings", type="warning")
+    # UI feature: Slide-down warning toast - replaced with welcome message
+    # (Toast not available in Chainlit 1.1.x)
 
     # UI feature: The Settings Modal Pop-up
     settings = await cl.ChatSettings(
@@ -83,8 +84,9 @@ async def on_settings_update(settings):
         
     cl.user_session.set("booking_args", booking_args)
 
-    # UI feature: Success toast when they hit 'Save'
-    await cl.context.emitter.send_toast(message=f"Profile saved! Welcome, {settings.get('guest_name', 'Guest')}.", type="success")
+    # UI feature: Success toast when they hit 'Save' - replaced with message
+    # (Toast not available in Chainlit 1.1.x)
+    await cl.Message(content=f"✅ Profile saved! Welcome, {settings.get('guest_name', 'Guest')}.").send()
 
 
 async def stream_callback(token: str, msg: cl.Message):
