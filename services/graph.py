@@ -353,12 +353,6 @@ async def run_chat_graph(
     # Clean the filters to ensure no stale booking context on first message
     clean_filters = filters or {}
     
-    # If this looks like a greeting and we have booking context, clear it
-    if message and nlp_engine.is_greeting(message):
-        # Remove any booking-related context that might interfere
-        for key in [SK.awaiting_field, SK.awaiting_selection_confirm, SK.receipt_shown]:
-            clean_filters.pop(key, None)
-    
     state: ChatState = {
         "user_text": message,
         "filters": clean_filters,
