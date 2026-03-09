@@ -974,9 +974,9 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
 
     # Global branch: user explicitly asks to search different properties
     is_answering = persisted.get(SK.awaiting_field) in ["check_in", "check_out"] and _parse_dates(user_text)
-    if _wants_property_search_request(user_text) and not is_answering:
+    if _wants_property_search_request(user_text) and not is_answering and not persisted.get(SK.awaiting_selection_confirm):
         keep_keys = [
-            "location","city","budget","amenities","beds",
+            "location","city","budget","amenities","beds","property_type",
             "results_index_map","last_results","results",
             # Keep user-provided details to avoid losing context
             *config.REQUIRED_FIELDS,
@@ -1110,7 +1110,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             # Keep user info but clear property selection
             keep_keys = [
                 "name", "phone", "email", "check_in", "check_out", "guests",
-                "location", "city", "budget", "amenities", "beds"
+                "location", "city", "budget", "amenities", "beds", "property_type"
             ]
             reset = {k: v for k, v in persisted.items() if k in keep_keys}
             return {
@@ -1131,7 +1131,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
                 if "property" in requested:
                     keep_keys = [
                         "name", "phone", "email", "check_in", "check_out", "guests",
-                        "location", "city", "budget", "amenities", "beds"
+                        "location", "city", "budget", "amenities", "beds", "property_type"
                     ]
                     reset = {k: v for k, v in persisted.items() if k in keep_keys}
                     return {
@@ -1337,7 +1337,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         elif "property" in requested:
             keep_keys = [
                 "name", "phone", "email", "check_in", "check_out", "guests",
-                "location", "city", "budget", "amenities", "beds"
+                "location", "city", "budget", "amenities", "beds", "property_type"
             ]
             reset = {k: v for k, v in persisted.items() if k in keep_keys}
             return {
@@ -1495,7 +1495,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         # If location change requested, route to search but preserve details
         if "location" in requested:
             keep_keys = [
-                *config.REQUIRED_FIELDS, "budget", "amenities", "beds"
+                *config.REQUIRED_FIELDS, "budget", "amenities", "beds", "property_type"
             ]
             reset = {k:v for k,v in persisted.items() if k in keep_keys}
             return {
@@ -1506,7 +1506,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         # If property change requested, route back to search
         if "property" in requested:
             keep_keys = [
-                *config.REQUIRED_FIELDS, "budget", "amenities", "beds", "location", "city"
+                *config.REQUIRED_FIELDS, "budget", "amenities", "beds", "location", "city", "property_type"
             ]
             reset = {k:v for k,v in persisted.items() if k in keep_keys}
             return {
@@ -1698,7 +1698,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
             # Handle property change directly by routing back to search
             if "property" in requested:
                 keep_keys = [
-                    "location","city","budget","amenities","beds",
+                    "location","city","budget","amenities","beds","property_type",
                     "results_index_map","last_results","results",
                     *config.REQUIRED_FIELDS,
                 ]
@@ -1825,7 +1825,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         if _wants_property_search_request(user_text) and not is_answering:
             # Keep search-related filters and last results; clear booking-only flags
             keep_keys = [
-                "location","city","budget","amenities","beds",
+                "location","city","budget","amenities","beds","property_type",
                 "results_index_map","last_results","results",
                 # Preserve user-provided details
                 *config.REQUIRED_FIELDS,
@@ -1858,7 +1858,7 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         # If property change requested, route back to search
         if "property" in requested:
             keep_keys = [
-                "location","city","budget","amenities","beds",
+                "location","city","budget","amenities","beds","property_type",
                 "results_index_map","last_results","results"
             ]
             reset = {k:v for k,v in persisted.items() if k in keep_keys}

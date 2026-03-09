@@ -431,6 +431,8 @@ nlp_fallback:
     - "show other"       # <-- ADDED
     - "different one"    # <-- ADDED
     - "something else"   # <-- ADDED
+    - "show something else"   # <-- ADDED
+    - "other please"          # <-- ADDED
     - "go back"          # <-- ADDED
     - "back to list"     # <-- ADDED
     - "instead"          # <-- ADDED
