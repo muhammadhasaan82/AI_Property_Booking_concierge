@@ -6,21 +6,41 @@ if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import chainlit as cl
+from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from services.graph import run_chat_graph
 from services.db_logging import log_feedback
 from services.state_keys import SK
 
+# ---------------------------------------------------------------------------
+# FIXED: Data Layer for Chat History (ChatGPT-like Sidebar)
+# This creates a local SQLite file so past conversations magically appear!
+# ---------------------------------------------------------------------------
+@cl.data_layer
+def get_data_layer():
+    return SQLAlchemyDataLayer(conninfo="sqlite:///local_chat_history.db")
 
+# ---------------------------------------------------------------------------
+# Chat Resume 
+# ---------------------------------------------------------------------------
+@cl.on_chat_resume
+async def on_chat_resume(thread):
+    past_thread_id = thread.get("id")
+    cl.user_session.set("past_thread_id", past_thread_id)
+    await cl.Message(content="🔄 Chat session restored from memory.").send()
+
+# ---------------------------------------------------------------------------
+# Session Initialization
+# ---------------------------------------------------------------------------
 @cl.on_chat_start
 async def on_chat_start():
-    # Initialize session state for all arguments required by run_chat_graph
+    # Initialize session state 
     cl.user_session.set("filters", {})
     cl.user_session.set("booking_args", {})
     cl.user_session.set("status_args", {})
     cl.user_session.set("payment_args", {})
 
     # Send a styled welcome message
-    welcome_msg = """# AI Booking Concierge
+    welcome_msg = """# 🏨 AI Booking Concierge
 
 Welcome! I'm your personal booking assistant.
 
@@ -33,12 +53,13 @@ What would you like to do today?
 """
     await cl.Message(content=welcome_msg).send()
 
-
 async def stream_callback(token: str, msg: cl.Message):
     """Async callback for streaming LLM tokens to the user."""
     await msg.stream_token(token)
 
-
+# ---------------------------------------------------------------------------
+# Main Message Handler
+# ---------------------------------------------------------------------------
 @cl.on_message
 async def on_message(message: cl.Message):
     # Retrieve current session state
@@ -46,6 +67,16 @@ async def on_message(message: cl.Message):
     booking_args = cl.user_session.get("booking_args", {})
     status_args = cl.user_session.get("status_args", {})
     payment_args = cl.user_session.get("payment_args", {})
+
+    # Dynamic Thread Renaming for the History Sidebar
+    question = message.content
+    short_q = question[:15].rstrip() + "..."
+    try:
+        data_layer = cl.data_layer
+        if data_layer:
+            await data_layer.update_thread(message.thread_id, name=f"Booking: {short_q}")
+    except Exception:
+        pass 
 
     # Enable streaming for the underlying graph request
     filters["stream"] = True
@@ -105,7 +136,6 @@ async def on_message(message: cl.Message):
     cl.user_session.set("last_bot_reply", reply)
     cl.user_session.set("last_msg_id", msg.id)
 
-
 @cl.action_callback("thumbs_up")
 async def on_thumbs_up(action: cl.Action):
     user_msg = cl.user_session.get("last_user_msg", "")
@@ -123,7 +153,6 @@ async def on_thumbs_up(action: cl.Action):
             await cl.Message(content="Thanks for the feedback! 🚀").send()
     else:
         await cl.Message(content="Thanks for the feedback! 🚀").send()
-
 
 @cl.action_callback("thumbs_down")
 async def on_thumbs_down(action: cl.Action):
