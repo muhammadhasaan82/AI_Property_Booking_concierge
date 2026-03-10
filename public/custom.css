@@ -1,0 +1,60 @@
+/* Custom CSS to replace Chainlit branding with AI Booking Concierge */
+
+/* Hide the Chainlit logo on login page */
+.css-1r8d1ch img[src*="chainlit"],
+.css-1r8d1ch svg,
+.css-1r8d1ch .MuiBox-root img,
+.css-1r8d1ch [alt*="chainlit"],
+.login-logo,
+.auth-logo {
+    display: none !important;
+}
+
+/* Replace the "Chainlit" text with "AI Booking Concierge" */
+.css-1r8d1ch h1,
+.css-1r8d1ch .MuiTypography-h1,
+.css-1r8d1ch .MuiTypography-h4,
+.login-title,
+.auth-title {
+    font-size: 0 !important;
+}
+
+/* Add custom text after the hidden Chainlit text */
+.css-1r8d1ch h1::after,
+.css-1r8d1ch .MuiTypography-h1::after,
+.css-1r8d1ch .MuiTypography-h4::after,
+.login-title::after,
+.auth-title::after {
+    content: "🏨 AI Booking Concierge";
+    font-size: 24px !important;
+    font-weight: 600;
+    color: #fff;
+}
+
+/* Alternative selector for the logo area - replace entire content */
+.css-1r8d1ch,
+.MuiBox-root:has(> img[src*="chainlit"]) {
+    position: relative;
+}
+
+/* Hide Chainlit logo in header after login */
+header img[src*="chainlit"],
+header svg,
+.MuiAppBar-root img[src*="chainlit"] {
+    display: none !important;
+}
+
+/* Replace header title */
+header .MuiTypography-h6,
+header h1,
+.css-1r8d1ch h6 {
+    font-size: 0 !important;
+}
+
+header .MuiTypography-h6::after,
+header h1::after,
+.css-1r8d1ch h6::after {
+    content: "AI Booking Concierge";
+    font-size: 18px !important;
+    font-weight: 600;
+}
