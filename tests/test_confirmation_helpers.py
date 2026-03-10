@@ -1,23 +1,26 @@
 # tests/test_confirmation_helpers.py
-# Unit tests for the modular confirmation_agent helpers.
+# Unit tests for the modular confirmation helpers.
 
-import pytest
 from services.confirmation_helpers import (
-    _render_receipt,
-    _next_missing_field,
+    FIELD_PROMPTS,
+    REQUIRED_FIELDS,
     _ask_for_field,
+    _next_missing_field,
+    _render_receipt,
     _try_show_receipt,
+    build_restart_filters,
+    capture_awaited_field,
     handle_final_confirmation,
+    handle_inline_receipt_updates,
     handle_post_modification_choice,
     handle_property_selection,
     handle_selection_confirm,
-    REQUIRED_FIELDS,
-    FIELD_PROMPTS,
+    normalize_date_value,
+    route_requested_modifications,
 )
 from services.state_keys import SK
 
 
-# --- Helpers for mocking intent detection ---
 def _mock_is_yes(text: str) -> bool:
     return text.strip().lower() in {"yes", "y", "yeah", "yep", "sure", "ok"}
 
@@ -34,6 +37,7 @@ COMPLETE_FILTERS = {
     "check_out": "2027-06-05",
     "guests": 2,
     SK.selected_property: {
+        "id": "p1",
         "title": "Beach Villa",
         "city": "miami",
         "price_per_night": 200,
@@ -59,8 +63,8 @@ class TestRenderReceipt:
         receipt = _render_receipt(COMPLETE_FILTERS)
         assert "2027-06-01" in receipt
         assert "2027-06-05" in receipt
-        assert "4" in receipt  # nights
-        assert "$800" in receipt  # total
+        assert "4" in receipt
+        assert "$800" in receipt
 
     def test_renders_confirmation_prompt(self):
         receipt = _render_receipt(COMPLETE_FILTERS)
@@ -87,13 +91,13 @@ class TestAskForField:
     def test_asks_for_name(self):
         persisted = {}
         result = _ask_for_field("name", persisted)
-        assert "name" in result["reply"].lower()
+        assert result["reply"] == FIELD_PROMPTS["name"]
         assert persisted[SK.awaiting_field] == "name"
 
     def test_asks_for_email(self):
         persisted = {}
         result = _ask_for_field("email", persisted)
-        assert "email" in result["reply"].lower()
+        assert result["reply"] == FIELD_PROMPTS["email"]
 
 
 class TestTryShowReceipt:
@@ -123,11 +127,12 @@ class TestHandleFinalConfirmation:
         assert result["tool_result"]["ready_for_booking"] is True
         assert result["booking_args"]["property_id"] == "p1"
 
-    def test_cancels_on_no(self):
+    def test_cancels_on_no_and_opens_modification_choice(self):
         persisted = {**COMPLETE_FILTERS, SK.receipt_shown: True}
         result = handle_final_confirmation("no", persisted, _mock_is_yes, _mock_is_no)
         assert result is not None
         assert result["tool_result"]["cancelled"] is True
+        assert persisted[SK.awaiting_field] == "modification_choice"
 
     def test_re_renders_receipt_on_total_request(self):
         persisted = {**COMPLETE_FILTERS, SK.receipt_shown: True}
@@ -136,7 +141,7 @@ class TestHandleFinalConfirmation:
         assert "BOOKING SUMMARY" in result["reply"]
 
 
-class TestHandlePostModification:
+class TestHandlePostModificationChoice:
     def test_returns_none_without_flag(self):
         result = handle_post_modification_choice("proceed", {})
         assert result is None
@@ -151,6 +156,7 @@ class TestHandlePostModification:
         persisted = {**COMPLETE_FILTERS, SK.awaiting_post_mod_choice: True}
         result = handle_post_modification_choice("modify", persisted)
         assert result is not None
+        assert persisted[SK.awaiting_field] == "modification_choice"
         assert "modify" in result["reply"].lower()
 
 
@@ -165,8 +171,137 @@ class TestHandleSelectionConfirm:
         assert result is not None
         assert "BOOKING SUMMARY" in result["reply"]
 
-    def test_declines_selection(self):
-        persisted = {**COMPLETE_FILTERS, SK.awaiting_selection_confirm: True}
+    def test_declines_selection_and_reuses_previous_results(self):
+        persisted = {
+            **COMPLETE_FILTERS,
+            SK.awaiting_selection_confirm: True,
+            "last_results": [COMPLETE_FILTERS[SK.selected_property]],
+            "results_index_map": {1: "p1"},
+        }
         result = handle_selection_confirm("no", persisted, _mock_is_yes, _mock_is_no)
         assert result is not None
-        assert "end" in str(result.get("tool_result", {}))
+        assert result["tool_result"]["need"] == ["property_selection"]
+        assert "Reply with a number to choose" in result["reply"]
+        assert SK.selected_property not in persisted
+
+
+class TestRestartFilters:
+    def test_preserves_required_fields_and_clears_selection_state(self):
+        persisted = {
+            **COMPLETE_FILTERS,
+            "city": "miami",
+            "budget": 350,
+            "results": [COMPLETE_FILTERS[SK.selected_property]],
+            "last_results": [COMPLETE_FILTERS[SK.selected_property]],
+            "results_index_map": {1: "p1"},
+            SK.awaiting_selection_confirm: True,
+            SK.awaiting_field: "email",
+            SK.receipt_shown: True,
+        }
+        reset = build_restart_filters(persisted, include_results=True)
+        assert reset["name"] == "John Doe"
+        assert reset["budget"] == 350
+        assert "results" in reset
+        assert SK.selected_property not in reset
+        assert SK.awaiting_selection_confirm not in reset
+        assert SK.awaiting_field not in reset
+        assert SK.receipt_shown not in reset
+
+
+class TestRouteRequestedModifications:
+    def test_routes_dates_through_shared_prompt_path(self):
+        persisted = {**COMPLETE_FILTERS}
+        result = route_requested_modifications(persisted, ["dates"])
+        assert result["tool_result"]["need"] == ["check_in"]
+        assert persisted[SK.awaiting_field] == "check_in"
+        assert persisted["check_in"] is None
+        assert persisted["check_out"] is None
+
+    def test_inline_apply_updates_and_sets_post_mod_choice(self):
+        persisted = {**COMPLETE_FILTERS}
+        result = route_requested_modifications(
+            persisted,
+            ["email"],
+            parsed_email="updated@example.com",
+            allow_inline_apply=True,
+        )
+        assert persisted["email"] == "updated@example.com"
+        assert persisted[SK.awaiting_post_mod_choice] is True
+        assert result["tool_result"]["need"] == ["post_mod_choice"]
+
+    def test_property_restart_preserves_user_details(self):
+        persisted = {
+            **COMPLETE_FILTERS,
+            "city": "miami",
+            "last_results": [COMPLETE_FILTERS[SK.selected_property]],
+            "results_index_map": {1: "p1"},
+            SK.awaiting_selection_confirm: True,
+        }
+        result = route_requested_modifications(persisted, ["property"])
+        filters = result["filters"]
+        assert result["tool_result"]["need"] == ["restart"]
+        assert filters["name"] == "John Doe"
+        assert SK.selected_property not in filters
+        assert SK.awaiting_selection_confirm not in filters
+
+
+class TestCaptureAwaitedField:
+    def test_normalizes_slash_dates(self):
+        persisted = {SK.awaiting_field: "check_in"}
+        result = capture_awaited_field(
+            persisted,
+            "2027/06/10",
+            parsed_name=None,
+            parsed_phone=None,
+            parsed_email=None,
+            parsed_guests=None,
+            parsed_dates=["2027/06/10"],
+        )
+        assert result["updated"] is True
+        assert persisted["check_in"] == "2027-06-10"
+        assert persisted[SK.awaiting_field] is None
+
+    def test_malformed_dates_do_not_crash_and_ask_again(self):
+        persisted = {**COMPLETE_FILTERS, SK.awaiting_field: "check_in"}
+        result = capture_awaited_field(
+            persisted,
+            "2027.06.10",
+            parsed_name=None,
+            parsed_phone=None,
+            parsed_email=None,
+            parsed_guests=None,
+            parsed_dates=["2027.06.10"],
+        )
+        assert result["response"] is not None
+        assert "check-in" in result["response"]["reply"].lower()
+        assert persisted["check_in"] == "2027-06-01"
+
+
+class TestInlineReceiptUpdates:
+    def test_direct_field_update_rerenders_receipt(self):
+        persisted = {**COMPLETE_FILTERS, SK.receipt_shown: True}
+        result = handle_inline_receipt_updates(
+            persisted,
+            parsed_name=None,
+            parsed_phone="+15557654321",
+            parsed_email=None,
+            parsed_guests=None,
+            parsed_dates=[],
+        )
+        assert result is not None
+        assert "BOOKING SUMMARY" in result["reply"]
+        assert "+15557654321" in result["reply"]
+        assert persisted["phone"] == "+15557654321"
+
+
+class TestNormalizeDateValue:
+    def test_rejects_unsupported_format(self):
+        assert normalize_date_value("2027.06.01") is None
+
+    def test_accepts_iso_and_slash(self):
+        assert normalize_date_value("2027-06-01") == "2027-06-01"
+        assert normalize_date_value("2027/06/01") == "2027-06-01"
+
+
+def test_required_fields_contract_still_has_core_slots():
+    assert REQUIRED_FIELDS == ["name", "phone", "email", "check_in", "check_out", "guests"]
