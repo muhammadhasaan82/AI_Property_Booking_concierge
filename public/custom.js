@@ -1,17 +1,54 @@
-// Custom JS to open the sidebar/thread panel by default
-window.addEventListener('load', function() {
-    setTimeout(function() {
-        const sidebarToggle = document.querySelector('[data-testid="sidebar-toggle"], .sidebar-toggle, button[aria-label*="sidebar"], button[aria-label*="history"]');
-        const threadButton = document.querySelector('button[aria-label="Toggle thread history"], button[aria-label="thread history"]');
-        
-        if (sidebarToggle) {
-            sidebarToggle.click();
-        } else if (threadButton) {
-            threadButton.click();
-        }
-        
-        try {
-            localStorage.setItem('chainlit-sidebar-open', 'true');
-        } catch (e) {}
-    }, 1000);
+const SIDEBAR_STATE_KEY = "chainlit-sidebar-open";
+
+function findSidebarToggle() {
+  return document.querySelector(
+    [
+      '[data-testid="sidebar-toggle"]',
+      'button[aria-label*="Open sidebar"]',
+      'button[aria-label*="Toggle sidebar"]',
+      'button[aria-label*="thread history"]',
+      'button[aria-label*="history"]',
+    ].join(", ")
+  );
+}
+
+function sidebarLooksClosed(toggle) {
+  const label = (toggle.getAttribute("aria-label") || "").toLowerCase();
+  const expanded = toggle.getAttribute("aria-expanded");
+  return expanded === "false" || label.includes("open");
+}
+
+function ensureSidebarOpen() {
+  const toggle = findSidebarToggle();
+  if (!toggle) {
+    return false;
+  }
+
+  if (sidebarLooksClosed(toggle)) {
+    toggle.click();
+  }
+
+  try {
+    localStorage.setItem(SIDEBAR_STATE_KEY, "true");
+  } catch (error) {}
+
+  return true;
+}
+
+window.addEventListener("load", () => {
+  let attempts = 0;
+  const interval = window.setInterval(() => {
+    attempts += 1;
+    const opened = ensureSidebarOpen();
+    if (opened || attempts >= 20) {
+      window.clearInterval(interval);
+    }
+  }, 500);
+
+  const observer = new MutationObserver(() => {
+    ensureSidebarOpen();
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+  window.setTimeout(() => observer.disconnect(), 15000);
 });
