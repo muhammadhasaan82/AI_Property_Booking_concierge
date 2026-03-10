@@ -12,9 +12,17 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-from services.db_logging import log_feedback
 from services.graph import run_chat_graph
 from services.state_keys import SK
+
+# ---------------------------------------------------------------------------
+# Authentication - Password Login
+# ---------------------------------------------------------------------------
+@cl.password_auth_callback
+def auth_callback(username: str, password: str):
+    if username == "admin" and password == "123":
+        return cl.User(identifier=username, metadata={"role": "admin"})
+    return None
 
 load_dotenv()
 
@@ -273,23 +281,7 @@ async def _rename_thread(message: cl.Message, question: str) -> None:
         pass
 
 
-async def _update_feedback_message(
-    bot_reply: str,
-    acknowledgement: str,
-    fallback_message: str,
-) -> None:
-    last_msg_id = cl.user_session.get("last_msg_id")
-    if last_msg_id:
-        try:
-            msg = cl.Message(id=last_msg_id)
-            msg.content = f"{bot_reply}\n\n---\n*{acknowledgement}*"
-            msg.actions = []
-            await msg.update()
-            return
-        except Exception:
-            pass
-
-    await cl.Message(content=fallback_message).send()
+# Removed feedback message logic
 
 
 @cl.on_chat_resume
@@ -359,10 +351,6 @@ async def on_message(message: cl.Message):
         reply = "\n".join(formatted_lines)
 
     msg.content = reply
-    msg.actions = [
-        cl.Action(name="thumbs_up", value="positive", label="+1"),
-        cl.Action(name="thumbs_down", value="negative", label="-1"),
-    ]
     await msg.update()
 
     cl.user_session.set("last_user_msg", message.content)
@@ -370,25 +358,4 @@ async def on_message(message: cl.Message):
     cl.user_session.set("last_msg_id", msg.id)
 
 
-@cl.action_callback("thumbs_up")
-async def on_thumbs_up(action: cl.Action):
-    user_msg = cl.user_session.get("last_user_msg", "")
-    bot_reply = cl.user_session.get("last_bot_reply", "")
-    await log_feedback(user_msg, bot_reply, rating="positive")
-    await _update_feedback_message(
-        bot_reply,
-        "Thanks for the positive feedback!",
-        "Thanks for the feedback!",
-    )
-
-
-@cl.action_callback("thumbs_down")
-async def on_thumbs_down(action: cl.Action):
-    user_msg = cl.user_session.get("last_user_msg", "")
-    bot_reply = cl.user_session.get("last_bot_reply", "")
-    await log_feedback(user_msg, bot_reply, rating="negative")
-    await _update_feedback_message(
-        bot_reply,
-        "Thanks for the feedback! We'll work on improving.",
-        "Thanks for the feedback. We'll work on improving!",
-    )
+# Removed feedback callbacks
