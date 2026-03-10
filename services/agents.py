@@ -22,7 +22,6 @@ from .booking import (
     get_booking_status,
 )
 from .faq import faq_lookup
-from .faq_enhanced import enhanced_faq_agent, initialize_faq_system
 from services import confirmation_helpers
 from .whatsapp import send_payment_link_async
 from .nlp_extractor import extract_filters, extract_property_type, KNOWN_CITIES, CITY_ALIASES
@@ -130,85 +129,13 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
         return None
 
     active_filters = filters or {}
-    
-    # 1. Build the dynamic system prompt
-    system_prompt = (
-        "You are an intent classifier for a hotel booking chatbot. "
-        "Classify the user's message into ONE intent. Return strict JSON: {intent, confidence, brief_reason}. "
-        "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
-        "status_update, payment_link, handoff, availability, end.\n\n"
-        "CRITICAL RULES:\n"
-        "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, etc. A policy question always overrides booking context.\n"
-        "- 'confirmation' = user is selecting a numbered option, providing booking details, or affirming/declining a step.\n"
-        "- 'property_search' = user is looking for a place or asking about properties.\n"
-        "- 'greeting' = ONLY pure greetings with NO other intent.\n"
-    )
-
-    # 2. INJECT STATE DIRECTLY INTO SYSTEM PROMPT (The Super Soft-Coded Fix)
-    has_last_results = bool(active_filters.get("last_results"))
-    if has_last_results:
-        count = len(active_filters.get("last_results") or [])
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You just showed the user a numbered list of {count} properties. If their message contains a number (e.g. '1', '{count}'), an ordinal, or a phrase like 'option 6' or 'show me option 7', they are making a selection. You MUST classify this intent strictly as 'confirmation'. Do NOT classify as property_search."
-
-    if active_filters.get(SK.awaiting_field) == "booking_id":
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their Booking ID. You MUST classify their input strictly as 'status_update'."
-    elif active_filters.get(SK.awaiting_field):
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get(SK.awaiting_field)}'. Treat their input as a 'confirmation' of this data."
-
-    try:
-        valid_types = get_vocabulary().seed_property_types
-        if valid_types:
-            system_prompt += f"\n\nValid property types in our database: {', '.join(valid_types)}."
-    except Exception:
-        pass
-
-    # 3. Send ONLY the user text, no confusing JSON context block
-    payload: Dict[str, Any] = {
-        "model": OPENAI_CHAT_MODEL,
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text}, 
-        ],
-    }
-
-    try:
-        with httpx.Client(timeout=8.0) as client:
-            r = client.post("https://api.openai.com/v1/chat/completions", headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            }, json=payload)
-        if r.status_code != 200:
-            return None
-        body = r.json()
-        content = (((body or {}).get("choices") or [{}])[0] or {}).get("message", {}).get("content", "")
-        if not content:
-            return None
-        parsed = json.loads(content)
-        intent = str(parsed.get("intent", "")).strip()
-        confidence = float(parsed.get("confidence", 0.0) or 0.0)
-        if intent in _ALLOWED_INTENTS and confidence >= 0.45:
-            return intent
-    except Exception:
-        return None
-    return None
-
-    """Use LLM structured output to classify intent with minimal hardcoded rules."""
-    if not (OPENAI_API_KEY and LLM_STRUCTURED and SOFT_INTENT_ROUTER):
-        return None
-
-    text = (user_text or "").strip()
-    if not text:
-        return None
-
     context = {
-        "has_selected_property": bool((filters or {}).get(SK.selected_property)),
-        "has_booking_progress": any((filters or {}).get(k) for k in config.REQUIRED_FIELDS),
-        "has_last_results": bool((filters or {}).get("last_results")),
-        "last_results_count": len((filters or {}).get("last_results") or []),
-        SK.awaiting_field: (filters or {}).get(SK.awaiting_field),
-        SK.receipt_shown: bool((filters or {}).get(SK.receipt_shown)),
+        "has_selected_property": bool(active_filters.get(SK.selected_property)),
+        "has_booking_progress": any(active_filters.get(field) for field in config.REQUIRED_FIELDS),
+        "has_last_results": bool(active_filters.get("last_results")),
+        "last_results_count": len(active_filters.get("last_results") or []),
+        SK.awaiting_field: active_filters.get(SK.awaiting_field),
+        SK.receipt_shown: bool(active_filters.get(SK.receipt_shown)),
     }
     system_prompt = _build_llm_router_system_prompt(context)
 
@@ -217,14 +144,8 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": text,
-            },
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
         ],
     }
 
@@ -848,6 +769,33 @@ def _format_property_brief(p: Dict[str, Any]) -> str:
     bedrooms = p.get("bedrooms", "N/A")
     return f"**{title}** â€” {city}\n- Bedrooms: {bedrooms}\n- Price: ${price}/night"
 
+
+def _coerce_name_when_awaited(user_text: str, parsed_name: Optional[str]) -> Optional[str]:
+    if parsed_name:
+        return parsed_name
+
+    candidate = (user_text or "").strip()
+    if not candidate:
+        return None
+
+    name_invalid_chars = set(_nlp_fallback().parse_name_invalid_chars)
+    if len(candidate) < 2 or any(char in candidate for char in name_invalid_chars):
+        return None
+
+    disallowed = set(_nlp_fallback().parse_name_disallowed_words)
+    words = re.findall(r"[a-zA-Z][a-zA-Z'-]*", candidate)
+    candidate_lower = candidate.lower()
+    if (
+        1 <= len(words) <= 3
+        and not any(word.lower() in disallowed for word in words)
+        and not any(
+            phrase in candidate_lower
+            for phrase in _nlp_fallback().parse_name_disallowed_phrases
+        )
+    ):
+        return candidate
+    return None
+
 # -----------------------
 # Agents
 # -----------------------
@@ -870,1054 +818,249 @@ def greeting_agent(filters: Dict[str, Any], user_text: str = "") -> Dict[str, An
 
 async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Selection + slot fill â†’ receipt â†’ final yes/no
+    Selection + slot fill -> receipt -> final yes/no
     - shows a full property card on selection
-    - robust single-date handling using `awaiting_field`
+    - keeps confirmation state transitions delegated to helpers
     """
-    persisted = {**(filters or {})}
+    original_filters = filters or {}
+    persisted = {**original_filters}
 
-    # PRIORITY 1: Handle final confirmation responses (after receipt shown) - CHECK THIS FIRST
-    if persisted.get(SK.receipt_shown):
-        if _is_yes(user_text):
-            # Clear any lingering post-mod/cancel prompts and proceed to booking
-            persisted.pop(SK.awaiting_post_mod_choice, None)
-            persisted.pop(SK.awaiting_post_cancel_choice, None)
-            persisted.pop(SK.receipt_shown, None)
-            # Also clear any booking-related flags to prevent re-entry
-            persisted.pop(SK.awaiting_field, None)
-            persisted.pop(SK.modifying_dates, None)
-            return {
-                "reply": "ðŸŽ¯ Perfect! Creating your booking now...",
-                "tool_result": {"ok": True, "ready_for_booking": True},
-                "filters": persisted,
-                "booking_args": {
-                    "property_id": persisted.get(SK.recent_property_id),
-                    "check_in": persisted.get("check_in"),
-                    "check_out": persisted.get("check_out"),
-                    "guests": persisted.get("guests"),
-                    "name": persisted.get("name"),
-                    "email": persisted.get("email"),
-                    "phone": persisted.get("phone"),
-                    SK.selected_property: persisted.get(SK.selected_property),
-                },
-            }
-
-        if _is_no(user_text):
-            # Clear the receipt flag but KEEP all user data, then immediately ask what to modify
-            persisted.pop(SK.receipt_shown, None)
-            persisted.pop(SK.awaiting_post_mod_choice, None)
-            # Allow user to still say "search different properties" if they want, but default to modification list
-            persisted[SK.awaiting_field] = "modification_choice"
-            return {
-                "reply": "No problem, the booking has been cancelled. What would you like to modify â€” dates, guests, name, phone, email, or property?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "cancelled": True, "need": ["modification"]}
-            }
-        
-        # If user asks for total bill or receipt again
-        if nlp_engine.is_receipt_request(user_text):
-            receipt = _render_receipt(persisted)
-            return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
-
-    # If we're in any modification sub-flow, ensure post-cancel choice doesn't interfere
-    if persisted.get(SK.awaiting_field) in {"modification","modification_choice","check_in","check_out","guests","name","phone","email"} or persisted.get(SK.modifying_dates):
+    if persisted.get(SK.awaiting_field) in {
+        "modification",
+        "modification_choice",
+        "check_in",
+        "check_out",
+        "guests",
+        "name",
+        "phone",
+        "email",
+    } or persisted.get(SK.modifying_dates):
         persisted.pop(SK.awaiting_post_cancel_choice, None)
 
-    # High-priority: After a modification, the user may say 'no' to proceed to receipt or 'yes' to modify more
-    if persisted.get(SK.awaiting_post_mod_choice):
-        tl = (user_text or "").lower().strip()
-        proceed_phrases = _vocab().proceed_phrases
-        modify_phrases = _vocab().modify_phrases
-        # Check for simple "yes" first - this should proceed to receipt
-        if tl.strip() == "yes":
-            persisted.pop(SK.awaiting_post_mod_choice, None)
-            persisted.pop(SK.awaiting_post_cancel_choice, None)
-            receipt = _render_receipt(persisted)
-            persisted[SK.receipt_shown] = True
-            return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
-        
-        if any(p in tl for p in proceed_phrases):
-            persisted.pop(SK.awaiting_post_mod_choice, None)
-            persisted.pop(SK.awaiting_post_cancel_choice, None)
-            # Ensure all required fields are present before rendering receipt; otherwise ask for the next missing field
-            required = config.REQUIRED_FIELDS + [SK.selected_property]
-            for rk in config.REQUIRED_FIELDS:
-                if not persisted.get(rk):
-                    persisted[SK.awaiting_field]=rk
-                    return {"reply": _slot_prompt(rk), "filters": persisted, "tool_result": {"ok": False, "need": [rk]}}
-            return confirmation_helpers._try_show_receipt(persisted)
+    response = confirmation_helpers.handle_final_confirmation(
+        user_text,
+        persisted,
+        _is_yes,
+        _is_no,
+    )
+    if response:
+        return response
 
-        if any(p in tl for p in modify_phrases):
-            persisted.pop(SK.awaiting_post_mod_choice, None)
-            persisted.pop(SK.awaiting_post_cancel_choice, None)
-            persisted[SK.awaiting_field] = "modification_choice"
-            return {
-                "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["modification"]}
-            }
-
-        # If user didn't answer clearly, and we're not in modification mode, proceed to receipt automatically
-        if not persisted.get(SK.modifying_dates):
-            # Ensure required fields, else ask for next missing
-            for rk in config.REQUIRED_FIELDS:
-                if not persisted.get(rk):
-                    persisted[SK.awaiting_field]=rk
-                    return {"reply": _slot_prompt(rk), "filters": persisted, "tool_result": {"ok": False, "need": [rk]}}
-            return confirmation_helpers._try_show_receipt(persisted)
-
+    if persisted.get(SK.receipt_shown) and nlp_engine.is_receipt_request(user_text):
         return {
-            "reply": "Would you like to proceed to the updated receipt, or make another change?",
+            "reply": _render_receipt(persisted),
+            "tool_result": {"ok": False, "need": ["final_confirmation"], "show_receipt": True},
             "filters": persisted,
-            "tool_result": {"ok": False, "need": ["post_mod_choice"]}
         }
 
-    # Global branch: user explicitly asks to search different properties
-    is_answering = persisted.get(SK.awaiting_field) in ["check_in", "check_out"] and _parse_dates(user_text)
-    if _wants_property_search_request(user_text) and not is_answering and not persisted.get(SK.awaiting_selection_confirm):
-        keep_keys = [
-            "location","city","budget","amenities","beds","property_type",
-            "results_index_map","last_results","results",
-            # Keep user-provided details to avoid losing context
-            *config.REQUIRED_FIELDS,
-        ]
-        reset = {k:v for k,v in persisted.items() if k in keep_keys}
-        # Clear any selection-specific flags
-        for k in [SK.recent_selection_index,SK.recent_property_id,SK.selected_property,SK.awaiting_selection_confirm,SK.awaiting_field,SK.receipt_shown]:
-            reset.pop(k, None)
-        return {
-            "reply": "Sure â€” let's explore more options. Tell me what you're looking for (city, budget, dates, beds, amenities).",
-            "filters": reset,
-            "tool_result": {"ok": False, "need": ["restart"]}
-        }
+    parsed_dates = _parse_dates(user_text) or []
 
-    # Handle numeric selection (but not if we're collecting guest numbers)
+    response = confirmation_helpers.handle_post_modification_choice(user_text, persisted)
+    if response:
+        return response
+
+    response = confirmation_helpers.handle_restart_search_request(
+        user_text,
+        persisted,
+        parsed_dates=parsed_dates,
+        wants_property_search_request=_wants_property_search_request,
+    )
+    if response:
+        return response
+
     sel = _parse_selection_index(user_text)
     awaiting_field = (persisted.get(SK.awaiting_field) or "").strip()
-    awaiting_guests = awaiting_field == "guests"
-    # If we are actively collecting any booking field, never treat numbers/ordinals
-    # as property selection in this turn.
     if awaiting_field and awaiting_field not in {"modification", "modification_choice"}:
         sel = None
-    # Note: do NOT suppress sel when awaiting_selection_confirm; user may re-select a different item.
-    # The awaiting_selection_confirm block below handles this case explicitly.
-    
-    # If we're waiting for guests and got a number, treat it as guest count, not selection
-    if awaiting_guests and re.match(r"^\s*\d+\s*$", user_text.strip()):
+    if awaiting_field == "guests" and re.match(r"^\s*\d+\s*$", user_text.strip()):
         sel = None
-    
-    if sel is not None and not awaiting_guests:
-        idx_map = persisted.get("results_index_map") or {}
-        prop_id = idx_map.get(sel)
-        results = persisted.get("last_results") or persisted.get("results") or []
-        chosen = next((p for p in results if p.get("id")==prop_id), None)
-        if not chosen:
-            # Dynamic message based on available options
-            max_option = max(idx_map.keys()) if idx_map else 4
-            options_str = ", ".join(str(i) for i in range(1, max_option + 1))
-            return {"reply":f"Sorry, I couldn't find that option. Please choose from: {options_str}.",
-                    "tool_result":{"ok":False,"need":["property_selection"]},"filters":persisted}
-        card = _format_property_full(chosen)
-        persisted.update({
-            SK.recent_selection_index: sel,
-            SK.recent_property_id: prop_id,
-            SK.selected_property: chosen,
-            SK.awaiting_selection_confirm: True,
-            SK.awaiting_field: None,
-        })
-        # If all required booking fields are already present, show the final receipt immediately
-        required = list(config.REQUIRED_FIELDS)
-        if all(persisted.get(k) for k in required):
-            return confirmation_helpers._try_show_receipt(persisted)
-        # Otherwise, ask for a quick confirmation on the selected property
-        return {
-            "reply": f"ðŸ  Selected:\n\n{card}\n\nWould you like to book this one? (yes/no)",
-            "tool_result":{"ok":False,"need":["booking_confirmation"],"property_id":prop_id},
-            "filters": persisted
-        }
 
-    # If user answered yes/no to selection
-    if persisted.get(SK.awaiting_selection_confirm):
-        # While awaiting selection confirm, do NOT parse name/phone/email/dates/guests
-        tl=(user_text or "").strip().lower()
+    response = confirmation_helpers.handle_property_selection(
+        user_text,
+        persisted,
+        sel,
+        _format_property_full,
+    )
+    if response:
+        return response
 
-        # FIX B: If user types a new numeric selection (e.g. "6"), handle it here instead of
-        # asking "please reply yes or no". Clear stale selection state and fall through
-        # to the sel-handling block which will show the proper property card.
-        if sel is not None:
-            persisted.pop(SK.awaiting_selection_confirm, None)
-            persisted.pop(SK.selected_property, None)
-            persisted.pop(SK.recent_property_id, None)
-            persisted.pop(SK.recent_selection_index, None)
-            # Fall through â€” sel block below will handle showing the property card
+    response = confirmation_helpers.handle_selection_confirm(
+        user_text,
+        persisted,
+        _is_yes,
+        _is_no,
+        wants_previous_results=nlp_engine.wants_previous_results_sync,
+        wants_property_search_request=_wants_property_search_request,
+    )
+    if response:
+        return response
 
-        # FIX A: "no, back to list" / "show other properties" â€” re-show last results, NOT end session
-        elif _is_no(user_text) or await nlp_engine.wants_previous_results_async(tl) or nlp_engine.wants_property_search_request(tl):
-            last_results = persisted.get("last_results") or persisted.get("results") or []
-            idx_map = persisted.get("results_index_map") or {}
-            for k in [SK.recent_property_id, SK.recent_selection_index, SK.selected_property, SK.awaiting_selection_confirm, SK.awaiting_field]:
-                persisted.pop(k, None)
-            if last_results and idx_map:
-                # Re-display the previous search results
-                lines = []
-                for num in sorted(idx_map.keys()):
-                    pid = idx_map[num]
-                    prop = next((p for p in last_results if p.get("id") == pid), None)
-                    if prop:
-                        title = prop.get("title", "Property")
-                        city = (prop.get("city") or "").title()
-                        price = int(float(prop.get("price_per_night") or 0))
-                        lines.append(f"{num}. {title} â€” {city} â€” about ${price}/night")
-                if lines:
-                    listing = "\n".join(lines)
-                    return {
-                        "reply": f"Sure! Here are your previous results:\n\n{listing}\n\nReply with a number to choose.",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["property_selection"]},
-                    }
-            # No cached results â€” prompt a fresh search
-            return {
-                "reply": "No previous results found. What would you like to search for? (city, property type, budget)",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["restart"]},
-            }
+    requested_fields = _detect_requested_fields(user_text)
+    response = confirmation_helpers.handle_post_cancel_choice(
+        user_text,
+        persisted,
+        requested_fields=requested_fields,
+        wants_property_search_request=_wants_property_search_request,
+        wants_modification=_wants_modification,
+    )
+    if response:
+        return response
 
-        if sel is None and _is_yes(user_text):
-            persisted[SK.awaiting_selection_confirm] = False
-            # If we already have required fields, show receipt directly; otherwise ask for next missing
-            required=list(config.REQUIRED_FIELDS)
-            missing=[k for k in required if not persisted.get(k)]
-            if not missing:
-                return confirmation_helpers._try_show_receipt(persisted)
-            # Ask for the next missing field
-            nxt=missing[0]
-            persisted[SK.awaiting_field]=nxt
-            return {"reply":config.FIELD_PROMPTS.get(nxt, f"Please provide your {nxt}."), "tool_result": {"ok": False, "need": [nxt]}, "filters": persisted}
-        # If neither explicit yes nor no (and not a new numeric selection), keep asking
-        if sel is None:
-            return {"reply": "Please reply with yes or no to continue.",
-                    "tool_result": {"ok": False, "need": ["booking_confirmation"]},
-                    "filters": persisted}
-
-    # Handle user's choice after cancelling a receipt (search again vs modify)
-    if persisted.get(SK.awaiting_post_cancel_choice) and not persisted.get(SK.awaiting_field):
-        tl = (user_text or "").lower().strip()
-
-        # User wants to search for different properties
-        if _wants_property_search_request(user_text):
-            persisted.pop(SK.awaiting_post_cancel_choice, None)
-            persisted.pop(SK.awaiting_post_mod_choice, None)
-            # Keep user info but clear property selection
-            keep_keys = [
-                "name", "phone", "email", "check_in", "check_out", "guests",
-                "location", "city", "budget", "amenities", "beds", "property_type"
-            ]
-            reset = {k: v for k, v in persisted.items() if k in keep_keys}
-            return {
-                "reply": "Sure! What type of property are you looking for? (city, budget, amenities, property type)",
-                "filters": reset,
-                "tool_result": {"ok": False, "need": ["restart"]}
-            }
-
-        # User wants to modify requirements (and may have already specified which one)
-        if _wants_modification(user_text):
-            requested = _detect_requested_fields(user_text)
-            persisted.pop(SK.awaiting_post_cancel_choice, None)
-            persisted.pop(SK.awaiting_post_mod_choice, None)
-
-            # If a specific field is mentioned, jump straight to that flow
-            if requested:
-                # Property â†’ restart search preserving user details
-                if "property" in requested:
-                    keep_keys = [
-                        "name", "phone", "email", "check_in", "check_out", "guests",
-                        "location", "city", "budget", "amenities", "beds", "property_type"
-                    ]
-                    reset = {k: v for k, v in persisted.items() if k in keep_keys}
-                    return {
-                        "reply": "Let's find a different property. What are you looking for?",
-                        "filters": reset,
-                        "tool_result": {"ok": False, "need": ["restart"]}
-                    }
-                # Dates (both)
-                if "dates" in requested or ("check_in" in requested and "check_out" in requested):
-                    persisted["check_in"] = None
-                    persisted["check_out"] = None
-                    persisted[SK.modifying_dates] = True
-                    persisted[SK.awaiting_field] = "check_in"
-                    return {
-                        "reply": "What's the new check-in date (YYYY-MM-DD)?",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["check_in"]}
-                    }
-                # Single date targets
-                if "check_in" in requested:
-                    persisted[SK.modifying_dates] = True
-                    persisted[SK.awaiting_field] = "check_in"
-                    return {
-                        "reply": "What's the new check-in date (YYYY-MM-DD)?",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["check_in"]}
-                    }
-                if "check_out" in requested:
-                    persisted[SK.modifying_dates] = True
-                    persisted[SK.awaiting_field] = "check_out"
-                    return {
-                        "reply": "What's the new check-out date (YYYY-MM-DD)?",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["check_out"]}
-                    }
-                # Guests
-                if "guests" in requested:
-                    persisted[SK.awaiting_field] = "guests"
-                    return {
-                        "reply": "How many guests will be staying?",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["guests"]}
-                    }
-                # Identity/contact
-                if "name" in requested:
-                    persisted[SK.awaiting_field] = "name"
-                    return {
-                        "reply": "What's the correct full name?",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["name"]}
-                    }
-                if "phone" in requested:
-                    persisted[SK.awaiting_field] = "phone"
-                    return {
-                        "reply": "What's the correct phone number?",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["phone"]}
-                    }
-                if "email" in requested:
-                    persisted[SK.awaiting_field] = "email"
-                    return {
-                        "reply": "What's the correct email address?",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["email"]}
-                    }
-
-            # Otherwise ask a focused clarification
-            persisted[SK.awaiting_field] = "modification_choice"
-            return {
-                "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["modification"]}
-            }
-
-        # Neither clear yes nor modify - ask again
-        return {
-            "reply": ("Please specify: would you like to:\n"
-                     "1. Search for different properties, or\n"
-                     "2. Modify your current requirements?\n\n"
-                     "Just tell me what you'd prefer!"),
-            "filters": persisted,
-            "tool_result": {"ok": False, "need": ["clarification"]}
-        }
-
-        # After a modification was applied, ask whether to proceed or modify more
-        if persisted.get(SK.awaiting_post_mod_choice):
-            tl = (user_text or "").lower().strip()
-            proceed_phrases = _vocab().proceed_phrases
-            modify_phrases = _vocab().modify_phrases
-            if any(p in tl for p in proceed_phrases):
-                # Skip rendering confirmation receipt; proceed directly to booking/payment
-                persisted.pop(SK.awaiting_post_mod_choice, None)
-                selected_property = persisted.get(SK.selected_property) or {}
-                price_per_night = float(selected_property.get("price_per_night") or 0)
-                from datetime import datetime
-                try:
-                    ci=datetime.strptime(persisted.get("check_in",""), "%Y-%m-%d")
-                    co=datetime.strptime(persisted.get("check_out",""), "%Y-%m-%d")
-                    nights=max(1, (co-ci).days)
-                except Exception:
-                    nights=1
-                total=int(price_per_night*nights)
-
-                return {
-                    "reply": f"Proceeding to payment. Total amount: ${total}.",
-                    "filters": persisted,
-                    "tool_result": {"ok": True, "ready_for_booking": True},
-                    "booking_args": {
-                        "property_id": persisted.get(SK.recent_property_id),
-                        "check_in": persisted.get("check_in"),
-                        "check_out": persisted.get("check_out"),
-                        "guests": persisted.get("guests"),
-                        "name": persisted.get("name"),
-                        "email": persisted.get("email"),
-                        "phone": persisted.get("phone"),
-                        SK.selected_property: persisted.get(SK.selected_property),
-                    },
-                }
-
-            if any(p in tl for p in modify_phrases):
-                persisted.pop(SK.awaiting_post_mod_choice, None)
-                persisted[SK.awaiting_field] = "modification_choice"
-                return {
-                    "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
-                    "filters": persisted,
-                    "tool_result": {"ok": False, "need": ["modification"]}
-                }
-
-            return {
-                "reply": "Would you like to proceed to the updated receipt, or make another change?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["post_mod_choice"]}
-            }
-    
-    # Add handling for modification_choice
-    if persisted.get(SK.awaiting_field) == "modification_choice":
-        requested = _detect_requested_fields(user_text)
-        
-        if not requested:
-            # Try to parse direct field mentions
-            tl = user_text.lower()
-            if "date" in tl:
-                requested = ["dates"]
-            elif "guest" in tl:
-                requested = ["guests"]
-            elif "name" in tl:
-                requested = ["name"]
-            elif "phone" in tl:
-                requested = ["phone"]
-            elif "email" in tl:
-                requested = ["email"]
-            elif "property" in tl:
-                requested = ["property"]
-            else:
-                return {
-                    "reply": "Please specify what you'd like to change: dates, guests, name, phone, email, or property?",
-                    "filters": persisted,
-                    "tool_result": {"ok": False, "need": ["modification"]}
-                }
-        
-        persisted.pop(SK.awaiting_field, None)
-        
-        # Handle each modification type
-        if "dates" in requested or "check_in" in requested or "check_out" in requested:
-            # User wants to change dates - clear existing dates and ask for both check-in and check-out
-            persisted["check_in"] = None
-            persisted["check_out"] = None
-            persisted[SK.awaiting_field] = "check_in"
-            persisted[SK.modifying_dates] = True
-            return {
-                "reply": "What is your new check-in date (YYYY-MM-DD)?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["check_in"]}
-            }
-        elif "guests" in requested:
-            persisted[SK.awaiting_field] = "guests"
-            return {
-                "reply": "How many guests?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["guests"]}
-            }
-        elif "name" in requested:
-            persisted[SK.awaiting_field] = "name"
-            return {
-                "reply": "What's your full name?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["name"]}
-            }
-        elif "phone" in requested:
-            persisted[SK.awaiting_field] = "phone"
-            return {
-                "reply": "What's your phone number?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["phone"]}
-            }
-        elif "email" in requested:
-            persisted[SK.awaiting_field] = "email"
-            return {
-                "reply": "What's your email address?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["email"]}
-            }
-        elif "property" in requested:
-            keep_keys = [
-                "name", "phone", "email", "check_in", "check_out", "guests",
-                "location", "city", "budget", "amenities", "beds", "property_type"
-            ]
-            reset = {k: v for k, v in persisted.items() if k in keep_keys}
-            return {
-                "reply": "Let's find a different property. What are you looking for?",
-                "filters": reset,
-                "tool_result": {"ok": False, "need": ["restart"]}
-            }
-        
-        if "dates" in requested:
-            # Clear existing dates when modifying
-            persisted["check_in"] = None
-            persisted["check_out"] = None
-            persisted[SK.awaiting_field] = "check_in"
-            persisted[SK.modifying_dates] = True
-            return {
-                "reply": "What's the new check-in date (YYYY-MM-DD)?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["check_in"]}
-            }
-        
-        # Treat single date mentions as a full dates update (ask both sequentially)
-        if "check_in" in requested and "dates" not in requested:
-            persisted[SK.awaiting_field] = "check_in"
-            return {
-                "reply": "What's the new check-in date (YYYY-MM-DD)?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["check_in"]}
-            }
-        
-        if "check_out" in requested and "dates" not in requested:
-            persisted[SK.awaiting_field] = "check_out"
-            return {
-                "reply": "What's the new check-out date (YYYY-MM-DD)?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["check_out"]}
-            }
-        
-        if "guests" in requested:
-            persisted[SK.awaiting_field] = "guests"
-            return {
-                "reply": "How many guests will be staying?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["guests"]}
-            }
-        
-        if "name" in requested:
-            persisted[SK.awaiting_field] = "name"
-            return {
-                "reply": "What's the correct full name?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["name"]}
-            }
-        
-        if "phone" in requested:
-            persisted[SK.awaiting_field] = "phone"
-            return {
-                "reply": "What's the correct phone number?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["phone"]}
-            }
-        
-        if "email" in requested:
-            persisted[SK.awaiting_field] = "email"
-            return {
-                "reply": "What's the correct email address?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["email"]}
-            }
-
-    # Parse incremental fields
-    # If still awaiting selection confirmation, skip parsing to avoid capturing phrases like "yes please" as name
     if persisted.get(SK.awaiting_selection_confirm):
         parsed_name = None
         parsed_phone = None
         parsed_email = None
-        parsed_dates = None
         parsed_guests = None
+        parsed_dates_for_fields: List[str] = []
     else:
         parsed_name = _parse_name(user_text)
-    parsed_phone = _parse_phone(user_text)
-    parsed_email = _parse_email(user_text)
-    parsed_dates = _parse_dates(user_text)
-    parsed_guests = _parse_guests(user_text)
+        parsed_phone = _parse_phone(user_text)
+        parsed_email = _parse_email(user_text)
+        parsed_guests = _parse_guests(user_text)
+        parsed_dates_for_fields = parsed_dates
 
-    # Fast-path: if user explicitly asked to change dates, immediately route to date prompts
-    # Master Shield: If we are asking for a field and they give it, skip modification
+    resolved_name = _coerce_name_when_awaited(user_text, parsed_name)
     original_awaited = (persisted.get(SK.awaiting_field) or "").strip()
     is_answering_prompt = (
-        (original_awaited in ["check_in", "check_out"] and parsed_dates) or
-        (original_awaited == "guests" and parsed_guests is not None) or
-        (original_awaited == "name" and parsed_name) or
-        (original_awaited == "phone" and parsed_phone) or
-        (original_awaited == "email" and parsed_email)
+        (original_awaited in {"check_in", "check_out"} and bool(parsed_dates_for_fields))
+        or (
+            original_awaited == "guests"
+            and (parsed_guests is not None or user_text.strip().isdigit())
+        )
+        or (original_awaited == "name" and bool(resolved_name))
+        or (original_awaited == "phone" and bool(parsed_phone))
+        or (original_awaited == "email" and bool(parsed_email))
     )
 
-    # Fast-path: if user explicitly asked to change dates, immediately route to date prompts
-    if _wants_modification(user_text) and not is_answering_prompt:
-        try:
-            requested_now = _detect_requested_fields(user_text)
-        except Exception:
-            requested_now = []
-        if ("dates" in requested_now) or ("check_in" in requested_now) or ("check_out" in requested_now):
-            persisted[SK.modifying_dates] = True
-            if not persisted.get("check_in"):
-                persisted[SK.awaiting_field] = "check_in"
-                return {"reply": "What's the new check-in date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
-            if not persisted.get("check_out"):
-                persisted[SK.awaiting_field] = "check_out"
-                return {"reply": "What's the new check-out date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_out"]}}
+    if original_awaited in {"modification", "modification_choice"}:
+        return confirmation_helpers.route_requested_modifications(
+            persisted,
+            requested_fields,
+            parsed_name=parsed_name,
+            parsed_phone=parsed_phone,
+            parsed_email=parsed_email,
+            parsed_guests=parsed_guests,
+            parsed_dates=parsed_dates_for_fields,
+            allow_inline_apply=True,
+        )
 
-    # If the bot explicitly asked to modify a specific field, overwrite it even if it already exists
-    just_applied_field_update = False
-    awaited = (persisted.get(SK.awaiting_field) or "").strip()
-    if awaited == "email" and parsed_email:
-        persisted["email"] = parsed_email
-        persisted[SK.awaiting_field] = None
-        just_applied_field_update = True
-    elif awaited == "phone" and parsed_phone:
+    capture = confirmation_helpers.capture_awaited_field(
+        persisted,
+        user_text,
+        parsed_name=parsed_name,
+        parsed_phone=parsed_phone,
+        parsed_email=parsed_email,
+        parsed_guests=parsed_guests,
+        parsed_dates=parsed_dates_for_fields,
+        resolve_name_candidate=lambda text: _coerce_name_when_awaited(text, parsed_name),
+    )
+    if capture["response"]:
+        return capture["response"]
+
+    just_applied_field_update = bool(capture["updated"])
+
+    if parsed_name and not persisted.get("name"):
+        persisted["name"] = parsed_name
+    if parsed_phone and not persisted.get("phone"):
         persisted["phone"] = parsed_phone
-        persisted[SK.awaiting_field] = None
-        just_applied_field_update = True
-    elif awaited == "name" and (parsed_name or user_text.strip()):
-        # Be lenient for names when explicitly awaiting
-        cand = parsed_name or user_text.strip()
-        name_invalid_chars = set(_nlp_fallback().parse_name_invalid_chars)
-        if cand and len(cand) >= 2 and not any(ch in cand for ch in name_invalid_chars):
-            words = re.findall(r"[a-zA-Z][a-zA-Z'-]*", cand)
-            disallowed = set(_nlp_fallback().parse_name_disallowed_words)
-            if 1 <= len(words) <= 3 and not any(w.lower() in disallowed for w in words):
-                persisted["name"] = cand
-                persisted[SK.awaiting_field] = None
-                just_applied_field_update = True
-    elif awaited == "guests":
-        cand = user_text.strip()
-        if parsed_guests is not None:
-            try: persisted["guests"] = int(parsed_guests)
-            except Exception: persisted["guests"] = parsed_guests
-            persisted[SK.awaiting_field] = None
-            just_applied_field_update = True
-        elif cand.isdigit():
-            persisted["guests"] = int(cand)
-            persisted[SK.awaiting_field] = None
-            just_applied_field_update = True
+    if parsed_email and not persisted.get("email"):
+        persisted["email"] = parsed_email
 
-    # Global branch: user explicitly wants to modify requirements (even if receipt not visible)
-    if _wants_modification(user_text) and not is_answering_prompt:
-        requested = _detect_requested_fields(user_text)
-        if not requested:
-            persisted[SK.awaiting_field] = "modification"
-            return {
-                "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["modification"]}
-            }
-        # If location change requested, route to search but preserve details
-        if "location" in requested:
-            keep_keys = [
-                *config.REQUIRED_FIELDS, "budget", "amenities", "beds", "property_type"
-            ]
-            reset = {k:v for k,v in persisted.items() if k in keep_keys}
-            return {
-                "reply": "Sure â€” which city should I search in?",
-                "filters": reset,
-                "tool_result": {"ok": False, "need": ["restart"]}
-            }
-        # If property change requested, route back to search
-        if "property" in requested:
-            keep_keys = [
-                *config.REQUIRED_FIELDS, "budget", "amenities", "beds", "location", "city", "property_type"
-            ]
-            reset = {k:v for k,v in persisted.items() if k in keep_keys}
-            return {
-                "reply": "Okay, let's search for a different property. What should I look for (city, budget, amenities, beds)?",
-                "filters": reset,
-                "tool_result": {"ok": False, "need": ["restart"]}
-            }
-        # For specific fields, set awaiting_field and prompt accordingly
-        if "dates" in requested or ("check_in" in requested and "check_out" in requested):
-            persisted["check_in"] = None
-            persisted["check_out"] = None
-            persisted[SK.awaiting_field] = "check_in"
-            return {"reply": "Sure â€” what's the new check-in date (YYYY-MM-DD)? Then I'll ask for check-out.", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
-        if "check_in" in requested:
-            persisted["check_in"] = None
-            persisted[SK.awaiting_field] = "check_in"
-            return {"reply": "Got it â€” what's the new check-in date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
-        if "check_out" in requested:
-            persisted["check_out"] = None
-            persisted[SK.awaiting_field] = "check_out"
-            return {"reply": "Got it â€” what's the new check-out date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_out"]}}
-        if "guests" in requested:
-            persisted["guests"] = None
-            persisted[SK.awaiting_field] = "guests"
-            return {"reply": "How many guests now?", "filters": persisted, "tool_result": {"ok": False, "need": ["guests"]}}
-        if "name" in requested:
-            persisted["name"] = None
-            persisted[SK.awaiting_field] = "name"
-            return {"reply": "What's the correct full name?", "filters": persisted, "tool_result": {"ok": False, "need": ["name"]}}
-        if "phone" in requested:
-            persisted["phone"] = None
-            persisted[SK.awaiting_field] = "phone"
-            return {"reply": "What's the correct phone number?", "filters": persisted, "tool_result": {"ok": False, "need": ["phone"]}}
-        if "email" in requested:
-            persisted["email"] = None
-            persisted[SK.awaiting_field] = "email"
-            return {"reply": "What's the correct email address?", "filters": persisted, "tool_result": {"ok": False, "need": ["email"]}}
-
-    # If we're explicitly awaiting a name and got text, be more lenient
-    if persisted.get(SK.awaiting_field) == "name" and not parsed_name:
-        # Accept any reasonable text as a name when explicitly asked
-        t_clean = user_text.strip()
-        name_invalid_chars = set(_nlp_fallback().parse_name_invalid_chars)
-        if t_clean and len(t_clean) >= 2 and not any(char in t_clean for char in name_invalid_chars):
-            disallowed = set(_nlp_fallback().parse_name_disallowed_words)
-            words = re.findall(r"[a-zA-Z][a-zA-Z'-]*", t_clean)
-            t_lower = t_clean.lower()
-            if (
-                1 <= len(words) <= 3
-                and not any(w.lower() in disallowed for w in words)
-                and not any(phrase in t_lower for phrase in _nlp_fallback().parse_name_disallowed_phrases)
-            ):
-                parsed_name = t_clean
-
-    if parsed_name and not persisted.get("name"): persisted["name"]=parsed_name
-    if parsed_phone and not persisted.get("phone"): persisted["phone"]=parsed_phone
-    if parsed_email and not persisted.get("email"): persisted["email"]=parsed_email
-    
-    # Handle guest parsing - only set if we're awaiting guests or if it's clearly a guest number
-    if parsed_guests and not persisted.get("guests"):
-        # Only set guests if we're explicitly awaiting it or if the text clearly mentions guests
+    if parsed_guests is not None and not persisted.get("guests"):
         guest_context_terms = _nlp_fallback().guest_context_terms
-        if (
-            persisted.get(SK.awaiting_field) == "guests"
-            or any(term in user_text.lower() for term in guest_context_terms)
+        if original_awaited == "guests" or any(
+            term in user_text.lower() for term in guest_context_terms
         ):
-            try: persisted["guests"]=int(parsed_guests)
-            except: persisted["guests"]=parsed_guests
+            try:
+                persisted["guests"] = int(parsed_guests)
+            except Exception:
+                persisted["guests"] = parsed_guests
 
-    # Date handling with awaiting_field
-    if parsed_dates:
-        if persisted.get(SK.awaiting_field) == "check_in":
-            y,m,d = parsed_dates[0].split("-"); persisted["check_in"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-            # If modifying dates, ask for check-out next explicitly; otherwise clear awaiting_field
-            if persisted.get(SK.modifying_dates):
-                persisted[SK.awaiting_field] = "check_out"
-                return {"reply": "Thanks. Please share the new check-out date (YYYY-MM-DD).", "filters": persisted, "tool_result": {"ok": False, "need": ["check_out"]}}
-            else:
-                persisted[SK.awaiting_field] = None
-        elif persisted.get(SK.awaiting_field) == "check_out":
-            y,m,d = parsed_dates[0].split("-"); persisted["check_out"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-            persisted[SK.awaiting_field]=None
-            # Clear the modifying_dates flag when both dates are set
-            was_modifying = bool(persisted.pop(SK.modifying_dates, None))
-            # Only in modification mode: ask whether to modify anything else
-            if was_modifying:
-                persisted[SK.awaiting_post_mod_choice] = True
-                return {
-                    "reply": "Dates updated. Do you want to proceed to the total bill for payment or make more changes?",
-                    "filters": persisted,
-                    "tool_result": {"ok": False, "need": ["post_mod_choice"]}
-                }
-        else:
-            applied_check_in = False
-            applied_check_out = False
-            if len(parsed_dates)>=1 and not persisted.get("check_in"):
-                y,m,d = parsed_dates[0].split("-"); persisted["check_in"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                applied_check_in = True
-            if len(parsed_dates)>=2 and not persisted.get("check_out"):
-                y,m,d = parsed_dates[1].split("-"); persisted["check_out"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                applied_check_out = True
-            # If only check-in was provided during modification, prompt for check-out next
-            if applied_check_in and not persisted.get("check_out") and persisted.get(SK.modifying_dates):
-                persisted[SK.awaiting_field] = "check_out"
-                return {"reply": "Thanks. Please share the new check-out date (YYYY-MM-DD).", "filters": persisted, "tool_result": {"ok": False, "need": ["check_out"]}}
-            # If both dates are now set, clear awaiting markers for a clean re-render
-            if persisted.get("check_in") and persisted.get("check_out"):
-                persisted[SK.awaiting_field] = None
-                was_modifying = bool(persisted.pop(SK.modifying_dates, None))
-                if was_modifying:
-                    # After dates update, ask whether to modify anything else or proceed to the updated receipt
-                    persisted[SK.awaiting_post_mod_choice] = True
-                    return {
-                        "reply": "Dates updated. Do you want to proceed to the total bill for payment or make more changes?",
-                        "filters": persisted,
-                        "tool_result": {"ok": False, "need": ["post_mod_choice"]}
-                    }
-                # If not in modification mode, just continue with normal flow
-                # Don't return here, let the normal booking flow continue
+    if parsed_dates_for_fields:
+        if not persisted.get("check_in"):
+            normalized_check_in = confirmation_helpers.normalize_date_value(
+                parsed_dates_for_fields[0]
+            )
+            if normalized_check_in:
+                persisted["check_in"] = normalized_check_in
+        if len(parsed_dates_for_fields) >= 2 and not persisted.get("check_out"):
+            normalized_check_out = confirmation_helpers.normalize_date_value(
+                parsed_dates_for_fields[1]
+            )
+            if normalized_check_out:
+                persisted["check_out"] = normalized_check_out
 
-    # If we already showed a receipt
-    if persisted.get(SK.receipt_shown):
-        # Inline direct modifications when no explicit prompt is pending
-        if not persisted.get(SK.awaiting_field):
-            direct_update_applied = False
-            # Phone
-            if parsed_phone and parsed_phone != persisted.get("phone"):
-                persisted["phone"] = parsed_phone
-                direct_update_applied = True
-            # Email
-            if parsed_email and parsed_email != persisted.get("email"):
-                persisted["email"] = parsed_email
-                direct_update_applied = True
-            # Guests
-            if parsed_guests is not None and parsed_guests != persisted.get("guests"):
-                try:
-                    persisted["guests"] = int(parsed_guests)
-                except Exception:
-                    persisted["guests"] = parsed_guests
-                direct_update_applied = True
-            # Dates: if two dates provided together, update both
-            if parsed_dates and len(parsed_dates) >= 2:
-                try:
-                    y,m,d = parsed_dates[0].split("-"); persisted["check_in"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                    y,m,d = parsed_dates[1].split("-"); persisted["check_out"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                    direct_update_applied = True
-                except Exception:
-                    pass
-            elif parsed_dates and len(parsed_dates) == 1:
-                # If a single date is provided while viewing the receipt:
-                # - If a date is missing, ask specifically for the missing one
-                # - If both dates already exist, treat as an update and re-render
-                if not persisted.get("check_in"):
-                    persisted[SK.awaiting_field] = "check_in"
-                    return {"reply": "Thanks. Please share the new check-in date (YYYY-MM-DD).", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
-                if not persisted.get("check_out"):
-                    persisted[SK.awaiting_field] = "check_out"
-                    return {"reply": "Thanks. Please share the new check-out date (YYYY-MM-DD).", "filters": persisted, "tool_result": {"ok": False, "need": ["check_out"]}}
-                # If both dates are already present, re-render with current values
-                direct_update_applied = True
+    if _wants_modification(user_text) and not is_answering_prompt:
+        return confirmation_helpers.route_requested_modifications(
+            persisted,
+            requested_fields,
+            parsed_name=parsed_name,
+            parsed_phone=parsed_phone,
+            parsed_email=parsed_email,
+            parsed_guests=parsed_guests,
+            parsed_dates=parsed_dates_for_fields,
+            allow_inline_apply=True,
+        )
 
-            if direct_update_applied:
-                # Re-render receipt with updated values
-                receipt = _render_receipt(persisted)
-                # Ensure no lingering modification prompt flags remain when rendering receipt
-                persisted[SK.receipt_shown] = True
-                persisted[SK.awaiting_field] = None
-                persisted.pop(SK.awaiting_post_mod_choice, None)
-                persisted.pop(SK.awaiting_post_cancel_choice, None)
-                return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
-        # If a targeted field was just updated, immediately re-render the receipt with the new values
-        if just_applied_field_update:
-            receipt = _render_receipt(persisted)
-            # Ensure no lingering modification prompt flags remain when rendering receipt
-            persisted[SK.receipt_shown] = True
-            persisted[SK.awaiting_field] = None
-            persisted.pop(SK.awaiting_post_mod_choice, None)
-            persisted.pop(SK.awaiting_post_cancel_choice, None)
-            return {"reply":receipt, "tool_result":{"ok":False,"need":["final_confirmation"],"show_receipt":True}, "filters":persisted}
-        # If we asked what to modify, process the user's specification
-        if persisted.get(SK.awaiting_field) == "modification":
-            requested = _detect_requested_fields(user_text)
-            if not requested:
-                return {
-                    "reply": "Please specify what you'd like to modify â€” dates, guests, name, phone, email, or property?",
-                    "filters": persisted,
-                    "tool_result": {"ok": False, "need": ["modification"]}
-                }
-            # Handle property change directly by routing back to search
-            if "property" in requested:
-                keep_keys = [
-                    "location","city","budget","amenities","beds","property_type",
-                    "results_index_map","last_results","results",
-                    *config.REQUIRED_FIELDS,
-                ]
-                reset = {k:v for k,v in persisted.items() if k in keep_keys}
-                for k in [SK.recent_selection_index,SK.recent_property_id,SK.selected_property,SK.awaiting_selection_confirm,SK.awaiting_field,SK.receipt_shown]:
-                    reset.pop(k, None)
-                return {
-                    "reply": "Okay, let's search for a different property. What should I look for (city, budget, amenities, beds)?",
-                    "filters": reset,
-                    "tool_result": {"ok": False, "need": ["restart"]}
-                }
+    response = confirmation_helpers.handle_inline_receipt_updates(
+        persisted,
+        parsed_name=parsed_name,
+        parsed_phone=parsed_phone,
+        parsed_email=parsed_email,
+        parsed_guests=parsed_guests,
+        parsed_dates=parsed_dates_for_fields,
+    )
+    if response:
+        return response
 
-            # Apply multiple modifications in one go if possible
-            updates_applied = []
-            need_next: str | None = None
+    if persisted.get(SK.receipt_shown) and just_applied_field_update:
+        return confirmation_helpers._render_updated_receipt(persisted)
 
-            # Dates handling (if both dates provided or specific date target specified)
-            if "dates" in requested:
-                if parsed_dates and len(parsed_dates) >= 2:
-                    try:
-                        y,m,d = parsed_dates[0].split("-"); persisted["check_in"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                        y,m,d = parsed_dates[1].split("-"); persisted["check_out"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                        updates_applied.append("dates")
-                    except Exception:
-                        need_next = need_next or "check_in"
-                else:
-                    # Ask both dates explicitly when user says 'dates'
-                    persisted["check_in"] = None
-                    persisted["check_out"] = None
-                    persisted[SK.awaiting_field] = "check_in"
-                    return {"reply": "Sure â€” what's the new check-in date (YYYY-MM-DD)? Then I'll ask for check-out.", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
-            if "check_in" in requested and "dates" not in requested:
-                if parsed_dates:
-                    try:
-                        y,m,d = parsed_dates[0].split("-"); persisted["check_in"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                        updates_applied.append("check_in")
-                    except Exception:
-                        need_next = need_next or "check_in"
-                else:
-                    need_next = need_next or "check_in"
-            if "check_out" in requested and "dates" not in requested:
-                # Prefer the last date in message if two provided
-                if parsed_dates:
-                    try:
-                        tgt = parsed_dates[-1]
-                        y,m,d = tgt.split("-"); persisted["check_out"]=f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-                        updates_applied.append("check_out")
-                    except Exception:
-                        need_next = need_next or "check_out"
-                else:
-                    need_next = need_next or "check_out"
+    current_awaited = (persisted.get(SK.awaiting_field) or "").strip()
+    if current_awaited and not just_applied_field_update:
+        if current_awaited in {"check_in", "check_out", "guests", "name", "phone", "email"}:
+            if persisted.get(current_awaited):
+                return confirmation_helpers._ask_for_modification_field(
+                    current_awaited,
+                    persisted,
+                )
+            return confirmation_helpers._ask_for_field(current_awaited, persisted)
 
-            # Guests
-            if "guests" in requested:
-                if parsed_guests:
-                    try:
-                        persisted["guests"] = int(parsed_guests)
-                    except Exception:
-                        persisted["guests"] = parsed_guests
-                    updates_applied.append("guests")
-                else:
-                    need_next = need_next or "guests"
-
-            # Identity/contact fields
-            if "name" in requested:
-                if parsed_name:
-                    persisted["name"] = parsed_name
-                    updates_applied.append("name")
-                else:
-                    need_next = need_next or "name"
-            if "phone" in requested:
-                if parsed_phone:
-                    persisted["phone"] = parsed_phone
-                    updates_applied.append("phone")
-                else:
-                    need_next = need_next or "phone"
-            if "email" in requested:
-                if parsed_email:
-                    persisted["email"] = parsed_email
-                    updates_applied.append("email")
-                else:
-                    need_next = need_next or "email"
-
-            # If something still needed, set the next required field and prompt
-            if need_next:
-                persisted[SK.awaiting_field] = need_next
-                return {"reply":config.FIELD_MODIFICATION_PROMPTS.get(need_next, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need_next]}}
-
-            # All requested updates applied; if both dates present, proceed to ask next action
-            persisted[SK.awaiting_field] = None
-            if persisted.get("check_in") and persisted.get("check_out"):
-                persisted[SK.awaiting_post_mod_choice] = True
-                return {
-                    "reply": "All set. Would you like to proceed to the updated receipt, or make another change?",
-                    "filters": persisted,
-                    "tool_result": {"ok": False, "need": ["post_mod_choice"]}
-                }
-            # If something is still missing (edge case), ask explicitly for the missing one
-            missing = []
-            if not persisted.get("check_in"): missing.append("check_in")
-            if not persisted.get("check_out"): missing.append("check_out")
-            if missing:
-                need = missing[0]
-                persisted[SK.awaiting_field] = need
-                return {"reply":config.FIELD_MODIFICATION_PROMPTS.get(need, "Please provide the updated information."), "filters": persisted, "tool_result": {"ok": False, "need": [need]}}
-            # Fallback to proceed prompt
-            persisted[SK.awaiting_post_mod_choice] = True
-            return {
-                "reply": "All set. Would you like to proceed to the updated receipt, or make another change?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["post_mod_choice"]}
-            }
-        # (Removed unconditional re-render to ensure 'no' branch triggers correctly)
-
-        # Allow direct inline updates even when receipt isn't currently shown, if we just updated a field and all data is present
-        # This makes the UX consistent after cancellation + modification
     if not persisted.get(SK.receipt_shown) and just_applied_field_update:
         required = config.REQUIRED_FIELDS + [SK.selected_property]
-        if all(persisted.get(k) for k in required):
+        if all(persisted.get(key) for key in required):
             return confirmation_helpers._try_show_receipt(persisted)
 
-        # Branch: user wants to search different properties after seeing receipt
-        is_answering = persisted.get(SK.awaiting_field) in ["check_in", "check_out"] and _parse_dates(user_text)
-        if _wants_property_search_request(user_text) and not is_answering:
-            # Keep search-related filters and last results; clear booking-only flags
-            keep_keys = [
-                "location","city","budget","amenities","beds","property_type",
-                "results_index_map","last_results","results",
-                # Preserve user-provided details
-                *config.REQUIRED_FIELDS,
-            ]
-            reset = {k:v for k,v in persisted.items() if k in keep_keys}
-            reset.pop(SK.recent_selection_index, None)
-            reset.pop(SK.recent_property_id, None)
-            reset.pop(SK.selected_property, None)
-            reset.pop(SK.awaiting_selection_confirm, None)
-            reset.pop(SK.awaiting_field, None)
-            reset.pop(SK.receipt_shown, None)
-            return {
-                "reply": "Sure â€” let's explore more options. Tell me what you're looking for (city, budget, dates, beds, amenities).",
-                "filters": reset,
-                "tool_result": {"ok": False, "need": ["restart"]}
-            }
+    if (
+        _is_no(user_text)
+        and not persisted.get(SK.awaiting_selection_confirm)
+        and not persisted.get(SK.awaiting_field)
+        and not persisted.get(SK.receipt_shown)
+        and not persisted.get(SK.awaiting_post_mod_choice)
+    ):
+        persisted[SK.awaiting_post_cancel_choice] = True
+        return {
+            "reply": (
+                "No problem, the booking has been cancelled. Would you like to "
+                "search for different properties or modify your requirements?"
+            ),
+            "filters": persisted,
+            "tool_result": {"ok": False, "cancelled": True, "need": ["clarification"]},
+        }
 
+    missing_field = confirmation_helpers._next_missing_field(persisted)
+    if missing_field:
+        persisted[SK.awaiting_selection_confirm] = False
+        return confirmation_helpers._ask_for_field(missing_field, persisted)
 
-    # Branch: user explicitly wants to modify requirements
-    if _wants_modification(user_text) and not _parse_dates(user_text):
-        requested = _detect_requested_fields(user_text)
-        # If user didn't specify which field, ask a focused clarification
-        if not requested:
-            persisted[SK.awaiting_field] = "modification"
-            return {
-                "reply": "What would you like to modify â€” dates, guests, name, phone, email, or property?",
-                "filters": persisted,
-                "tool_result": {"ok": False, "need": ["modification"]}
-            }
-        # If property change requested, route back to search
-        if "property" in requested:
-            keep_keys = [
-                "location","city","budget","amenities","beds","property_type",
-                "results_index_map","last_results","results"
-            ]
-            reset = {k:v for k,v in persisted.items() if k in keep_keys}
-            return {
-                "reply": "Okay, let's pick a different property. What should I search for (city, budget, amenities, beds)?",
-                "filters": reset,
-                "tool_result": {"ok": False, "need": ["restart"]}
-            }
-        # Dates path: always ask both dates, starting with check-in
-        if "dates" in requested or ("check_in" in requested and "check_out" in requested):
-            persisted["check_in"] = None
-            persisted["check_out"] = None
-            persisted[SK.modifying_dates] = True
-            persisted[SK.awaiting_field] = "check_in"
-            return {"reply": "What's the new check-in date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
-        if "check_in" in requested:
-            persisted[SK.modifying_dates] = True
-            persisted[SK.awaiting_field] = "check_in"
-            return {"reply": "What's the new check-in date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_in"]}}
-        if "check_out" in requested:
-            persisted[SK.modifying_dates] = True
-            persisted[SK.awaiting_field] = "check_out"
-            return {"reply": "What's the new check-out date (YYYY-MM-DD)?", "filters": persisted, "tool_result": {"ok": False, "need": ["check_out"]}}
-        if "guests" in requested:
-            persisted[SK.awaiting_field] = "guests"
-            return {"reply": "How many guests now?", "filters": persisted, "tool_result": {"ok": False, "need": ["guests"]}}
-        if "name" in requested:
-            persisted[SK.awaiting_field] = "name"
-            return {"reply": "What's the correct full name?", "filters": persisted, "tool_result": {"ok": False, "need": ["name"]}}
-        if "phone" in requested:
-            persisted[SK.awaiting_field] = "phone"
-            return {"reply": "What's the correct phone number?", "filters": persisted, "tool_result": {"ok": False, "need": ["phone"]}}
-        if "email" in requested:
-            persisted[SK.awaiting_field] = "email"
-            return {"reply": "What's the correct email address?", "filters": persisted, "tool_result": {"ok": False, "need": ["email"]}}
-
-
-
-    # Stateless safety: if user says no right after a summary-like context was likely shown, but `receipt_shown` isn't set
-    # Honor the cancellation and ask next action, preserving collected info
-    if _is_no(user_text) and not persisted.get(SK.awaiting_selection_confirm) and not persisted.get(SK.awaiting_field) and not persisted.get(SK.receipt_shown) and not persisted.get(SK.awaiting_post_mod_choice):
-        return {"reply":"No problem, The booking has been cancelled. Would you like to search for different properties or modify your requirements?",
-                "filters": persisted}
-
-    # Ask next missing field (with awaiting_field marker)
-    required=list(config.REQUIRED_FIELDS)
-    for k in required:
-        if not persisted.get(k):
-            persisted[SK.awaiting_field]=k
-            persisted[SK.awaiting_selection_confirm] = False  # Clear this flag when asking for fields
-            return {"reply":config.FIELD_PROMPTS.get(k, f"Please provide your {k}."), "tool_result":{"ok":False,"need":[k]}, "filters":persisted}
-
-    # Build receipt only when it has not already been shown in this state.
     if not persisted.get(SK.receipt_shown):
         return confirmation_helpers._try_show_receipt(persisted)
 
-    # Receipt was already shown but message was not strongly classified.
     return {
-        "reply": "I want to make sure I get this right. Please reply with a clear 'yes' to confirm and proceed with payment, or 'no' to cancel and modify.",
+        "reply": (
+            "I want to make sure I get this right. Please reply with a clear "
+            "'yes' to confirm and proceed with payment, or 'no' to cancel and modify."
+        ),
         "filters": persisted,
     }
 
@@ -1929,6 +1072,8 @@ def faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """Enhanced FAQ agent that uses semantic search on policy documents"""
     # Try the enhanced FAQ system first
     try:
+        from .faq_enhanced import enhanced_faq_agent
+
         result = enhanced_faq_agent(user_text, context)
         return result
     except Exception as e:
