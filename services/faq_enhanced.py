@@ -662,7 +662,7 @@ Provide a clear, direct answer:"""
         if response.status_code == 200:
             result = response.json()
             answer = result["choices"][0]["message"]["content"].strip()
-            return answer
+            return _clean_pdf_artifacts(answer)
         else:
             logger.error("OpenAI API error: %s", response.status_code)
             return extract_key_sentences(context, question)
@@ -670,6 +670,33 @@ Provide a clear, direct answer:"""
     except Exception as e:
         logger.error("Error generating concise answer: %s", e)
         return extract_key_sentences(context, question)
+
+
+def _clean_pdf_artifacts(text: str) -> str:
+    """Remove common PDF artifacts like headers, footers, and artifact text."""
+    if not text:
+        return text
+    
+    # Remove common PDF header patterns (company names, document titles)
+    patterns_to_remove = [
+        r'xyz\s*company\s*Internal\s*Policies?\s*&\s*Terms?\s*v?\d+\.\d+',
+        r'Company\s*Policy',
+        r'Internal\s*Policies?\s*&\s*Terms?',
+        r'Property\s*Rental\s*Company\s*-\s*Policies?\s*&\s*Terms?',
+    ]
+    
+    cleaned = text
+    for pattern in patterns_to_remove:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+    
+    # Clean up multiple spaces and newlines
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    cleaned = re.sub(r' {2,}', ' ', cleaned)
+    
+    # Remove any remaining page-like artifacts at the start
+    cleaned = re.sub(r'^\s*[-=]+\s*$', '', cleaned, flags=re.MULTILINE)
+    
+    return cleaned.strip()
 
 
 def extract_key_sentences(context: str, question: str, max_lines: int = 10) -> str:
@@ -710,7 +737,7 @@ def extract_key_sentences(context: str, question: str, max_lines: int = 10) -> s
     if len(result) > 800:
         result = result[:800] + "..."
     
-    return result
+    return _clean_pdf_artifacts(result)
 
 
 # Optional: Auto-initialize when module is imported
