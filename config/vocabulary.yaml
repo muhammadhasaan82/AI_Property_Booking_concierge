@@ -95,6 +95,10 @@ faq_fallback_keywords:
   - "cancel"
   - "terms"
   - "internet"
+  - "payment methods"
+  - "how to pay"
+  - "payment link"
+  - "payment options"
 
 booking_triggers:
   - " book "
