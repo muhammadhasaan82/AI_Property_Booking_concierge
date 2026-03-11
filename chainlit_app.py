@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -257,11 +258,27 @@ def _get_data_layer():
 _configure_data_layer()
 
 
-def _make_stream_callback(msg: cl.Message):
-    def _callback(token: str) -> None:
-        asyncio.create_task(msg.stream_token(token))
+def _build_stream_handler():
+    state: dict[str, Any] = {"msg": None, "started": False}
+    lock = asyncio.Lock()
 
-    return _callback
+    async def _ensure_message() -> cl.Message:
+        async with lock:
+            if state["msg"] is None:
+                msg = cl.Message(content="")
+                await msg.send()
+                state["msg"] = msg
+                state["started"] = True
+        return state["msg"]
+
+    def _callback(token: str) -> None:
+        async def _emit() -> None:
+            msg = await _ensure_message()
+            await msg.stream_token(token)
+
+        asyncio.create_task(_emit())
+
+    return _callback, state
 
 
 async def _rename_thread(message: cl.Message, question: str) -> None:
@@ -312,10 +329,8 @@ async def on_message(message: cl.Message):
 
     await _rename_thread(message, (message.content or "").strip())
 
-    filters["stream"] = True
-    msg = cl.Message(content="")
-    await msg.send()
-    filters["stream_callback"] = _make_stream_callback(msg)
+    stream_callback, stream_state = _build_stream_handler()
+    filters["stream_callback"] = stream_callback
 
     result = await run_chat_graph(
         message=message.content,
@@ -350,8 +365,14 @@ async def on_message(message: cl.Message):
                 formatted_lines.append(line)
         reply = "\n".join(formatted_lines)
 
-    msg.content = reply
-    await msg.update()
+    streamed_msg = stream_state.get("msg")
+    if streamed_msg is not None:
+        streamed_msg.content = reply
+        await streamed_msg.update()
+        msg = streamed_msg
+    else:
+        msg = cl.Message(content=reply)
+        await msg.send()
 
     cl.user_session.set("last_user_msg", message.content)
     cl.user_session.set("last_bot_reply", reply)
