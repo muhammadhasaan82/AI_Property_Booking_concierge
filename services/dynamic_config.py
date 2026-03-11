@@ -89,6 +89,7 @@ class NlpFallbackConfig(BaseModel):
     """Fallback lexical configuration for NLP helpers."""
     greeting_seeds: List[str] = Field(default_factory=list)
     greeting_phrases: List[str] = Field(default_factory=list)
+    identity_phrases: List[str] = Field(default_factory=list)
     acknowledgment_tokens: List[str] = Field(default_factory=list)
     acknowledgment_phrases: List[str] = Field(default_factory=list)
     affirm_yes_tokens: List[str] = Field(default_factory=list)
