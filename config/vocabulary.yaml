@@ -719,6 +719,13 @@ nlp_fallback:
     - "\\b(?:option|number|no\\.?|#)\\s*(\\d{1,2})\\b"
     - "\\b(?:pick|choose|select|book|take)\\s*(\\d{1,2})\\b"
     - "^\\s*(\\d{1,2})\\s*$"
+  selection_explicit_verbs:
+    - "choose"
+    - "pick"
+    - "select"
+    - "take"
+    - "option"
+    - "go with"
   selection_context_patterns:
     - "\\b(option|number|no\\.?|#|pick|choose|select|book|take|go with|i(?:\\s*'ll|\\s*will)?\\s*take)\\b"
   selection_ordinal_templates:

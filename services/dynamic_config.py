@@ -132,6 +132,7 @@ class NlpFallbackConfig(BaseModel):
     parse_name_disallowed_phrases: List[str] = Field(default_factory=list)
     phrase_fillers: List[str] = Field(default_factory=list)
     selection_patterns: List[str] = Field(default_factory=list)
+    selection_explicit_verbs: List[str] = Field(default_factory=list)
     selection_context_patterns: List[str] = Field(default_factory=list)
     selection_ordinal_templates: List[str] = Field(default_factory=list)
     selection_referential_patterns: List[str] = Field(default_factory=list)
