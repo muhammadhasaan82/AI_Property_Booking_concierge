@@ -254,7 +254,7 @@ def _classify_proceed_or_modify(user_text: str) -> str | None:
     return None
 
 # -----------------------
-# Intent helpers â€” NLP-powered (delegates to nlp_engine)
+# Intent helpers ,  NLP-powered (delegates to nlp_engine)
 # -----------------------
 # Structural regex (not semantic, kept minimal)
 _DATE_PAT = re.compile(r"\b(\d{4}-\d{1,2}-\d{1,2})\b")
@@ -286,7 +286,7 @@ def _is_end(t: str) -> bool:
     return nlp_engine.is_end_request(t or "")
 
 # -----------------------
-# Selection & slot helpers â€” NLP-powered
+# Selection & slot helpers ,  NLP-powered
 # -----------------------
 
 def _llm_extract_booking_fields(text: str) -> dict:
@@ -507,7 +507,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         if not any(p in tl for p in _nlp_fallback().status_resume_phrases):
             return "status_update"
 
-    # NLP-driven and keyword fallback routing (secondary pass â€” catches LLM misses).
+    # NLP-driven and keyword fallback routing (secondary pass ,  catches LLM misses).
     if _looks_like_property_search(t):
         return "property_search"
     if _is_handoff_request(t):
@@ -560,14 +560,14 @@ async def llm_reply_from_results(
         city = (r.get("city") or "").title()
         title = r.get("title") or "Option"
         price = r.get("price_per_night")
-        price_txt = f" â€” about ${price}/night" if price is not None else ""
-        numbered.append(f"{i}. {title} â€” {city}{price_txt}")
+        price_txt = f" ,  about ${price}/night" if price is not None else ""
+        numbered.append(f"{i}. {title} ,  {city}{price_txt}")
 
     if not OPENAI_API_KEY:
         if results:
             total_count = len(results)
             shown_count = len(numbered)
-            header = f"Yesâ€”found {total_count} options"
+            header = f"Yes, found {total_count} options"
             if total_count > shown_count:
                 header += f", here are the top {shown_count}:"
             else:
@@ -575,10 +575,10 @@ async def llm_reply_from_results(
             return f"{header}\n\n" + "\n".join(numbered) + "\n\nReply with your desired option."
         kf = known_filters or {}
         if not (kf.get("location") or kf.get("city")): 
-            return "No match yetâ€”what city should I search in (and a nightly budget)?"
+            return "No match yet, what city should I search in (and a nightly budget)?"
         if not kf.get("budget"): 
-            return "No match yetâ€”what's your target nightly budget (approx)?"
-        return "No match yetâ€”any preferred dates or must-have amenities?"
+            return "No match yet, what's your target nightly budget (approx)?"
+        return "No match yet, any preferred dates or must-have amenities?"
 
     total_count = len(results)
     shown_count = len(numbered)
@@ -587,9 +587,9 @@ async def llm_reply_from_results(
             "Think step by step: First identify which properties match the user's needs, then present them clearly. "
             f"Keep replies very short. Language: {locale}")
             
-    header_instruction = f"Start: 'Yesâ€”found {total_count} options.'"
+    header_instruction = f"Start: 'Yes, found {total_count} options.'"
     if total_count > shown_count:
-        header_instruction = f"Start: 'Yesâ€”found {total_count} options, here are the top {shown_count}.'"
+        header_instruction = f"Start: 'Yes, found {total_count} options, here are the top {shown_count}.'"
             
     style = (f"If results:\n- {header_instruction}\n"
            "- Show ONLY the provided numbered list.\n- End: 'Reply with your desired option.'\n"
@@ -710,7 +710,7 @@ async def llm_reply_from_results(
     if results:
         total_count = len(results)
         shown_count = len(numbered)
-        header = f"Yesâ€”found {total_count} options"
+        header = f"Yes,found {total_count} options"
         if total_count > shown_count:
             header += f", here are the top {shown_count}:"
         else:
@@ -747,7 +747,7 @@ def _format_property_full(p: Dict[str, Any]) -> str:
     desc = p.get("description") or p.get("summary") or ""
     one_line_desc = (desc.strip().split("\n")[0])[:160] if desc else ""
 
-    s = f"**{title}** â€” {city}\n"
+    s = f"**{title}** ,  {city}\n"
     if prop_type:
         s += f"- Type: {prop_type}\n"
     if bedrooms is not None:
@@ -772,7 +772,7 @@ def _format_property_brief(p: Dict[str, Any]) -> str:
     city = (p.get("city") or "").title()
     price = p.get("price_per_night", "N/A")
     bedrooms = p.get("bedrooms", "N/A")
-    return f"**{title}** â€” {city}\n- Bedrooms: {bedrooms}\n- Price: ${price}/night"
+    return f"**{title}** ,  {city}\n- Bedrooms: {bedrooms}\n- Price: ${price}/night"
 
 
 def _coerce_name_when_awaited(user_text: str, parsed_name: Optional[str]) -> Optional[str]:
@@ -817,6 +817,7 @@ def greeting_agent(filters: Dict[str, Any], user_text: str = "") -> Dict[str, An
     if city: parts.append(city)
     if beds: parts.append(f"{beds} beds")
     if budget: parts.append(f"budget ${budget}")
+    hint = f" (noted: {', '.join(parts)})" if parts else ""
     reply_msg = f"Hi there! I'm your AI Hotel Concierge{hint}. I can help you search for properties, check availability, book your stay, and answer policy questions. How can I help you today?"
 
     return {"reply": reply_msg, "filters": clean_filters}
@@ -1140,7 +1141,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
                     "reply": f"âŒ **Booking validation failed:**\n\n{error_list}{warn_text}\n\nPlease correct the above and try again.",
                     "tool_result": {"ok": False, "need": ["correction"], "validation_errors": errors, "warnings": warnings},
                 }
-            # Validation passed â€” log any warnings
+            # Validation passed ,  log any warnings
             if warnings:
                 logger.warning("RUST booking validation warnings: %s", warnings)
             logger.info("RUST booking validated OK via gateway")
@@ -1225,8 +1226,8 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
             total = float(price or 0) * float(nights or 1)
             prop_title = selected.get('title') or 'Property'
             city = (selected.get('city') or '').title()
-            price_txt = f" â€” about ${int(price)}/night" if price else ""
-            prop_desc = f"{prop_title} â€” {city}{price_txt}".strip()
+            price_txt = f" ,  about ${int(price)}/night" if price else ""
+            prop_desc = f"{prop_title} ,  {city}{price_txt}".strip()
             booking_code = str(r.get('booking_id'))
             row = {
                 "booking_id": r.get("booking_id"),
@@ -1361,7 +1362,7 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 "reply": f"Booking {booking_id}: **{s_human}**\n- Check-in: {ci}\n- Check-out: {co}\n\nWould you like to ask anything else or end this chat session? (say 'end' to close)",
             }
 
-        return {"tool_result": r, "reply": f"Sorryâ€”{r.get('error','unable to find that booking')}."}
+        return {"tool_result": r, "reply": f"Sorry, {r.get('error','unable to find that booking')}."}
     # Update flow (explicit request)
     if action in set(nlp_fb.status_check_in_actions):
         new_status = "checked_in"
@@ -1624,7 +1625,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
 
 def handoff_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     city=filters.get("location") or filters.get("city")
-    return {"reply": f"Okay â€” I'll connect you with a human specialist{f' about {city.title()}' if city else ''}. "
+    return {"reply": f"Okay ,  I'll connect you with a human specialist{f' about {city.title()}' if city else ''}. "
                      "Please share your email or phone number and a preferred time.",
             "tool_result":{"handoff":True}}
 
