@@ -425,7 +425,7 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
         if nlp_engine.has_cardinal_extraction(t):
             return "confirmation"
         # SHIELD: Catch explicit selection verbs dynamically from vocabulary.yaml
-        if any(re.search(pat, tl) for pat in _nlp_fallback().selection_context_patterns):
+        if any(w in tl for w in _nlp_fallback().selection_explicit_verbs):
             return "confirmation"
         # SHIELD: Catch if the user copy-pasted the property title instead of typing the number!
         for prop in active_filters["last_results"]:
