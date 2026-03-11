@@ -4,6 +4,7 @@ from typing import TypedDict, Optional, Dict, Any, List
 import logging
 import re
 import inspect
+import asyncio
 from langgraph.graph import StateGraph, END
 from .tracing import span
 from .db_logging import log_chat
@@ -369,7 +370,7 @@ async def run_chat_graph(
         user_msg = message or ""
         bot_resp = (result.get("reply") or "").strip()
         if user_msg and bot_resp:
-            await log_chat(user_msg, bot_resp)
+            asyncio.create_task(log_chat(user_msg, bot_resp))
     except Exception:
         pass
     return result
