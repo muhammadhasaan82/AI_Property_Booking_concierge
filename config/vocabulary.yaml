@@ -95,10 +95,12 @@ faq_fallback_keywords:
   - "cancel"
   - "terms"
   - "internet"
+  - "payment method"
   - "payment methods"
-  - "how to pay"
-  - "payment link"
+  - "payment option"
   - "payment options"
+  - "how to pay"
+  - "accepted payments"
 
 booking_triggers:
   - " book "
@@ -117,8 +119,7 @@ status_keywords:
 
 payment_keywords:
   - "pay"
-  - "payment"
-  - "link"
+  - "payment link"
   - "invoice"
 
 # ─── Fallback cities & aliases ───

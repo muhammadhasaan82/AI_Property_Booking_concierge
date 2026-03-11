@@ -68,7 +68,7 @@ def _build_llm_router_system_prompt(context: Dict[str, Any]) -> str:
         "status_update, payment_link, handoff, availability, end.\n\n"
         "CRITICAL RULES:\n"
         "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, smoking, check-in time, "
-        "wifi password, security deposit, amenities, payment methods, how to pay, or any property/platform question. "
+        "wifi password, security deposit, amenities, payment methods, how to pay, accepted payments, or any property/platform question. "
         "Classify as 'faq' EVEN IF the user is mid-booking. A policy question always overrides booking context.\n"
         "- 'payment_link' = user is actively ready to pay for an existing booking (e.g., 'send me the link', 'I am ready to pay'). Do NOT use for general questions about accepted payment methods.\n"
         "- 'confirmation' = user is selecting a numbered option, providing booking details "
