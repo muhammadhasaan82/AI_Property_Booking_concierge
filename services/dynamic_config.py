@@ -121,6 +121,7 @@ class NlpFallbackConfig(BaseModel):
     faq_seeds: List[str] = Field(default_factory=list)
     faq_question_starts: List[str] = Field(default_factory=list)
     faq_question_cues: List[str] = Field(default_factory=list)
+    faq_complex_indicators: List[str] = Field(default_factory=list)
     selection_faq_blocklist: List[str] = Field(default_factory=list)
     name_search_guards: List[str] = Field(default_factory=list)
     name_conversational_guards: List[str] = Field(default_factory=list)

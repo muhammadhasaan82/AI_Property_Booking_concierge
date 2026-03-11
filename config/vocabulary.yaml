@@ -555,6 +555,13 @@ nlp_fallback:
   faq_question_cues:
     - "tell me"
     - "explain"
+  faq_complex_indicators:
+    - "explain"
+    - "how does"
+    - "process"
+    - "procedure"
+    - "steps"
+    - "details"
   selection_faq_blocklist:
     - "policy"
     - "refund"

@@ -31,6 +31,7 @@ except Exception:  # noqa: BLE001 - package may not be installed in all envs
 
 # Load environment variables
 from dotenv import load_dotenv
+from .dynamic_config import get_vocabulary
 
 env_path_root = Path(__file__).parent.parent / ".env"
 env_path_services = Path(__file__).parent / ".env"
@@ -611,7 +612,7 @@ def generate_concise_answer(question: str, context: str) -> str:
         scores = vader.polarity_scores(q_lower)
         # Simple: short, direct questions; Complex: longer, analytical questions
         is_simple = q_words <= 6 and "?" in question
-        is_complex = q_words > 10 or any(w in q_lower for w in ["explain", "how does", "process", "procedure"])
+        is_complex = q_words > 10 or any(w in q_lower for w in get_vocabulary().nlp_fallback.faq_complex_indicators)
         
         # Set length guidance
         if is_simple and not is_complex:
@@ -690,7 +691,8 @@ def extract_key_sentences(context: str, question: str, max_lines: int = 10) -> s
         sentence_lower = sentence.lower()
         # Count matching words
         matches = sum(1 for word in question_words if word in sentence_lower)
-        if matches >= 2 or any(kw in sentence_lower for kw in ["refund", "cancel", "pet", "deposit", "check"]):
+        fallback_kws = get_vocabulary().nlp_fallback.faq_seeds + get_vocabulary().nlp_fallback.faq_strong_keywords
+        if matches >= 2 or any(kw in sentence_lower for kw in fallback_kws):
             relevant_sentences.append(sentence.strip())
     
     # Return the most relevant sentences
