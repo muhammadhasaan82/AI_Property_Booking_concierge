@@ -420,8 +420,15 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     tl = t.lower().strip()
 
     # 1. --- IRONCLAD SELECTION GUARD ---
-    if active_filters.get("last_results") and nlp_engine.has_cardinal_extraction(t):
-        return "confirmation"
+    # 1. --- IRONCLAD SELECTION GUARD ---
+    if active_filters.get("last_results"):
+        if nlp_engine.has_cardinal_extraction(t):
+            return "confirmation"
+        # 🛡️ SHIELD: Catch if the user copy-pasted the property title instead of typing the number!
+        for prop in active_filters["last_results"]:
+            title = prop.get("title", "").lower()
+            if title and len(title) > 4 and title in tl:
+                return "confirmation"
 
     # 2. ðŸ›‘ GLOBAL CONTEXT PRESERVER SHIELD (Soft-Coded via NLP Engine) ðŸ›‘
     # Dynamically prevents short acknowledgments, greetings, or 2-letter gibberish from wiping active flows.
@@ -875,6 +882,16 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
         return response
 
     sel = _parse_selection_index(user_text)
+    
+    # 🛠️ FIX: Convert a copy-pasted property name back into its selection index number!
+    if sel is None and persisted.get("last_results"):
+        user_lower = user_text.lower().strip()
+        for i, prop in enumerate(persisted["last_results"], start=1):
+            title = prop.get("title", "").lower()
+            if title and len(title) > 4 and (title in user_lower or user_lower in title):
+                sel = i
+                break
+
     awaiting_field = (persisted.get(SK.awaiting_field) or "").strip()
     if awaiting_field and awaiting_field not in {"modification", "modification_choice"}:
         sel = None
@@ -1609,8 +1626,8 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
         SK.awaiting_property_type_choice: False,
     })
 
-    stream = bool(filters.get("stream", False))
     stream_cb = filters.get("stream_callback") if callable(filters.get("stream_callback")) else None
+    stream = stream_cb is not None
 
     reply = await llm_reply_from_results(
         user_text=user_text,
