@@ -373,7 +373,7 @@ def handle_property_selection(
         return _try_show_receipt(persisted)
 
     return {
-        "reply": f"Selected:\n\n{card}\n\nWould you like to book this one? (yes/no)",
+        "reply": f"Selected:\n\n{card}\n\nWould you like to book this one?",
         "tool_result": {"ok": False, "need": ["booking_confirmation"], "property_id": property_id},
         "filters": persisted,
     }

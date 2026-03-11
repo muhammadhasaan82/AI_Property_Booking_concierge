@@ -567,7 +567,7 @@ async def llm_reply_from_results(
                 header += f", here are the top {shown_count}:"
             else:
                 header += ":"
-            return f"{header}\n\n" + "\n".join(numbered) + "\n\nReply with a number (e.g., 1 or 2) to choose."
+            return f"{header}\n\n" + "\n".join(numbered) + "\n\nReply with your desired option."
         kf = known_filters or {}
         if not (kf.get("location") or kf.get("city")): 
             return "No match yetâ€”what city should I search in (and a nightly budget)?"
@@ -587,7 +587,7 @@ async def llm_reply_from_results(
         header_instruction = f"Start: 'Yesâ€”found {total_count} options, here are the top {shown_count}.'"
             
     style = (f"If results:\n- {header_instruction}\n"
-           "- Show ONLY the provided numbered list.\n- End: 'Reply with a number (e.g., 1 or 2) to choose.'\n"
+           "- Show ONLY the provided numbered list.\n- End: 'Reply with your desired option.'\n"
            "If no results: ask ONE follow-up from {city,budget,dates,beds,amenities}.")
     
     messages = [
@@ -710,7 +710,7 @@ async def llm_reply_from_results(
             header += f", here are the top {shown_count}:"
         else:
             header += ":"
-        return f"{header}\n\n" + "\n".join(numbered) + "\n\nReply with a number (e.g., 1 or 2) to choose."
+        return f"{header}\n\n" + "\n".join(numbered) + "\n\nReply with your desired option."
     
     kf = known_filters or {}
     if not (kf.get("location") or kf.get("city")): 
