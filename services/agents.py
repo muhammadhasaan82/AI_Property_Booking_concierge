@@ -424,7 +424,10 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if active_filters.get("last_results"):
         if nlp_engine.has_cardinal_extraction(t):
             return "confirmation"
-        # 🛡️ SHIELD: Catch if the user copy-pasted the property title instead of typing the number!
+        # SHIELD: Catch explicit selection verbs dynamically from vocabulary.yaml
+        if any(re.search(pat, tl) for pat in _nlp_fallback().selection_context_patterns):
+            return "confirmation"
+        # SHIELD: Catch if the user copy-pasted the property title instead of typing the number!
         for prop in active_filters["last_results"]:
             title = prop.get("title", "").lower()
             if title and len(title) > 4 and title in tl:
@@ -883,12 +886,19 @@ async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> D
 
     sel = _parse_selection_index(user_text)
     
-    # 🛠️ FIX: Convert a copy-pasted property name back into its selection index number!
+    # 🛠️ FIX: Smart Keyword Matching for copy-pasted property names!
     if sel is None and persisted.get("last_results"):
         user_lower = user_text.lower().strip()
+        
         for i, prop in enumerate(persisted["last_results"], start=1):
             title = prop.get("title", "").lower()
-            if title and len(title) > 4 and (title in user_lower or user_lower in title):
+            
+            # Extract main keywords from the property title (e.g., "4br", "apartment")
+            key_words = [w for w in re.findall(r'\b\w+\b', title) if len(w) >= 3]
+            
+            # If the user's text contains at least 2 of these keywords, it's a match!
+            matches = sum(1 for w in key_words if w in user_lower)
+            if matches >= 2 or (title and title in user_lower):
                 sel = i
                 break
 
