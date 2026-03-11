@@ -72,7 +72,7 @@ def _render_receipt(persisted: Dict[str, Any]) -> str:
         f"- Number of guests: {persisted.get('guests')}\n\n"
         f"TOTAL AMOUNT: ${total}\n\n"
         "Would you like to confirm this booking?\n"
-        "Reply yes to confirm and proceed with payment, or no to cancel."
+        "Reply  Confirm to proceed with payment or cancel the booking."
     )
 
 
