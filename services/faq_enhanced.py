@@ -401,10 +401,11 @@ class FAQService:
             answer += "\n\n[Note: Some details may need verification. Please contact support for confirmation.]"
 
         # --- Page references ---
-        pages = list(set(doc.metadata.get("page", "Unknown") for doc in reranked))
-        if pages and pages != ["Unknown"]:
-            page_refs = ", ".join(f"Page {p}" for p in pages if p != "Unknown")
-            answer += f"\n\n[Reference: {page_refs} of Company Policy]"
+        # We are turning off the page reference tags to make the chat feel more natural.
+        # pages = list(set(doc.metadata.get("page", "Unknown") for doc in reranked))
+        # if pages and pages != ["Unknown"]:
+        #     page_refs = ", ".join(f"Page {p}" for p in pages if p != "Unknown")
+        #     answer += f"\n\n[Reference: {page_refs} of Company Policy]"
 
         # --- CAG: store in cache ---
         cache.set(question, (answer, sources))
@@ -622,11 +623,14 @@ def generate_concise_answer(question: str, context: str) -> str:
         else:
             length_guide = "Provide a clear, concise answer in 5-10 lines."
         
-        system_prompt = f"""You are a helpful property rental assistant. Answer questions based ONLY on the provided policy text.
+        system_prompt = f"""You are a polite, helpful property rental assistant. Answer questions based ONLY on the provided policy text.
 Think step by step: 1) Identify the relevant policy section, 2) Extract the specific answer, 3) Provide a clear response.
 {length_guide}
-Be specific and direct. Use bullet points for multiple items.
-Do not add information not present in the context."""
+CRITICAL FORMATTING RULES:
+- Use clean Markdown formatting with bullet points and bold text where appropriate.
+- DO NOT include raw PDF artifacts, document titles, or headers (e.g., do not say "xyz company Internal Policies & Terms v1.0").
+- Speak directly and naturally to the user.
+- Do not add information not present in the context."""
         
         user_prompt = f"""Based on the following policy text, answer this question concisely:
 
