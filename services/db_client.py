@@ -23,12 +23,12 @@ _POOL: Optional[AsyncConnectionPool] = None
 _POOL_CONNINFO: Optional[str] = None
 _POOL_LOCK = asyncio.Lock()
 
-_DEFAULT_TIMEOUT_SECONDS = float(os.getenv("DB_TIMEOUT_SECONDS", "10"))
-_MAX_RETRIES = int(os.getenv("DB_MAX_RETRIES", "3"))
+_DEFAULT_TIMEOUT_SECONDS = float(os.getenv("DB_TIMEOUT_SECONDS", "2"))
+_MAX_RETRIES = int(os.getenv("DB_MAX_RETRIES", "1"))
 _RETRY_BACKOFF_SECONDS = float(os.getenv("DB_RETRY_BACKOFF_SECONDS", "0.25"))
 _POOL_MIN_SIZE = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
 _POOL_MAX_SIZE = int(os.getenv("DB_POOL_MAX_SIZE", "10"))
-_POOL_OPEN_TIMEOUT_SECONDS = float(os.getenv("DB_POOL_OPEN_TIMEOUT_SECONDS", "10"))
+_POOL_OPEN_TIMEOUT_SECONDS = float(os.getenv("DB_POOL_OPEN_TIMEOUT_SECONDS", "2"))
 
 
 def build_conninfo(conninfo: Optional[str] = None) -> str:
