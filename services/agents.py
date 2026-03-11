@@ -817,9 +817,9 @@ def greeting_agent(filters: Dict[str, Any], user_text: str = "") -> Dict[str, An
     if city: parts.append(city)
     if beds: parts.append(f"{beds} beds")
     if budget: parts.append(f"budget ${budget}")
-    hint=f" (noted: {', '.join(parts)})" if parts else ""
+    reply_msg = f"Hi there! I'm your AI Hotel Concierge{hint}. I can help you search for properties, check availability, book your stay, and answer policy questions. How can I help you today?"
 
-    return {"reply": f"Hi there! ðŸ‘‹ I'm your property assistant{hint}. How can I help you today?", "filters": clean_filters}
+    return {"reply": reply_msg, "filters": clean_filters}
 
 async def _confirmation_agent_impl(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     """

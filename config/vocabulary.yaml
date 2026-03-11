@@ -244,7 +244,14 @@ nlp_fallback:
     - "what do you do"
     - "what are you about"
     - "your purpose"
+    - "the purpose of"
+    - "purpose of this"
+    - "what is the purpose"
     - "tell me about yourself"
+    - "what can you do"
+    - "how can you help"
+    - "are you a bot"
+    - "are you an ai"
 
   acknowledgment_tokens:
     - "ok"
