@@ -442,6 +442,11 @@ def triage_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> s
     if _is_end(t):
         return "end"
 
+    # 3. 🛡️ IDENTITY SHIELD 🛡️
+    # Soft-coded check for queries about the bot's identity.
+    if any(phrase in tl for phrase in _nlp_fallback().identity_phrases):
+        return "greeting"
+
     # If user is currently deciding on a selected property...
     if active_filters.get(SK.awaiting_selection_confirm):
         if (
@@ -1119,9 +1124,9 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
             email=args.get("email", "")
         )
 
-        if not rust_validation.get("fallback"):
+        if rust_validation and not rust_validation.get("fallback"):
             # Unwrap: the gateway wraps in {ok, result, ...}
-            inner = rust_validation.get("result", rust_validation)
+            inner = rust_validation.get("result", rust_validation) or {}
             is_valid = inner.get("valid", True)
             errors = inner.get("errors", [])
             warnings = inner.get("warnings", [])
@@ -1549,8 +1554,8 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
             properties=_DATASET if _DATASET else None,
         )
 
-        if not rust_result.get("fallback"):
-            inner = rust_result.get("result", rust_result)
+        if rust_result and not rust_result.get("fallback"):
+            inner = rust_result.get("result", rust_result) or {}
             rust_results = inner.get("results", [])
             if isinstance(rust_results, list):
                 results = rust_results
