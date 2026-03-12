@@ -46,13 +46,12 @@ setInterval(function() {
         }
     });
 
-    // Also replace direct text occurrences
-    const els = document.querySelectorAll('h1, h2, span, p, div');
-    els.forEach(el => {
-        if (el.childNodes.length === 1 && el.childNodes[0].nodeType === 3) {
-            if (el.textContent.trim() === 'Chainlit') {
-                el.textContent = 'AI Booking Concierge';
-            }
+    // Replace all text nodes containing "Chainlit" anywhere in the DOM
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) {
+        if (node.nodeValue && node.nodeValue.trim() === 'Chainlit') {
+            node.nodeValue = node.nodeValue.replace('Chainlit', 'AI Booking Concierge');
         }
-    });
+    }
 }, 500);
