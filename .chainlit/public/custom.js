@@ -23,3 +23,36 @@ window.addEventListener('load', function() {
         }
     }, 1000); // Wait 1 second for UI to initialize
 });
+
+// Replace "Chainlit" with "AI Booking Concierge" on login page
+setInterval(function() {
+    const logoImgs = document.querySelectorAll('img');
+    logoImgs.forEach(img => {
+        if (img.src && (img.src.includes('logo') || img.src.includes('chainlit'))) {
+            const parent = img.parentElement;
+            if (parent && !parent.hasAttribute('data-replaced-title')) {
+                const span = document.createElement('span');
+                span.textContent = 'AI Booking Concierge';
+                span.style.fontSize = '24px';
+                span.style.fontWeight = 'bold';
+                span.style.color = '#F80061';
+                span.style.fontFamily = 'Inter, sans-serif';
+                span.style.marginLeft = '10px';
+                
+                img.style.display = 'none';
+                parent.appendChild(span);
+                parent.setAttribute('data-replaced-title', 'true');
+            }
+        }
+    });
+
+    // Also replace direct text occurrences
+    const els = document.querySelectorAll('h1, h2, span, p, div');
+    els.forEach(el => {
+        if (el.childNodes.length === 1 && el.childNodes[0].nodeType === 3) {
+            if (el.textContent.trim() === 'Chainlit') {
+                el.textContent = 'AI Booking Concierge';
+            }
+        }
+    });
+}, 500);
