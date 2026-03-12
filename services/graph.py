@@ -370,6 +370,7 @@ async def run_chat_graph(
         user_msg = message or ""
         bot_resp = (result.get("reply") or "").strip()
         if user_msg and bot_resp:
+            # Fire-and-forget: DB logging must never block the chat reply
             asyncio.create_task(log_chat(user_msg, bot_resp))
     except Exception:
         pass
