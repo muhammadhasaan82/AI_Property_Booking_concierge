@@ -2,7 +2,6 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -13,6 +12,7 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from dotenv import load_dotenv
 from sqlalchemy import text
 
+from services.db_logging import log_feedback
 from services.graph import run_chat_graph
 from services.state_keys import SK
 
@@ -258,27 +258,11 @@ def _get_data_layer():
 _configure_data_layer()
 
 
-def _build_stream_handler():
-    state: dict[str, Any] = {"msg": None, "started": False}
-    lock = asyncio.Lock()
-
-    async def _ensure_message() -> cl.Message:
-        async with lock:
-            if state["msg"] is None:
-                msg = cl.Message(content="")
-                await msg.send()
-                state["msg"] = msg
-                state["started"] = True
-        return state["msg"]
-
+def _make_stream_callback(msg: cl.Message):
     def _callback(token: str) -> None:
-        async def _emit() -> None:
-            msg = await _ensure_message()
-            await msg.stream_token(token)
+        asyncio.create_task(msg.stream_token(token))
 
-        asyncio.create_task(_emit())
-
-    return _callback, state
+    return _callback
 
 
 async def _rename_thread(message: cl.Message, question: str) -> None:
@@ -298,7 +282,23 @@ async def _rename_thread(message: cl.Message, question: str) -> None:
         pass
 
 
-# Removed feedback message logic
+async def _update_feedback_message(
+    bot_reply: str,
+    acknowledgement: str,
+    fallback_message: str,
+) -> None:
+    last_msg_id = cl.user_session.get("last_msg_id")
+    if last_msg_id:
+        try:
+            msg = cl.Message(id=last_msg_id)
+            msg.content = f"{bot_reply}\n\n---\n*{acknowledgement}*"
+            msg.actions = []
+            await msg.update()
+            return
+        except Exception:
+            pass
+
+    await cl.Message(content=fallback_message).send()
 
 
 @cl.on_chat_resume
@@ -329,8 +329,10 @@ async def on_message(message: cl.Message):
 
     await _rename_thread(message, (message.content or "").strip())
 
-    stream_callback, stream_state = _build_stream_handler()
-    filters["stream_callback"] = stream_callback
+    filters["stream"] = True
+    msg = cl.Message(content="")
+    await msg.send()
+    filters["stream_callback"] = _make_stream_callback(msg)
 
     result = await run_chat_graph(
         message=message.content,
@@ -365,18 +367,37 @@ async def on_message(message: cl.Message):
                 formatted_lines.append(line)
         reply = "\n".join(formatted_lines)
 
-    streamed_msg = stream_state.get("msg")
-    if streamed_msg is not None:
-        streamed_msg.content = reply
-        await streamed_msg.update()
-        msg = streamed_msg
-    else:
-        msg = cl.Message(content=reply)
-        await msg.send()
+    msg.content = reply
+    msg.actions = [
+        cl.Action(name="thumbs_up", value="positive", label="+1"),
+        cl.Action(name="thumbs_down", value="negative", label="-1"),
+    ]
+    await msg.update()
 
     cl.user_session.set("last_user_msg", message.content)
     cl.user_session.set("last_bot_reply", reply)
     cl.user_session.set("last_msg_id", msg.id)
 
 
-# Removed feedback callbacks
+@cl.action_callback("thumbs_up")
+async def on_thumbs_up(action: cl.Action):
+    user_msg = cl.user_session.get("last_user_msg", "")
+    bot_reply = cl.user_session.get("last_bot_reply", "")
+    await log_feedback(user_msg, bot_reply, rating="positive")
+    await _update_feedback_message(
+        bot_reply,
+        "Thanks for the positive feedback!",
+        "Thanks for the feedback!",
+    )
+
+
+@cl.action_callback("thumbs_down")
+async def on_thumbs_down(action: cl.Action):
+    user_msg = cl.user_session.get("last_user_msg", "")
+    bot_reply = cl.user_session.get("last_bot_reply", "")
+    await log_feedback(user_msg, bot_reply, rating="negative")
+    await _update_feedback_message(
+        bot_reply,
+        "Thanks for the feedback! We'll work on improving.",
+        "Thanks for the feedback. We'll work on improving!",
+    )
