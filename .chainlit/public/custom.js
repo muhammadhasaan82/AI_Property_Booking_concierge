@@ -25,33 +25,73 @@ window.addEventListener('load', function() {
 });
 
 // Replace "Chainlit" with "AI Booking Concierge" on login page
-setInterval(function() {
-    const logoImgs = document.querySelectorAll('img');
-    logoImgs.forEach(img => {
-        if (img.src && (img.src.includes('logo') || img.src.includes('chainlit'))) {
-            const parent = img.parentElement;
-            if (parent && !parent.hasAttribute('data-replaced-title')) {
-                const span = document.createElement('span');
-                span.textContent = 'AI Booking Concierge';
-                span.style.fontSize = '24px';
-                span.style.fontWeight = 'bold';
-                span.style.color = '#F80061';
-                span.style.fontFamily = 'Inter, sans-serif';
-                span.style.marginLeft = '10px';
-                
-                img.style.display = 'none';
-                parent.appendChild(span);
-                parent.setAttribute('data-replaced-title', 'true');
-            }
-        }
-    });
+const BRAND_TOKEN = 'Chainlit';
+const BRAND_NAME = 'AI Booking Concierge';
 
-    // Replace all text nodes containing "Chainlit" anywhere in the DOM
+function replaceBrandText() {
+    if (!document.body) return;
+
+    // Replace text nodes containing "Chainlit"
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
     let node;
     while ((node = walker.nextNode())) {
-        if (node.nodeValue && node.nodeValue.trim() === 'Chainlit') {
-            node.nodeValue = node.nodeValue.replace('Chainlit', 'AI Booking Concierge');
+        if (node.nodeValue && node.nodeValue.includes(BRAND_TOKEN)) {
+            node.nodeValue = node.nodeValue.split(BRAND_TOKEN).join(BRAND_NAME);
         }
     }
+
+    // Replace common attributes
+    const attrTargets = document.querySelectorAll('[aria-label], [title]');
+    attrTargets.forEach(el => {
+        ['aria-label', 'title'].forEach(attr => {
+            const value = el.getAttribute(attr);
+            if (value && value.includes(BRAND_TOKEN)) {
+                el.setAttribute(attr, value.split(BRAND_TOKEN).join(BRAND_NAME));
+            }
+        });
+    });
+
+    // Replace document title if needed
+    if (document.title && document.title.includes(BRAND_TOKEN)) {
+        document.title = document.title.split(BRAND_TOKEN).join(BRAND_NAME);
+    }
+}
+
+function ensureLogoText() {
+    const logoCandidates = document.querySelectorAll('img, svg');
+    logoCandidates.forEach(logo => {
+        const src = logo.getAttribute('src') || '';
+        const aria = logo.getAttribute('aria-label') || '';
+        const looksLikeLogo = src.toLowerCase().includes('chainlit') ||
+            src.toLowerCase().includes('logo') ||
+            aria.toLowerCase().includes('chainlit');
+
+        if (!looksLikeLogo) return;
+
+        const parent = logo.parentElement;
+        if (!parent) return;
+
+        const parentText = (parent.textContent || '').trim();
+        if (parentText.includes(BRAND_NAME)) return;
+
+        if (!parentText || parentText === BRAND_TOKEN) {
+            let label = parent.querySelector('[data-brand-name="true"]');
+            if (!label) {
+                label = document.createElement('span');
+                label.setAttribute('data-brand-name', 'true');
+                label.style.fontSize = '24px';
+                label.style.fontWeight = '700';
+                label.style.color = '#F80061';
+                label.style.marginLeft = '10px';
+                label.style.fontFamily = 'inherit';
+                parent.appendChild(label);
+            }
+            label.textContent = BRAND_NAME;
+        }
+    });
+}
+
+setInterval(function() {
+    replaceBrandText();
+    ensureLogoText();
 }, 500);
