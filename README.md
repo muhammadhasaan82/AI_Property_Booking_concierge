@@ -110,13 +110,13 @@ uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
-uv pip install -r requirements.txt
+uv pip install -r backend/requirements.txt
 
 # Download the spaCy English model
 uv run python -m spacy download en_core_web_sm
 
 # Setup your environment variables
-cp services/env.example .env
+cp backend/app/services/env.example .env
 # Edit .env and add your OPENAI_API_KEY
 ```
 
@@ -124,7 +124,7 @@ cp services/env.example .env
 Open a second terminal window to run the high-performance computational backend:
 
 ```bash
-cd Hotel_Booking/rust_gateway
+cd Hotel_Booking/infrastructure/rust_gateway
 
 # Build and run the Axum server
 cargo run --release
@@ -136,7 +136,7 @@ Back in your Python terminal environment, ignite the Chainlit frontend:
 
 ```bash
 # Start the Chainlit UI with hot-reloading
-uv run chainlit run chainlit_app.py -w
+uv run chainlit run backend/chainlit_app.py -w
 ```
 *The dashboard will automatically open in your browser at `http://localhost:8000`.*
 
@@ -146,21 +146,30 @@ uv run chainlit run chainlit_app.py -w
 
 ```text
 Hotel_Booking/
-├── chainlit_app.py         # The Conversational UI Bridge
-├── requirements.txt        # Python dependency manifest
-├── services/               # 🐍 Python State & Orchestration
-│   ├── agents.py           # LangGraph Agent implementations
-│   ├── graph.py            # LangGraph explicit routing logic
-│   ├── nlp_engine.py       # Async spaCy/VADER NLP wrapper
-│   ├── rust_client.py      # TOON-powered async client
-│   └── toon.py             # Custom TOON Python encoder/decoder
-├── rust_gateway/           # 🦀 Rust Deterministic Microservice
-│   ├── src/
-│   │   ├── main.rs         # Axum Server & HTTP middleware
-│   │   ├── gateway.rs      # Autonomous intent inference
-│   │   ├── cache.rs        # High-speed LRU Cache
-│   │   ├── toon.rs         # Rust TOON encoder/decoder
-│   │   └── tools/          # Rust Computational Tools (Search, Validations)
-├── route/                  # FastAPI REST endpoints
-└── supabase/               # Local database schemas and migrations
+|-- backend/
+|   |-- app/
+|   |   |-- services/       # Agents, NLP engine, RAG pipelines
+|   |   |-- route/          # FastAPI endpoints
+|   |   `-- config/         # YAML configuration files
+|   |-- tests/              # Pytest suite
+|   |-- main.py             # FastAPI entry point
+|   |-- chainlit_app.py     # Chainlit backend execution
+|   |-- chatbot.py          # CLI chatbot entry
+|   `-- requirements.txt    # Python dependencies
+|-- frontend/
+|   |-- .chainlit/           # Chainlit UI config
+|   |-- public/              # Custom CSS/JS/logos
+|   `-- chainlit.md          # Chainlit UI welcome copy
+|-- infrastructure/
+|   |-- rust_gateway/        # Rust microservice
+|   |-- database/            # SQL schemas/migrations
+|   `-- supabase/            # Supabase configs
+|-- data/
+|   |-- Company policy.pdf
+|   |-- dataset.csv
+|   `-- chroma_faq/
+`-- scripts/
+    |-- execute_all_phases.py
+    `-- run_phases.py
 ```
+
