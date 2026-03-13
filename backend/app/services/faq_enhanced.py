@@ -46,7 +46,7 @@ OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
 # Initialize ChromaDB path
 CHROMA_PATH = Path(__file__).resolve().parents[3] / "data" / "chroma_faq"
-CHROMA_PATH.mkdir(exist_ok=True)
+CHROMA_PATH.mkdir(parents=True, exist_ok=True)
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
 
@@ -118,7 +118,7 @@ class FAQService:
     def __init__(self, chroma_path: Optional[Path] = None, openai_api_key: Optional[str] = None):
         self._openai_api_key = openai_api_key or OPENAI_API_KEY
         self._chroma_path = chroma_path or CHROMA_PATH
-        self._chroma_path.mkdir(exist_ok=True)
+        self._chroma_path.mkdir(parents=True, exist_ok=True)
         self._vector_store: Optional[Chroma] = None
         self._embeddings = None
         self._documents: List[Document] = []
