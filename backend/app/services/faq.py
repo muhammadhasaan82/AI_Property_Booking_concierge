@@ -4,6 +4,8 @@ import os
 from typing import Optional
 from supabase import create_client, Client
 
+from app.services.config import MOCK_MODE
+
 _SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 # Use service role key for server-side operations (bypasses RLS appropriately).
 # The anon key is scoped to public/unauthenticated access and must NOT be used
@@ -24,19 +26,30 @@ def faq_lookup(question: str) -> Optional[str]:
     Tries exact-ish match first, then a loose ILIKE contains.
     Returns the answer string or None.
     """
-    sb = _sb_client()
+    if MOCK_MODE:
+        return "Based on our mock policy, the answer to your question is: All reservations are subject to standard policies. Check out by 11am, and full refund available up to 48 hours before check-in."
+
+    try:
+        sb = _sb_client()
+    except RuntimeError:
+        return "I'm sorry, I cannot look up that policy right now because the FAQ database isn't connected."
+
     q = (question or "").strip()
     if not q:
         return None
 
-    # 1) Try exact case-insensitive
-    res = sb.table("faqs").select("answer").ilike("question", q).limit(1).execute()
-    if res.data:
-        return res.data[0]["answer"]
+    try:
+        # 1) Try exact case-insensitive
+        res = sb.table("faqs").select("answer").ilike("question", q).limit(1).execute()
+        if res.data:
+            return res.data[0]["answer"]
 
-    # 2) Try contains match (wrap with %...%)
-    res2 = sb.table("faqs").select("answer").ilike("question", f"%{q}%").limit(1).execute()
-    if res2.data:
-        return res2.data[0]["answer"]
+        # 2) Try contains match (wrap with %...%)
+        res2 = sb.table("faqs").select("answer").ilike("question", f"%{q}%").limit(1).execute()
+        if res2.data:
+            return res2.data[0]["answer"]
+    except Exception as e:
+        print(f"[FAQ Database Error] {e}")
+        return "I'm sorry, my FAQ knowledge base is currently inaccessible."
 
     return None
