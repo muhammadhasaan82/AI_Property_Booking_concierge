@@ -45,7 +45,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
 # Initialize ChromaDB path
-CHROMA_PATH = Path(__file__).resolve().parents[3] / "data" / "chroma_faq"
+CHROMA_PATH = Path(__file__).resolve().parents[2] / "data" / "chroma_faq"
 CHROMA_PATH.mkdir(parents=True, exist_ok=True)
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
@@ -277,14 +277,19 @@ class FAQService:
 
         if embeddings is not None and os.path.exists(persist_directory) and not force_reload:
             try:
-                self._vector_store = Chroma(
+                temp_store = Chroma(
                     persist_directory=persist_directory,
                     embedding_function=embeddings,
                     collection_name="company_policies",
                 )
-                self._healthy = True
-                logger.info("Loaded existing vector store")
-                return self._vector_store
+                # 🛡️ SHIELD: Ensure the database isn't empty before accepting it!
+                if temp_store._collection.count() > 0:
+                    self._vector_store = temp_store
+                    self._healthy = True
+                    logger.info("Loaded existing vector store")
+                    return self._vector_store
+                else:
+                    logger.info("Existing vector store is empty. Forcing rebuild...")
             except Exception as e:
                 logger.warning("Error loading existing store: %s, creating new one", e)
 
@@ -332,7 +337,7 @@ class FAQService:
             return cached  # (answer, sources) tuple
 
         if self._vector_store is None and not self._documents:
-            pdf_path = Path(__file__).resolve().parents[3] / "data" / "Company policy.pdf"
+            pdf_path = Path(__file__).resolve().parents[2] / "data" / "Company policy.pdf"
             if not pdf_path.exists():
                 return "Company policy document not found. Please ensure the PDF is uploaded.", []
             self.process_policy_document(str(pdf_path))
@@ -417,7 +422,7 @@ class FAQService:
     def initialize(self) -> bool:
         """Initialize FAQ system. Returns True on success."""
         try:
-            pdf_path = Path(__file__).resolve().parents[3] / "data" / "Company policy.pdf"
+            pdf_path = Path(__file__).resolve().parents[2] / "data" / "Company policy.pdf"
             if pdf_path.exists():
                 self.process_policy_document(str(pdf_path))
                 logger.info("System initialized successfully")
@@ -570,7 +575,7 @@ def initialize_faq_system():
 
 
 def best_effort_policy_answer(question: str) -> Optional[str]:
-    pdf_path = Path(__file__).resolve().parents[3] / "data" / "Company policy.pdf"
+    pdf_path = Path(__file__).resolve().parents[2] / "data" / "Company policy.pdf"
     if pdf_path.exists():
         text = load_pdf_document(str(pdf_path))
         if text:
@@ -740,7 +745,6 @@ def extract_key_sentences(context: str, question: str, max_lines: int = 10) -> s
     return _clean_pdf_artifacts(result)
 
 
-# Optional: Auto-initialize when module is imported
-# Uncomment the line below if you want automatic initialization
-# initialize_faq_system()
+# Auto-initialize when module is imported
+initialize_faq_system()
 
