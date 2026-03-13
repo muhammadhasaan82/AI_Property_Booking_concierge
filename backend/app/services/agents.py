@@ -1230,9 +1230,9 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
         if t in prop_title.lower(): ptype=t; break
 
     if r.get("ok"):
-        msg=f"""🎉 **Booking Confirmed!**
+        msg=f""" **Booking Confirmed!**
 
-✅ Your **{ptype}** has been successfully booked!
+Your **{ptype}** has been successfully booked!
 
 **Booking Details**
 - Booking ID: {r.get('booking_id','N/A')}
@@ -1368,7 +1368,7 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
         from .booking import delete_booking
         res = await delete_booking(booking_id)
         if res.get("ok"):
-            return {"tool_result": {"ok": True, "deleted": True}, "reply": f"✅ Booking `{booking_id}` has been successfully cancelled and completely removed from our database."}
+            return {"tool_result": {"ok": True, "deleted": True}, "reply": f"✅ Booking `{booking_id}` has been successfully cancelled."}
         else:
             return {"tool_result": {"ok": False}, "reply": f"Sorry, I couldn't delete the booking: {res.get('error')}"}
 
