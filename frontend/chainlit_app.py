@@ -16,6 +16,10 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from dotenv import load_dotenv
 from sqlalchemy import text
 
+# Fix sys.path to allow importing from the backend directory
+_backend_root = Path(__file__).resolve().parents[1] / "backend"
+sys.path.append(str(_backend_root))
+
 from app.services.graph import run_chat_graph
 from app.services.state_keys import SK
 
