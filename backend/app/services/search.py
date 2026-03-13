@@ -9,7 +9,8 @@ from .config import SEED_PROPERTY_TYPES
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DATASET_PATHS = [
-    _REPO_ROOT / "data" / "dataset.csv",                  # monorepo data/
+    _REPO_ROOT / "backend" / "data" / "dataset.csv",      # correctly resolve after moving data to backend/
+    _REPO_ROOT / "data" / "dataset.csv",                  # fallback 
     Path(__file__).parent / "dataset.csv",                # legacy (pre-monorepo)
 ]
 

@@ -61,9 +61,14 @@ def _discover_dataset_path() -> Optional[str]:
         return env_path
 
     repo_root = Path(__file__).resolve().parents[3]
-    candidate = repo_root / "data" / "dataset.csv"
+    candidate = repo_root / "backend" / "data" / "dataset.csv"
     if candidate.exists():
         return str(candidate)
+
+    # Secondary fallback for running from within backend/ directly
+    candidate2 = repo_root / "data" / "dataset.csv"
+    if candidate2.exists():
+        return str(candidate2)
 
     # Legacy fallbacks (pre-monorepo layout)
     here = Path(__file__).parent
