@@ -16,7 +16,6 @@ aiosqlite>=0.22.1
 # --- NLP engine ---
 vaderSentiment~=3.3
 spacy~=3.7
-en-core-web-sm>=3.7.0,<3.8.0
 numpy>=1.24
 
 # --- RAG stack ---
