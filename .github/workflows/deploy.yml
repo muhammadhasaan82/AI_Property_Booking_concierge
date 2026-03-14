@@ -1,0 +1,41 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to DigitalOcean Droplet
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script: |
+            cd /root/hotel_booking
+            
+            # Pull latest changes
+            git pull origin main
+            
+            # Rebuild Rust Gateway
+            cd backend/infrastructure/database/rust_db_gateway
+            cargo build --release
+            
+            # Update Python dependencies
+            cd ../../../../
+            cd backend
+            source .venv/bin/activate
+            uv pip install -r requirements.txt
+            
+            # Download spaCy model if needed
+            python -m spacy download en_core_web_sm || true
+            
+            # Restart services
+            sudo systemctl restart rust-gateway
+            sudo systemctl restart chainlit-app
+            
+            echo "Deployment completed successfully!"
