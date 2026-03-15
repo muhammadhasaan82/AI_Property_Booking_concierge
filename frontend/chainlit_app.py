@@ -100,6 +100,7 @@ POSTGRES_SCHEMA_STATEMENTS = [
         "playerConfig" JSONB,
         "forId" UUID,
         "mime" TEXT,
+        "props" JSONB,  -- Added for Chainlit v1.1.0+ compatibility
         FOREIGN KEY ("threadId") REFERENCES threads("id") ON DELETE CASCADE
     )
     """,
@@ -176,6 +177,7 @@ SQLITE_SCHEMA_STATEMENTS = [
         "playerConfig" TEXT,
         "forId" TEXT,
         "mime" TEXT,
+        "props" TEXT,  -- Added for Chainlit v1.1.0+ compatibility
         FOREIGN KEY ("threadId") REFERENCES threads("id") ON DELETE CASCADE
     )
     """,
@@ -215,7 +217,8 @@ def _normalize_conninfo(conninfo: str) -> str:
 
 
 def _resolve_history_conninfo() -> str:
-    for env_name in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_URL"):
+    # Add "SUPABASE_DB_URL" to this list
+    for env_name in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_URL", "SUPABASE_DB_URL"):
         raw_value = (os.getenv(env_name) or "").strip()
         if raw_value.startswith(
             (
@@ -237,22 +240,11 @@ def _schema_statements_for(conninfo: str):
     return POSTGRES_SCHEMA_STATEMENTS
 
 
-async def _ensure_history_schema(data_layer: SQLAlchemyDataLayer, conninfo: str) -> None:
-    async with data_layer.engine.begin() as connection:
-        if conninfo.startswith("sqlite"):
-            await connection.execute(text("PRAGMA foreign_keys = ON"))
-        for statement in _schema_statements_for(conninfo):
-            await connection.execute(text(statement))
-
-
-def _configure_data_layer() -> None:
-    if getattr(cl_data, "_data_layer", None) is not None:
-        return
-
+@cl.data_layer
+def get_data_layer():
     conninfo = _resolve_history_conninfo()
-    data_layer = SQLAlchemyDataLayer(conninfo=conninfo)
-    asyncio.run(_ensure_history_schema(data_layer, conninfo))
-    cl_data._data_layer = data_layer
+    # Chainlit's official layer automatically creates the schema tables for you!
+    return SQLAlchemyDataLayer(conninfo=conninfo)
 
 
 def _get_data_layer():
@@ -260,9 +252,6 @@ def _get_data_layer():
         return cl_data.get_data_layer()
     except Exception:
         return None
-
-
-_configure_data_layer()
 
 
 def _make_stream_callback(msg: cl.Message):
@@ -297,15 +286,30 @@ async def on_chat_resume(thread):
         if past_thread_id:
             cl.user_session.set("past_thread_id", past_thread_id)
 
-    await cl.Message(content="Chat session restored from memory.").send()
+    # await cl.Message(content="Chat session restored from memory.").send()
 
 
 @cl.on_chat_start
 async def on_chat_start():
+    # --- NEW: Safely ensure tables exist ---
+    data_layer = cl_data.get_data_layer()
+    if data_layer and hasattr(data_layer, "engine"):
+        conninfo = _resolve_history_conninfo()
+        try:
+            async with data_layer.engine.begin() as connection:
+                if conninfo.startswith("sqlite"):
+                    await connection.execute(text("PRAGMA foreign_keys = ON"))
+                for statement in _schema_statements_for(conninfo):
+                    await connection.execute(text(statement))
+        except Exception as e:
+            print(f"Schema Error: {e}")
+    # ---------------------------------------
+
     cl.user_session.set("filters", {})
     cl.user_session.set("booking_args", {})
     cl.user_session.set("status_args", {})
     cl.user_session.set("payment_args", {})
+    
     await cl.Message(content=WELCOME_MESSAGE).send()
 
 

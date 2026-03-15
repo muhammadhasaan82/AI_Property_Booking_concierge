@@ -6,9 +6,9 @@ After=network.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/root/hotel_booking/backend/infrastructure/database/rust_db_gateway
+WorkingDirectory=/root/AI_Property_Booking_concierge/backend/infrastructure/database/rust_db_gateway
 Environment="PATH=/root/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/root/hotel_booking/backend/infrastructure/database/rust_db_gateway/target/release/main
+ExecStart=/root/AI_Property_Booking_concierge/backend/infrastructure/database/rust_db_gateway/target/release/rust_db_gateway
 Restart=always
 RestartSec=5
 
