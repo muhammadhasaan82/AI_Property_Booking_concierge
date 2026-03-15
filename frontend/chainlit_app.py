@@ -217,7 +217,8 @@ def _normalize_conninfo(conninfo: str) -> str:
 
 
 def _resolve_history_conninfo() -> str:
-    for env_name in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_URL"):
+    # Add "SUPABASE_DB_URL" to this list
+    for env_name in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_URL", "SUPABASE_DB_URL"):
         raw_value = (os.getenv(env_name) or "").strip()
         if raw_value.startswith(
             (
