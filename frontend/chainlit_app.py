@@ -100,6 +100,7 @@ POSTGRES_SCHEMA_STATEMENTS = [
         "playerConfig" JSONB,
         "forId" UUID,
         "mime" TEXT,
+        "props" JSONB,  -- Added for Chainlit v1.1.0+ compatibility
         FOREIGN KEY ("threadId") REFERENCES threads("id") ON DELETE CASCADE
     )
     """,
@@ -176,6 +177,7 @@ SQLITE_SCHEMA_STATEMENTS = [
         "playerConfig" TEXT,
         "forId" TEXT,
         "mime" TEXT,
+        "props" TEXT,  -- Added for Chainlit v1.1.0+ compatibility
         FOREIGN KEY ("threadId") REFERENCES threads("id") ON DELETE CASCADE
     )
     """,
