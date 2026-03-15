@@ -237,22 +237,11 @@ def _schema_statements_for(conninfo: str):
     return POSTGRES_SCHEMA_STATEMENTS
 
 
-async def _ensure_history_schema(data_layer: SQLAlchemyDataLayer, conninfo: str) -> None:
-    async with data_layer.engine.begin() as connection:
-        if conninfo.startswith("sqlite"):
-            await connection.execute(text("PRAGMA foreign_keys = ON"))
-        for statement in _schema_statements_for(conninfo):
-            await connection.execute(text(statement))
-
-
-def _configure_data_layer() -> None:
-    if getattr(cl_data, "_data_layer", None) is not None:
-        return
-
+@cl.data_layer
+def get_data_layer():
     conninfo = _resolve_history_conninfo()
-    data_layer = SQLAlchemyDataLayer(conninfo=conninfo)
-    asyncio.run(_ensure_history_schema(data_layer, conninfo))
-    cl_data._data_layer = data_layer
+    # Chainlit's official layer automatically creates the schema tables for you!
+    return SQLAlchemyDataLayer(conninfo=conninfo)
 
 
 def _get_data_layer():
@@ -260,9 +249,6 @@ def _get_data_layer():
         return cl_data.get_data_layer()
     except Exception:
         return None
-
-
-_configure_data_layer()
 
 
 def _make_stream_callback(msg: cl.Message):
