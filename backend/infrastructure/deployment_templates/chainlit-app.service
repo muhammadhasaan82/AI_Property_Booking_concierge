@@ -6,11 +6,11 @@ After=network.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/root/hotel_booking/frontend
-Environment="PATH=/root/hotel_booking/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="CHAINLIT_APP_ROOT=/root/hotel_booking/frontend"
-EnvironmentFile=/root/hotel_booking/.env
-ExecStart=/root/hotel_booking/backend/.venv/bin/chainlit run chainlit_app.py --host 0.0.0.0 --port 8000
+WorkingDirectory=/root/AI_Property_Booking_concierge/frontend
+Environment="PATH=/root/AI_Property_Booking_concierge/backend/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="CHAINLIT_APP_ROOT=/root/AI_Property_Booking_concierge/frontend"
+EnvironmentFile=/root/AI_Property_Booking_concierge/backend/.env
+ExecStart=/root/AI_Property_Booking_concierge/backend/.venv/bin/chainlit run chainlit_app.py --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 
