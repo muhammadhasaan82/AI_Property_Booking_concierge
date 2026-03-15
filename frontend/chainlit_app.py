@@ -297,7 +297,7 @@ async def on_chat_resume(thread):
         if past_thread_id:
             cl.user_session.set("past_thread_id", past_thread_id)
 
-    await cl.Message(content="Chat session restored from memory.").send()
+    # await cl.Message(content="Chat session restored from memory.").send()
 
 
 @cl.on_chat_start
