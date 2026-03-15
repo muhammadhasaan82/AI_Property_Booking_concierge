@@ -291,8 +291,8 @@ async def on_chat_resume(thread):
 
 @cl.on_chat_start
 async def on_chat_start():
-    # 1. Safely create the missing Database Tables in Supabase!
-    data_layer = _get_data_layer()
+    # --- NEW: Safely ensure tables exist ---
+    data_layer = cl_data.get_data_layer()
     if data_layer and hasattr(data_layer, "engine"):
         conninfo = _resolve_history_conninfo()
         try:
@@ -302,9 +302,9 @@ async def on_chat_start():
                 for statement in _schema_statements_for(conninfo):
                     await connection.execute(text(statement))
         except Exception as e:
-            print(f"Supabase Table Creation Error: {e}")
+            print(f"Schema Error: {e}")
+    # ---------------------------------------
 
-    # 2. Reset the session filters (Your existing code)
     cl.user_session.set("filters", {})
     cl.user_session.set("booking_args", {})
     cl.user_session.set("status_args", {})
