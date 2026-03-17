@@ -146,7 +146,16 @@ def property_search(
         x.get("title",""),
     ))
     
-    # Return all matching results, not limited to 20
+    # Dynamic result limiting to protect token limits
+    total_count = len(out)
+    if total_count > 100:
+        # Too many results - cap at 100
+        out = out[:100]
+    elif total_count <= 10:
+        # Small result set (10 or less) - show all
+        pass
+    # If 11-30 results, show all (no limit needed for small result sets)
+    
     return out
 
 
