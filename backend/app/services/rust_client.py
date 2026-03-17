@@ -65,8 +65,8 @@ async def execute_tool(data: Dict[str, Any], context: Optional[Dict[str, Any]] =
         print("[RUST] Gateway timed out, using Python fallback")
         return {"fallback": True, "error": "timeout"}
     except Exception as e:
-        print(f"[RUST] Unexpected error: {e}, using Python fallback")
-        return {"fallback": True, "error": str(e)}
+        print(f"[RUST] Unexpected error: {type(e).__name__} - {repr(e)}, using Python fallback")
+        return {"fallback": True, "error": repr(e)}
 
 
 async def search_properties(
