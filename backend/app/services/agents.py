@@ -1448,6 +1448,27 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     user_tl = (user_text or "").lower().strip()
     requested_city = extracted.get("city") or extracted.get("location")
 
+    # 🛑 FIX: Force AI to ask for city if not provided
+    if not requested_city:
+        def _city_list_text() -> str:
+            cities = get_available_cities()
+            if not cities:
+                return "San Diego, New York, Miami"
+            lines = []
+            for i in range(0, len(cities), 5):
+                lines.append(", ".join(cities[i:i + 5]))
+            return "\n".join(lines)
+        
+        return {
+            "results": [],
+            "filters": extracted,
+            "reply": (
+                "I'd be happy to help you find the perfect property! "
+                "To get started, could you please tell me which city or location you're looking in?\n\n"
+                f"Here are some popular destinations: {_city_list_text()}"
+            ),
+        }
+
     # 🛑 FIX: Define these helpers at the TOP so they are available to the shields below 🛑
     def _city_list_text() -> str:
         cities = get_available_cities()
