@@ -1,5 +1,13 @@
 # AI Property Booking Concierge
 
+[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-AI-green.svg)](https://python.langchain.com/docs/langgraph)
+[![Supabase](https://img.shields.io/badge/Supabase-Database-3ECF8E.svg)](https://supabase.com/)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-black.svg)](https://openai.com/)
+[![Axum](https://img.shields.io/badge/Axum-Web_Framework-red.svg)](https://github.com/tokio-rs/axum)
+
 A conversational AI platform for property bookings that combines a Python-based LangGraph orchestration layer with a high-performance Rust database gateway. The system handles natural language property searches, booking flows, FAQ handling, and payment processing through a multi-agent architecture.
 
 ## Hybrid Architecture
@@ -11,6 +19,47 @@ The system is split into two cooperating layers:
 **Rust Database Gateway** — A high-throughput microservice built on [Tokio](https://tokio.rs/) and [Axum](https://docs.rs/axum/latest/axum/) that manages database connections, caching, and tool execution. It exposes a schema-agnostic `/execute` endpoint that accepts [TOON](https://github.com/toon-lang/spec) (a compact binary serialization format) or JSON, routes to the appropriate tool, and caches results with TTL-based eviction. The gateway handles property search, booking validation, pricing, sentiment analysis, and fraud detection.
 
 The Rust gateway sits behind the Python orchestration layer but can operate independently for high-throughput scenarios. Communication happens over HTTP with the Python layer consuming the Rust gateway as a service.
+
+## System Architecture
+
+```mermaid
+graph TD
+    User([User]) -->|Chat/Voice| UI[Chainlit UI]
+    UI -->|Session State| Python_Gateway[FastAPI + LangGraph]
+    
+    subgraph Python Backend
+        Python_Gateway -->|State Transitions| Agents((Agent Nodes))
+        Agents -->|Async| Supabase[(Supabase DB)]
+        Agents -->|Prompting| OpenAI[OpenAI API]
+    end
+    
+    subgraph Rust Backend
+        Agents -->|TOON Protocol| Rust_Gateway[Axum Autonomous Gateway]
+        Rust_Gateway -->|Search/Sort| Tools_Search[Property Search]
+        Rust_Gateway -->|Date Math| Tools_Valid[Booking Validator]
+        Rust_Gateway -->|NLP| Tools_Sentiment[Sentiment Analysis]
+    end
+```
+
+## Agent Workflow (LangGraph)
+
+The agentic framework uses a robust state machine to preserve context. If a user asks an FAQ question in the middle of a booking, the system safely routes them to the FAQ agent and seamlessly brings them back to complete their booking.
+
+```mermaid
+flowchart LR
+    Start((User Input)) --> Triage[Triage Agent]
+    Triage -->|Hi| G[Greeting Agent]
+    Triage -->|Policy?| F[FAQ Agent]
+    Triage -->|Find a home| P[Property Agent]
+    Triage -->|I want this one| C[Confirmation Agent]
+    Triage -->|Check-in/Out| S[Status Agent]
+    
+    C <-->|Slot Filling| C
+    C -->|Confirmed| B[Booking Agent]
+    B -->|Checkout| Pay[Payment Agent]
+    
+    F -->|Context Preserved| C
+```
 
 ## Interesting Techniques
 
