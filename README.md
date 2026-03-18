@@ -1,175 +1,105 @@
-# 🏨 AI Concierge: Hybrid Python + Rust Real Estate Platform
+# AI Property Booking Concierge
 
-[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-AI-green.svg)](https://python.langchain.com/docs/langgraph)
-[![Supabase](https://img.shields.io/badge/Supabase-Database-3ECF8E.svg)](https://supabase.com/)
-[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-black.svg)](https://openai.com/)
-[![Axum](https://img.shields.io/badge/Axum-Web_Framework-red.svg)](https://github.com/tokio-rs/axum)
+A conversational AI platform for property bookings that combines a Python-based LangGraph orchestration layer with a high-performance Rust database gateway. The system handles natural language property searches, booking flows, FAQ handling, and payment processing through a multi-agent architecture.
 
-> A production-grade, highly advanced AI hotel and real estate booking platform featuring a Chainlit conversational UI, dynamic LangGraph state routing, and high-throughput Rust microservices.
+## Hybrid Architecture
 
----
+The system is split into two cooperating layers:
 
-## 📖 Project Overview
+**Python AI Orchestration Layer** — Handles conversational state, intent classification, and agent routing using LangGraph. Each conversation flows through a state machine with specialized agents (greeting, property search, booking, FAQ, etc.) that operate on a shared `ChatState` object. The intent routing system uses a hybrid approach: lightweight pattern matching with [spaCy](https://spacy.io/) for common cases, falling back to OpenAI structured output when confidence is low.
 
-The **AI Concierge** represents the next generation of conversational AI platforms for the hospitality and real estate industry. It provides a seamless, ChatGPT-like interface where users can search for properties, ask complex FAQ questions, manage bookings, and check their booking status. 
+**Rust Database Gateway** — A high-throughput microservice built on [Tokio](https://tokio.rs/) and [Axum](https://docs.rs/axum/latest/axum/) that manages database connections, caching, and tool execution. It exposes a schema-agnostic `/execute` endpoint that accepts [TOON](https://github.com/toon-lang/spec) (a compact binary serialization format) or JSON, routes to the appropriate tool, and caches results with TTL-based eviction. The gateway handles property search, booking validation, pricing, sentiment analysis, and fraud detection.
 
-Behind the scenes, the system utilizes a cutting-edge hybrid architecture that separates non-deterministic AI reasoning from heavy, deterministic computational tasks.
+The Rust gateway sits behind the Python orchestration layer but can operate independently for high-throughput scenarios. Communication happens over HTTP with the Python layer consuming the Rust gateway as a service.
 
----
+## Interesting Techniques
 
-## 🏗️ Why a Hybrid Architecture?
+**LLM State Routing with Confidence Thresholds** — Intent classification in [`agents.py`](backend/app/services/agents.py) uses a tiered approach: deterministic pattern matching → NLP-based extraction → LLM structured output with confidence scoring. The [`triage_intent()`](backend/app/services/agents.py:413) function evaluates multiple "shield" conditions to preserve conversation context when users interject with greetings or questions mid-flow.
 
-Modern AI agents often suffer from event-loop blocking when handling heavy computations or string parsing in Python. We solved this by splitting the responsibilities:
+**Async Connection Pooling** — The Rust gateway uses Tokio's async runtime with shared-state concurrency. Database connections and the tool registry are wrapped in `Arc<AppState>` for lock-free read access across request handlers. See the [Axum State pattern](https://docs.rs/axum/latest/axum/extract/struct.State.html).
 
-1. **Python (Reasoning & Orchestration):** Manages the conversational state, LangGraph multi-agent routing, and OpenAI interactions.
-2. **Rust (Deterministic Compute):** A high-speed Axum microservice that acts as an autonomous tool gateway. It handles property filtering, pricing math, booking date validation, and sentiment analysis. 
+**Conversational UI State Management** — The [LangGraph](https://langchain-ai.github.io/langgraph/) state machine tracks user context across nodes: `triage` → `property` → `confirmation` → `booking` → `payment`. The [`ChatState`](backend/app/services/graph.py:23) TypedDict persists filters, booking args, and payment state across turns. The graph uses conditional edges to route between nodes based on detected intent and tool results.
 
-This guarantees that our asynchronous Python web server remains lightning-fast and never freezes under heavy load.
+**Streaming LLM Responses** — The [`llm_reply_from_results()`](backend/app/services/agents.py:555) function supports Server-Sent Events streaming with token-level callbacks, allowing real-time response generation without blocking the event loop.
 
----
+**Hybrid RAG Pipeline** — Document retrieval in [`rag_pipeline.py`](backend/app/services/rag_pipeline.py) combines [ChromaDB](https://www.trychroma.com/) vector search with BM25 keyword ranking for FAQ lookups. The pipeline supports PDF ingestion with PyPDF2 and sentence-transformer embeddings.
 
-## 🗺️ System Architecture
+**Dynamic Configuration System** — All routing policies, guardrails, and vocabulary are loaded from YAML files at runtime via [`dynamic_config.py`](backend/app/services/dynamic_config.py). This allows behavioral changes without code deployment—modify `vocabulary.yaml` to add new intent triggers or adjust routing logic.
 
-```mermaid
-graph TD
-    User([User]) -->|Chat/Voice| UI[Chainlit UI]
-    UI -->|Session State| Python_Gateway[FastAPI + LangGraph]
-    
-    subgraph Python Backend
-        Python_Gateway -->|State Transitions| Agents((Agent Nodes))
-        Agents -->|Async| Supabase[(Supabase DB)]
-        Agents -->|Prompting| OpenAI[OpenAI API]
-    end
-    
-    subgraph Rust Backend
-        Agents -->|TOON Protocol| Rust_Gateway[Axum Autonomous Gateway]
-        Rust_Gateway -->|Search/Sort| Tools_Search[Property Search]
-        Rust_Gateway -->|Date Math| Tools_Valid[Booking Validator]
-        Rust_Gateway -->|NLP| Tools_Sentiment[Sentiment Analysis]
-    end
+## Technologies and Libraries
+
+**Core Stack**
+
+- [FastAPI](https://fastapi.tiangolo.com/) — Async Python web framework for the main API layer
+- [LangGraph](https://langchain-ai.github.io/langgraph/) — Stateful orchestration framework for multi-agent workflows
+- [Axum](https://docs.rs/axum/latest/axum/) — Ergonomic Rust web framework with middleware support
+- [Tokio](https://tokio.rs/) — Rust async runtime with work-stealing scheduler
+- [Supabase](https://supabase.com/) — PostgreSQL database with realtime subscriptions and auth
+- [OpenAI API](https://platform.openai.com/docs/) — GPT-4o-mini for structured intent classification and response generation
+
+**AI/NLP Libraries**
+
+- [spaCy](https://spacy.io/) — Industrial-strength NLP for entity extraction (dates, emails, phone numbers, names)
+- [sentence-transformers](https://www.sbert.net/) — Hugging Face embeddings for semantic search
+- [VADER Sentiment](https://github.com/cjhutto/vaderSentiment) — Lexicon-based sentiment analysis for user messages
+- [ChromaDB](https://www.trychroma.com/) — Vector database for document embeddings
+- [BM25](https://pypi.org/project/rank-bm25/) — Probabilistic keyword ranking for hybrid retrieval
+
+**Infrastructure and UI**
+
+- [Chainlit](https://docs.chainlit.io/) — Python framework for building conversational interfaces; handles the web-based chat UI
+- [Stripe Python SDK](https://stripe.com/docs/api) — Payment processing and checkout session management
+- [Pydantic v2](https://docs.pydantic.dev/latest/) — Runtime validation for API payloads and configuration models
+- [OpenTelemetry](https://opentelemetry.io/) — Distributed tracing for request flows across Python and Rust components
+
+**Rust Crates**
+
+- `axum` — Web framework with typed request handlers and middleware
+- `tokio` — Async runtime with multi-threaded scheduler
+- `tower-http` — HTTP middleware including CORS
+- `serde` / `serde_json` — Serialization with derive macros
+- `chrono` — Date/time handling with timezone support
+- `uuid` — UUID generation for booking IDs
+- `tracing` — Structured logging with context propagation
+- `toml` — Configuration file parsing
+
+## Project Structure
+
+```
+Hotel booking/
+├── backend/
+│   ├── app/
+│   │   ├── services/
+│   │   │   ├── agents.py          # Intent routing and agent logic
+│   │   │   ├── graph.py           # LangGraph state machine
+│   │   │   ├── nlp_engine.py      # spaCy-based entity extraction
+│   │   │   ├── rag_pipeline.py    # Vector + BM25 retrieval
+│   │   │   ├── dynamic_config.py  # YAML-based policy loading
+│   │   │   └── ...
+│   │   └── route/
+│   │       └── chat.py            # FastAPI chat endpoints
+│   ├── rust_gateway/
+│   │   ├── src/
+│   │   │   ├── main.rs            # Axum server with tool routing
+│   │   │   ├── gateway.rs         # Request processing logic
+│   │   │   ├── tools/             # Tool implementations (search, pricing, etc.)
+│   │   │   ├── cache.rs           # TTL-based in-memory cache
+│   │   │   └── toon.rs            # TOON serialization codec
+│   │   └── Cargo.toml
+│   ├── infrastructure/
+│   │   ├── database/              # Schema migrations and seed data
+│   │   ├── deployment_templates/  # Docker/k8s manifests
+│   │   └── supabase/              # Supabase configuration
+│   └── chatbot.py                 # CLI entry point for local testing
+├── frontend/
+│   ├── chainlit_app.py            # Chainlit UI application
+│   └── public/                    # Static assets
+└── data/
+    └── properties/                # CSV property listings
 ```
 
-## 🤖 Agent Workflow (LangGraph)
-Our agentic framework uses a robust state machine to preserve context. If a user asks an FAQ question in the middle of a booking, the system safely routes them to the FAQ agent and seamlessly brings them back to complete their booking.
+**Notable Directories**
 
-```mermaid
-flowchart LR
-    Start((User Input)) --> Triage[Triage Agent]
-    Triage -->|Hi| G[Greeting Agent]
-    Triage -->|Policy?| F[FAQ Agent]
-    Triage -->|Find a home| P[Property Agent]
-    Triage -->|I want this one| C[Confirmation Agent]
-    Triage -->|Check-in/Out| S[Status Agent]
-    
-    C <-->|Slot Filling| C
-    C -->|Confirmed| B[Booking Agent]
-    B -->|Checkout| Pay[Payment Agent]
-    
-    F -->|Context Preserved| C
-```
-
-## ⚙️ Core Technical Innovations
-
-### 1. The Rust Autonomous Gateway
-The Rust microservice (`/execute` endpoint) does not rely on strict JSON schemas. It accepts arbitrary payloads and uses heuristic scoring to infer the Python agent's intent. It dynamically routes the data to specific internal Rust tools (Search, Validation, Pricing) and returns a structured response.
-
-### 2. The TOON Protocol
-To minimize LLM hallucination and payload overhead, Python and Rust communicate using a custom serialization format called **TOON** *(Token-Optimized Object Notation)*. It utilizes strict indentation rules and eliminates redundant brackets and quotes, highly optimizing the data pipeline between the two languages.
-
-### 3. Soft-Coded NLP Engine
-We stripped out all brittle Regex and hardcoded dictionaries. The Python `nlp_engine.py` uses:
-- **spaCy (NER):** Dynamically extracts Names, Dates, Cities, and Entities.
-- **VADER Sentiment:** Evaluates user affirmations ("yes", "yup", "sure") and negations dynamically.
-- **Sentence-Transformers:** Performs zero-shot intent classification via cosine similarity.
-
-*(All heavy NLP calls are wrapped in `asyncio.to_thread` to preserve FastAPI's concurrency).*
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- **Python 3.12+**
-- **Rust & Cargo** (rustup default stable)
-- **uv** (Ultra-fast Python package installer: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- **Supabase CLI** (For local database)
-
-### 1. Python Environment Setup
-We use `uv` for lightning-fast dependency resolution and virtual environments.
-
-```bash
-# Clone the repository
-git clone https://github.com/muhammadhasaan82/Hotel_Booking.git
-cd Hotel_Booking
-
-# Create and activate a virtual environment with uv
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-uv pip install -r backend/requirements.txt
-
-# Download the spaCy English model
-uv run python -m spacy download en_core_web_sm
-
-# Setup your environment variables
-cp backend/app/services/env.example .env
-# Edit .env and add your OPENAI_API_KEY
-```
-
-### 2. Rust Gateway Setup
-Open a second terminal window to run the high-performance computational backend:
-
-```bash
-cd Hotel_Booking/infrastructure/rust_gateway
-
-# Build and run the Axum server
-cargo run --release
-```
-*The Rust Gateway will now listen securely on `http://localhost:3001`.*
-
-### 3. Run the Conversational UI
-Back in your Python terminal environment, ignite the Chainlit frontend:
-
-```bash
-# Start the Chainlit UI with hot-reloading
-uv run chainlit run backend/chainlit_app.py -w
-```
-*The dashboard will automatically open in your browser at `http://localhost:8000`.*
-
----
-
-## 📁 Folder Structure
-
-```text
-Hotel_Booking/
-|-- backend/
-|   |-- app/
-|   |   |-- services/       # Agents, NLP engine, RAG pipelines
-|   |   |-- route/          # FastAPI endpoints
-|   |   `-- config/         # YAML configuration files
-|   |-- tests/              # Pytest suite
-|   |-- main.py             # FastAPI entry point
-|   |-- chainlit_app.py     # Chainlit backend execution
-|   |-- chatbot.py          # CLI chatbot entry
-|   `-- requirements.txt    # Python dependencies
-|-- frontend/
-|   |-- .chainlit/           # Chainlit UI config
-|   |-- public/              # Custom CSS/JS/logos
-|   `-- chainlit.md          # Chainlit UI welcome copy
-|-- infrastructure/
-|   |-- rust_gateway/        # Rust microservice
-|   |-- database/            # SQL schemas/migrations
-|   `-- supabase/            # Supabase configs
-|-- data/
-|   |-- Company policy.pdf
-|   |-- dataset.csv
-|   `-- chroma_faq/
-`-- scripts/
-    |-- execute_all_phases.py
-    `-- run_phases.py
-```
-
+- `backend/app/services/` — Core AI logic. The `agents.py` module contains the 1700-line routing engine with triage guards; `graph.py` defines the LangGraph state machine with 9 nodes and conditional edge routing.
+- `backend/rust_gateway/src/tools/` — Rust tool implementations. Each tool (`search`, `booking_validator`, `pricing`, `sentiment`, `fraud_check`) implements a common `Tool` trait for the registry pattern.
+- `backend/infrastructure/supabase/` — Database schema and Row Level Security policies. Uses Supabase's PostgreSQL with realtime subscriptions for booking status updates.
