@@ -1444,9 +1444,44 @@ async def payment_agent(args: Dict[str, Any]) -> Dict[str, Any]:
 async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, Any]:
     clean_filters = {k: v for k, v in filters.items() if not callable(v)}
     extracted = extract_filters(user_text, clean_filters)
-    prop_type = extract_property_type(user_text)
     user_tl = (user_text or "").lower().strip()
     requested_city = extracted.get("city") or extracted.get("location")
+    
+    # Extract property type - use existing from filters if user only provided city
+    prop_type = extract_property_type(user_text)
+    if not prop_type:
+        prop_type = clean_filters.get("property_type") or clean_filters.get("preferred_property_type")
+
+    # 🛑 FIX: Force AI to ask for city if not provided
+    # But FIRST save the property_type so we remember it for next turn
+    if not requested_city:
+        # If user mentioned a property type, save it to filters for next turn
+        if prop_type and "property_type" not in extracted:
+            extracted["property_type"] = prop_type
+        
+        def _city_list_text() -> str:
+            cities = get_available_cities()
+            if not cities:
+                return "San Diego, New York, Miami"
+            lines = []
+            for i in range(0, len(cities), 5):
+                lines.append(", ".join(cities[i:i + 5]))
+            return "\n".join(lines)
+        
+        return {
+            "results": [],
+            "filters": extracted,
+            "reply": (
+                "I'd be happy to help you find the perfect property! "
+                "To get started, could you please tell me which city or location you're looking in?\n\n"
+                f"Here are some popular destinations: {_city_list_text()}"
+            ),
+        }
+
+    # 🛑 FIX: If user provided city but no new property type, use the one from filters
+    # This remembers "apartment" from "find me an apartment" when user says "new york"
+    if not prop_type and clean_filters.get("property_type"):
+        prop_type = clean_filters.get("property_type")
 
     # 🛑 FIX: Define these helpers at the TOP so they are available to the shields below 🛑
     def _city_list_text() -> str:

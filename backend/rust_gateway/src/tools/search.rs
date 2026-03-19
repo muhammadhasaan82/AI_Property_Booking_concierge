@@ -153,6 +153,15 @@ impl Tool for PropertySearchTool {
                 let rating_b = b.get("rating").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
             });
+
+            // Dynamic result limiting to protect token limits
+            let total_count = results.len();
+            if total_count > 100 {
+                // Too many results - cap at 100
+                results.truncate(100);
+            }
+            // If 11-30 results, show all - no limit needed for small result sets
+            // If 10 or less, show all - no limit needed
         }
 
         json!({
