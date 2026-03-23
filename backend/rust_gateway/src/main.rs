@@ -4,6 +4,7 @@ mod cache;
 mod toon;
 mod config;
 mod cag;
+mod rate_limiter;
 
 use crate::tools::Tool;
 use axum::{
@@ -272,6 +273,8 @@ async fn main() {
         .route("/tools/sentiment", post(tool_sentiment))
         .route("/tools/fraud", post(tool_fraud))
         .layer(DefaultBodyLimit::disable())
+        // Phase 3: Per-IP rate limiter (anomaly detection)
+        .layer(rate_limiter::RateLimitLayer::from_env())
         .layer(cors)
         .with_state(state);
 
