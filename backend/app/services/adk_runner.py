@@ -5,20 +5,29 @@ ADK 2.0 Runner — Execution bridge between Chainlit and the ADK SequentialAgent
 Manages per-user sessions via InMemorySessionService and provides
 `run_adk_turn()` as the single async entry point for the Chainlit UI.
 
+Phase 2: Core ADK pipeline.
+Phase 3: DPO telemetry capture + tool-loop anomaly detection.
+
 Feature flag: ADK_ENABLED (env var, default "1"). Set to "0" to fall back
 to the V1 LangGraph pipeline (run_chat_graph).
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import logging
 import os
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai.types import Content, Part
 
 from .guardrails import sanitize_input, sanitize_output
+from . import anomaly
+from . import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -112,14 +121,41 @@ async def run_adk_turn(
 
     # --- Execute the pipeline ---
     user_content = Content(parts=[Part(text=cleaned_message)])
+    t0 = time.monotonic()
 
     final_reply = ""
+    tool_calls_log: List[Dict[str, Any]] = []
+    anomaly_triggered = False
+
     try:
         async for event in runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=user_content,
         ):
+            # --- Phase 3: Capture tool call events for telemetry ---
+            tool_name, tool_params = _extract_tool_call(event)
+            if tool_name:
+                # Anomaly check BEFORE recording
+                if anomaly.check_tool_loop(session_id, tool_name, tool_params):
+                    anomaly_triggered = True
+                    tool_calls_log.append({
+                        "tool": tool_name,
+                        "params_hash": hashlib.md5(
+                            json.dumps(tool_params, sort_keys=True, default=str).encode()
+                        ).hexdigest()[:12],
+                        "result_status": "anomaly_blocked",
+                    })
+                    break
+                anomaly.record_tool_call(session_id, tool_name, tool_params)
+                tool_calls_log.append({
+                    "tool": tool_name,
+                    "params_hash": hashlib.md5(
+                        json.dumps(tool_params, sort_keys=True, default=str).encode()
+                    ).hexdigest()[:12],
+                    "result_status": "ok",
+                })
+
             if event.is_final_response():
                 if event.content and event.content.parts:
                     final_reply = "".join(
@@ -128,9 +164,14 @@ async def run_adk_turn(
                 break
     except Exception as e:
         logger.error("[ADK] Pipeline execution error: %s", e, exc_info=True)
-        # Fall back to V1 on error
         logger.warning("[ADK] Falling back to V1 pipeline due to error")
         return await _v1_fallback(message)
+
+    latency_ms = (time.monotonic() - t0) * 1000.0
+
+    # --- Phase 3: Anomaly — return graceful fallback ---
+    if anomaly_triggered:
+        final_reply = anomaly.GRACEFUL_FALLBACK_REPLY
 
     # --- Try to get final_reply from session state if event didn't have it ---
     if not final_reply:
@@ -153,15 +194,48 @@ async def run_adk_turn(
     # --- Sanitize output ---
     final_reply = sanitize_output(final_reply)
 
-    # --- Best-effort chat logging ---
+    # --- Phase 3: Fire-and-forget telemetry + chat logging ---
+    try:
+        asyncio.create_task(
+            telemetry.log_trajectory(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=cleaned_message,
+                tool_calls=tool_calls_log,
+                final_reply=final_reply,
+                latency_ms=latency_ms,
+            )
+        )
+    except Exception:
+        pass
+
     try:
         from .db_logging import log_chat
-        import asyncio
         asyncio.create_task(log_chat(cleaned_message, final_reply))
     except Exception:
         pass
 
     return final_reply
+
+
+def _extract_tool_call(event: Any) -> tuple:
+    """Extract tool name and params from an ADK event, if it's a tool call.
+
+    Returns (tool_name, tool_params) or (None, None).
+    """
+    try:
+        # ADK events with function calls have content.parts with function_call
+        if event.content and event.content.parts:
+            for part in event.content.parts:
+                fc = getattr(part, "function_call", None)
+                if fc:
+                    name = getattr(fc, "name", None)
+                    args = getattr(fc, "args", None)
+                    if name:
+                        return (name, args or {})
+    except Exception:
+        pass
+    return (None, None)
 
 
 async def _v1_fallback(message: str) -> str:
