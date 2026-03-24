@@ -9,36 +9,36 @@ from typing import Dict, Any, List, Optional, Callable
 
 import httpx
 from dotenv import load_dotenv
-from .tracing import span
+from ..observability.tracing import span
 import logging
 
 logger = logging.getLogger(__name__)
 
-from .search import property_search
-from .booking import (
+from ..components.search import property_search
+from ..services.booking import (
     create_booking,
     update_booking_status,
     get_or_create_user,
     get_booking_status,
 )
-from .faq import faq_lookup
+from ..services.faq import faq_lookup
 from app.services import confirmation_helpers
-from .whatsapp import send_payment_link_async
-from .nlp_extractor import extract_filters, extract_property_type, KNOWN_CITIES, CITY_ALIASES
-from . import nlp_engine
-from .db_logging import (
+from ..services.whatsapp import send_payment_link_async
+from ..components.nlp_extractor import extract_filters, extract_property_type, KNOWN_CITIES, CITY_ALIASES
+from ..components import nlp_engine
+from ..observability.db_logging import (
     insert_booking_details,
     insert_successful_booking,
     get_successful_booking_status,
 )
 import app.services.config as config
-from .dynamic_config import get_routing_policies, get_vocabulary
-from .state_keys import SK, STATE_KEYS
+from ..services.dynamic_config import get_routing_policies, get_vocabulary
+from ..services.state_keys import SK, STATE_KEYS
 
 # -----------------------
 # Load env
 # -----------------------
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 env_path = _REPO_ROOT / ".env"
 if env_path.exists():
     load_dotenv(env_path)
@@ -382,7 +382,7 @@ def _looks_like_property_search(t: str) -> bool:
 
 def get_available_cities() -> List[str]:
     """Get list of unique cities from the dataset for display."""
-    from .nlp_extractor import KNOWN_CITIES
+    from ..components.nlp_extractor import KNOWN_CITIES
     cities = sorted([c.title() for c in KNOWN_CITIES if c and len(c) > 2])
     seen = set()
     unique_cities = []
@@ -1104,7 +1104,7 @@ def faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """Enhanced FAQ agent that uses semantic search on policy documents"""
     # Try the enhanced FAQ system first
     try:
-        from .faq_enhanced import enhanced_faq_agent
+        from ..components.faq_enhanced import enhanced_faq_agent
 
         result = enhanced_faq_agent(user_text, context)
         return result
@@ -1141,7 +1141,7 @@ async def booking_agent(args: Dict[str, Any]) -> Dict[str, Any]:
     # If the gateway is unreachable, skip validation and proceed
     # ──────────────────────────────────────────────────────────
     try:
-        from .rust_client import validate_booking
+        from .tools.rust_client import validate_booking
 
         rust_validation = await validate_booking(
             property_id=args.get("property_id", ""),
@@ -1356,7 +1356,7 @@ async def status_agent(user_text: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
     # 🛑 MASTER SHIELD: Intercept Cancellation Requests 🛑
     if "cancel" in user_text.lower() or "delete" in user_text.lower():
-        from .booking import delete_booking
+        from ..services.booking import delete_booking
         res = await delete_booking(booking_id)
         if res.get("ok"):
             return {"tool_result": {"ok": True, "deleted": True}, "reply": f"✅ Booking `{booking_id}` has been successfully cancelled."}
@@ -1606,7 +1606,7 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
 
     # Detect unknown city mentions like "find apartment in lisbon" when city isn't in dataset.
     if not requested_city:
-        from .nlp_extractor import KNOWN_CITIES, CITY_ALIASES
+        from ..components.nlp_extractor import KNOWN_CITIES, CITY_ALIASES
         candidate = None
         nlp_fb = _nlp_fallback()
         m = re.search(nlp_fb.city_candidate_prefix_pattern, user_tl) if nlp_fb.city_candidate_prefix_pattern else None
@@ -1634,8 +1634,8 @@ async def property_agent(user_text: str, filters: Dict[str, Any]) -> Dict[str, A
     # Try Rust gateway for property search and fall back to Python search.
     results = None
     try:
-        from .rust_client import search_properties
-        from .search import _DATASET
+        from .tools.rust_client import search_properties
+        from ..components.search import _DATASET
 
         rust_result = await search_properties(
             location=requested_city or "",

@@ -135,7 +135,7 @@ async def _mirror_supabase(
 ) -> bool:
     """Best-effort mirror to Supabase via db_client."""
     try:
-        from . import db_client
+        from ..services import db_client
         await db_client.execute(
             """
             INSERT INTO public.dpo_trajectories

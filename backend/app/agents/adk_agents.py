@@ -75,8 +75,8 @@ async def search_properties(
         property_type: Type of property — apartment, house, villa, condo, loft, studio, townhouse (optional).
         amenities: Comma-separated list of required amenities like wifi, pool, parking (optional).
     """
-    from .rust_client import search_properties as rust_search
-    from .search import property_search, _DATASET
+    from .tools.rust_client import search_properties as rust_search
+    from ..components.search import property_search, _DATASET
 
     amenity_list = [a.strip() for a in (amenities or "").split(",") if a.strip()] or None
 
@@ -151,7 +151,7 @@ async def check_faq(question: str) -> dict:
     Args:
         question: The user's policy or FAQ question.
     """
-    from .rust_client import execute_tool
+    from .tools.rust_client import execute_tool
 
     # Send to Rust gateway — the CAG layer will intercept known policies
     try:
@@ -168,7 +168,7 @@ async def check_faq(question: str) -> dict:
 
     # Python fallback: enhanced FAQ with RAG
     try:
-        from .faq_enhanced import enhanced_faq_agent
+        from ..components.faq_enhanced import enhanced_faq_agent
         faq_result = enhanced_faq_agent(question, {})
         reply = faq_result.get("reply", "")
         if reply:
@@ -177,7 +177,7 @@ async def check_faq(question: str) -> dict:
         pass
 
     # Basic fallback
-    from .faq import faq_lookup
+    from ..services.faq import faq_lookup
     ans = faq_lookup(question)
     if ans:
         return {"status": "answered", "answer": ans, "source": "basic_faq"}
@@ -198,8 +198,8 @@ async def check_booking_status(booking_id: str) -> dict:
     Args:
         booking_id: The booking ID (UUID format).
     """
-    from .booking import get_booking_status
-    from .db_logging import get_successful_booking_status
+    from ..services.booking import get_booking_status
+    from ..observability.db_logging import get_successful_booking_status
 
     try:
         r = await get_booking_status(booking_id)
@@ -255,7 +255,7 @@ async def trigger_checkout_flow(
         user_text: The user's latest message.
         session_state_json: JSON string of the current booking session state (filters, booking_args, etc.).
     """
-    from .checkout_graph import run_checkout_flow
+    from ..services.checkout_graph import run_checkout_flow
 
     try:
         session_state = json.loads(session_state_json) if session_state_json else {}

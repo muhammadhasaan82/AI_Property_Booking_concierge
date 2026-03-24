@@ -31,9 +31,9 @@ except Exception:  # noqa: BLE001 - package may not be installed in all envs
 
 # Load environment variables
 from dotenv import load_dotenv
-from .dynamic_config import get_vocabulary
+from ..services.dynamic_config import get_vocabulary
 
-env_path_root = Path(__file__).resolve().parents[3] / ".env"
+env_path_root = Path(__file__).resolve().parents[2] / ".env"
 env_path_services = Path(__file__).parent / ".env"
 
 if env_path_root.exists():

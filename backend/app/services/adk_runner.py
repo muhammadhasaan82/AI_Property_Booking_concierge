@@ -25,9 +25,9 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai.types import Content, Part
 
-from .guardrails import sanitize_input, sanitize_output
-from . import anomaly
-from . import telemetry
+from ..security.guardrails import sanitize_input, sanitize_output
+from ..security import anomaly
+from ..observability import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def _get_runner() -> Runner:
     """Lazily initialize the ADK Runner and session service."""
     global _session_service, _runner
     if _runner is None:
-        from .adk_agents import root_agent
+        from ..agents.adk_agents import root_agent
 
         _session_service = InMemorySessionService()
         _runner = Runner(
@@ -210,7 +210,7 @@ async def run_adk_turn(
         pass
 
     try:
-        from .db_logging import log_chat
+        from ..observability.db_logging import log_chat
         asyncio.create_task(log_chat(cleaned_message, final_reply))
     except Exception:
         pass

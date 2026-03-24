@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional, List
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from app.services.graph import run_chat_graph
-from app.services.search import property_search
+from app.components.search import property_search
 from app.services.booking import create_booking, update_booking_status, get_booking_status
 from app.services.faq import faq_lookup
 

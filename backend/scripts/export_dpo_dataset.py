@@ -30,7 +30,7 @@ sys.path.insert(0, str(_BACKEND_ROOT))
 
 from dotenv import load_dotenv
 
-_REPO_ROOT = _BACKEND_ROOT.parent
+_REPO_ROOT = _BACKEND_ROOT  # scripts/ is now at root level
 _env_path = _REPO_ROOT / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
