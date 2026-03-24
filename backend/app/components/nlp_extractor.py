@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Set, Tuple
 
 import app.services.config as config
-from .dynamic_config import get_thresholds
+from ..services.dynamic_config import get_thresholds
 
 # ------------------------------- Utils -------------------------------
 

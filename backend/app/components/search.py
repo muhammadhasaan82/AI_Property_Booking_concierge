@@ -5,9 +5,9 @@ import csv
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from .config import SEED_PROPERTY_TYPES
+from ..services.config import SEED_PROPERTY_TYPES
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _DATASET_PATHS = [
     _REPO_ROOT / "backend" / "data" / "dataset.csv",      # correctly resolve after moving data to backend/
     _REPO_ROOT / "data" / "dataset.csv",                  # fallback 
