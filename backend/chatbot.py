@@ -75,7 +75,7 @@ _maybe_auto_supabase()
 from app.services.graph import run_chat_graph
 from app.services.booking import create_booking, update_booking_status
 from app.services.faq import faq_lookup
-from app.services.search import property_search
+from app.components.search import property_search
 from app.services.adk_runner import run_adk_turn, ADK_ENABLED
 
 

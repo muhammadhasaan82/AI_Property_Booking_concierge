@@ -127,7 +127,7 @@ def rewrite_query(user_text: str) -> str:
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "gpt-4o-mini",
+                "model": "gpt-5-nano",
                 "temperature": 0,
                 "max_tokens": 80,
                 "messages": [
