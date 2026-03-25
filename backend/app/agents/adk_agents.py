@@ -3,7 +3,7 @@
 ADK 2.0 — Nested Hybrid Graph (Phase 2: V2 Brain)
 
 Dual-Model Architecture:
-  Node 1 (triage_router)  → GPT-5 Nano via LiteLLM  (temperature=0.3, top_p=0.95, top_k=50)
+  Node 1 (triage_router)  → GPT-5 Nano via LiteLLM  (temperature=1, top_p=0.95, top_k=50)
   Node 2 (concierge_voice) → Llama-3.3-70B via Groq   (temperature=0.6)
 
 The SequentialAgent pipeline: triage_router → concierge_voice.
@@ -39,8 +39,8 @@ voice_llm = LiteLlm(model=VOICE_MODEL)
 # ---------------------------------------------------------------------------
 # Generation configs
 # ---------------------------------------------------------------------------
-ROUTER_CONFIG = genai_types.GenerateContentConfig(
-    temperature=0.3,
+DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
+    temperature=1,
     top_k=50,
 )
 
