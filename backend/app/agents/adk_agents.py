@@ -15,8 +15,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import csv
+from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 from google.adk.agents import LlmAgent
 from google.adk.agents.sequential_agent import SequentialAgent
 from google.adk.models.lite_llm import LiteLlm
@@ -54,6 +55,27 @@ VOICE_CONFIG = genai_types.GenerateContentConfig(
 # ADK auto-wraps plain Python functions as FunctionTool.
 # Docstrings become the tool description the LLM sees.
 # ═══════════════════════════════════════════════════════════════════════════
+
+def get_all_available_cities() -> str:
+    """Use this tool ONLY when the user asks for a list of available cities or locations."""
+    try:
+        csv_path = Path(__file__).resolve().parents[2] / "data" / "dataset.csv"
+        cities = set()
+        
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            col_name = 'city' if 'city' in reader.fieldnames else 'location'
+            
+            for row in reader:
+                val = row.get(col_name)
+                if val:
+                    cities.add(val.strip())
+        
+        city_list = sorted(list(cities))
+        return f"We have properties in these {len(city_list)} cities: " + ", ".join(city_list)
+    except Exception as e:
+        return f"Could not retrieve cities. Error: {str(e)}"
+
 
 async def search_properties(
     city: str,
@@ -343,6 +365,7 @@ triage_router = LlmAgent(
         check_booking_status,
         trigger_checkout_flow,
         escalate_to_human,
+        get_all_available_cities,
     ],
     output_key="router_output",
     generate_content_config=DISPATCHER_CONFIG,
