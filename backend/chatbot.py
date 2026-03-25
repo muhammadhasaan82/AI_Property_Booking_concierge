@@ -76,6 +76,7 @@ from app.services.graph import run_chat_graph
 from app.services.booking import create_booking, update_booking_status
 from app.services.faq import faq_lookup
 from app.services.search import property_search
+from app.services.adk_runner import run_adk_turn, ADK_ENABLED
 
 
 def _run_async(coro):
@@ -133,25 +134,18 @@ async def cmd_chat(args: argparse.Namespace) -> int:
         overrides = _parse_kv_list(args.with_kv)
         current_filters = {**session_filters, **overrides}
 
-        result = await run_chat_graph(
-            message=user,
-            filters=current_filters,
-            booking_args=session_booking,
-            status_args=session_status,
-            payment_args=session_payment,
+        # Create a static session ID for the CLI test
+        session_id = "cli_test_session_001"
+        user_id = args.user_id if hasattr(args, 'user_id') and args.user_id else "cli_user"
+
+        # Run the message through the ADK
+        reply = await run_adk_turn(
+            user_id=user_id,
+            session_id=session_id,
+            message=user
         )
 
-        # Persist states returned by graph natively into local dicts
-        if result.get("filters"):
-            session_filters = result["filters"]
-        if result.get("booking_args"):
-            session_booking = result["booking_args"]
-        if result.get("status_args"):
-            session_status = result["status_args"]
-        if result.get("payment_args"):
-            session_payment = result["payment_args"]
-
-        print(f"\n[BOT] ({result.get('intent','?')}): {result.get('reply','(no reply)')}")
+        print(f"\nConcierge: {reply}\n")
 
 async def cmd_say(args: argparse.Namespace) -> int:
     def stream_cb(chunk: str):
