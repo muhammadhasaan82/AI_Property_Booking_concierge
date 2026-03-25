@@ -42,7 +42,6 @@ voice_llm = LiteLlm(model=VOICE_MODEL)
 # ---------------------------------------------------------------------------
 DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
     temperature=1,
-    top_k=50,
 )
 
 VOICE_CONFIG = genai_types.GenerateContentConfig(
