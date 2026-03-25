@@ -39,9 +39,8 @@ voice_llm = LiteLlm(model=VOICE_MODEL)
 # ---------------------------------------------------------------------------
 # Generation configs
 # ---------------------------------------------------------------------------
-DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
+ROUTER_CONFIG = genai_types.GenerateContentConfig(
     temperature=0.3,
-    top_p=0.95,
     top_k=50,
 )
 
