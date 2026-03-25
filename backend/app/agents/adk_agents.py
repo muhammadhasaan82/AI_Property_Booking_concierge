@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
-DISPATCHER_MODEL = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-4o-mini")
+DISPATCHER_MODEL = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-5-nano")
 VOICE_MODEL = os.getenv("ADK_VOICE_MODEL", "groq/llama-3.3-70b-versatile")
 
 # ---------------------------------------------------------------------------

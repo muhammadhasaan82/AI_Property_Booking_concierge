@@ -42,7 +42,7 @@ elif env_path_services.exists():
     load_dotenv(env_path_services)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-5-nano")
 
 # Initialize ChromaDB path
 CHROMA_PATH = Path(__file__).resolve().parents[2] / "data" / "chroma_faq"

@@ -45,7 +45,7 @@ chainlit run frontend/chainlit_app.py --port 8501
 | `GROQ_API_KEY` | Yes | Groq API key (Llama model) |
 | `DATABASE_URL` | No | PostgreSQL URL (Supabase) |
 | `ADK_ENABLED` | No | `1` = V2 ADK pipeline, `0` = V1 fallback |
-| `ADK_DISPATCHER_MODEL` | No | Default: `openai/gpt-4o-mini` |
+| `ADK_DISPATCHER_MODEL` | No | Default: `openai/gpt-5-nano` |
 | `ADK_VOICE_MODEL` | No | Default: `groq/llama-3.3-70b-versatile` |
 | `DPO_TELEMETRY_ENABLED` | No | Default: `1` |
 | `RUST_GATEWAY_URL` | No | Default: `http://localhost:3001` |
