@@ -39,7 +39,7 @@ async def execute_tool(data: Dict[str, Any], context: Optional[Dict[str, Any]] =
         if context:
             payload["context"] = context
 
-        from . import toon
+        from app.services import toon
         toon_payload = toon.toon_encode(payload)
         headers = {
             "Content-Type": "application/toon",
