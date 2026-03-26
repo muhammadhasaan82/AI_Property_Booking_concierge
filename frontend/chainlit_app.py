@@ -16,12 +16,13 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-# Fix sys.path to allow importing from the backend directory
-_backend_root = Path(__file__).resolve().parents[1] / "backend"
+# Fix sys.path to allow importing from the project root (app/ lives here)
+_backend_root = Path(__file__).resolve().parents[1]
 sys.path.append(str(_backend_root))
 
 from app.services.graph import run_chat_graph
 from app.services.state_keys import SK
+from app.services.adk_runner import run_adk_turn, ADK_ENABLED
 
 # ---------------------------------------------------------------------------
 # Authentication - Password Login
@@ -315,16 +316,34 @@ async def on_chat_start():
 
 @cl.on_message
 async def on_message(message: cl.Message):
+    await _rename_thread(message, (message.content or "").strip())
+
+    msg = cl.Message(content="")
+    await msg.send()
+
+    # ── V2 ADK Pipeline ─────────────────────────────────────────
+    if ADK_ENABLED:
+        user_obj = cl.user_session.get("user")
+        user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
+        session_id = cl.user_session.get("id", "default_session")
+
+        reply = await run_adk_turn(
+            user_id=user_id,
+            session_id=session_id,
+            message=message.content,
+        )
+
+        msg.content = reply
+        await msg.update()
+        return
+
+    # ── V1 LangGraph Fallback ───────────────────────────────────
     filters = dict(cl.user_session.get("filters", {}) or {})
     booking_args = dict(cl.user_session.get("booking_args", {}) or {})
     status_args = dict(cl.user_session.get("status_args", {}) or {})
     payment_args = dict(cl.user_session.get("payment_args", {}) or {})
 
-    await _rename_thread(message, (message.content or "").strip())
-
     filters["stream"] = True
-    msg = cl.Message(content="")
-    await msg.send()
     filters["stream_callback"] = _make_stream_callback(msg)
 
     result = await run_chat_graph(

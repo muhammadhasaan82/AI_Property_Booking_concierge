@@ -80,3 +80,20 @@ pub fn load_vader_lexicon() -> VaderLexiconConfig {
     }
     VaderLexiconConfig::default()
 }
+
+pub fn load_cag_config() -> crate::cag::CagConfig {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+    let path = format!("{}/config/cag_policies.toml", manifest_dir);
+    if let Some(contents) = read_toml_file(&path) {
+        match toml::from_str::<crate::cag::CagConfig>(&contents) {
+            Ok(cfg) => {
+                tracing::info!("[CAG] Loaded {} policies from {}", cfg.policies.len(), path);
+                return cfg;
+            }
+            Err(err) => tracing::warn!("[CAG] Failed to parse {}: {}. CAG disabled.", path, err),
+        }
+    } else {
+        tracing::warn!("[CAG] Config not found at {}. CAG disabled (all queries pass through).", path);
+    }
+    crate::cag::CagConfig::default()
+}

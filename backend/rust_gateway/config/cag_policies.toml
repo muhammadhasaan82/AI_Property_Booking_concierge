@@ -1,0 +1,148 @@
+# CAG (Cache-Augmented Generation) Policy Store
+# Pre-computed FAQ answers served from RAM to bypass LLM generation.
+# Edit this file to add/update policies without recompiling the gateway.
+
+[settings]
+keyword_threshold = 0.6       # fraction of keywords that must match (0.0–1.0)
+fuzzy_threshold = 0.82         # Jaro-Winkler similarity threshold (0.0–1.0)
+ttl_seconds = 3600             # how long entries stay valid (1 hour)
+
+# ─────────────────────────────────────────────────────────────────────
+# Policies: each [[policies]] block is one cached FAQ answer.
+#   id                  — unique identifier for telemetry
+#   answer              — the pre-computed response returned to the user
+#   keywords            — trigger words; if enough match the query, it's a hit
+#   canonical_questions — reference phrasings for fuzzy matching fallback
+# ─────────────────────────────────────────────────────────────────────
+
+[[policies]]
+id = "check_in_time"
+answer = "Check-in is from 3:00 PM onwards. Early check-in may be available upon request, subject to availability. Please contact the property directly for arrangements."
+keywords = ["check-in", "check", "time", "arrive", "arrival", "early", "when"]
+canonical_questions = [
+    "what time is check-in",
+    "when can i check in",
+    "check-in time",
+    "what is the check-in time",
+    "when is check in",
+]
+
+[[policies]]
+id = "check_out_time"
+answer = "Check-out is by 11:00 AM. Late check-out may be available for an additional fee — please ask the property at least 24 hours in advance."
+keywords = ["check-out", "checkout", "leave", "departure", "late", "out"]
+canonical_questions = [
+    "what time is check-out",
+    "when do i check out",
+    "checkout time",
+    "when is check out",
+    "what is the check-out time",
+]
+
+[[policies]]
+id = "pet_policy"
+answer = "Pet policies vary by property. Some properties allow pets with a refundable deposit, while others do not permit animals. Check the specific property listing for details, or ask us to filter for pet-friendly options."
+keywords = ["pet", "pets", "dog", "cat", "animal", "animals", "allow"]
+canonical_questions = [
+    "do you allow pets",
+    "are pets allowed",
+    "can i bring my dog",
+    "pet policy",
+    "is it pet friendly",
+]
+
+[[policies]]
+id = "cancellation_policy"
+answer = "Free cancellation is available up to 48 hours before your check-in date for a full refund. Cancellations within 48 hours may incur a charge equal to the first night's stay. Non-refundable rates, where offered, are clearly marked at booking."
+keywords = ["cancel", "cancellation", "cancelling", "free", "policy", "48"]
+canonical_questions = [
+    "what is the cancellation policy",
+    "can i cancel my booking",
+    "how do i cancel",
+    "cancellation rules",
+    "is there free cancellation",
+]
+
+[[policies]]
+id = "refund_policy"
+answer = "Refunds for eligible cancellations are processed within 5–10 business days to your original payment method. If you paid via credit card, the refund timeline depends on your bank. For non-refundable bookings, no refund is issued."
+keywords = ["refund", "money", "back", "return", "reimburse", "reimbursement"]
+canonical_questions = [
+    "what is the refund policy",
+    "how do i get a refund",
+    "when will i get my money back",
+    "refund process",
+    "can i get a refund",
+]
+
+[[policies]]
+id = "wifi_info"
+answer = "Complimentary Wi-Fi is available at all listed properties. Connection details (network name and password) are provided upon check-in or in your booking confirmation email."
+keywords = ["wifi", "wi-fi", "internet", "password", "network", "connection"]
+canonical_questions = [
+    "is there wifi",
+    "what is the wifi password",
+    "do you have internet",
+    "is wifi free",
+    "how do i connect to wifi",
+]
+
+[[policies]]
+id = "smoking_policy"
+answer = "Smoking is not permitted inside any of our listed properties. Designated outdoor smoking areas may be available at select locations. A cleaning fee may apply if evidence of indoor smoking is found."
+keywords = ["smoke", "smoking", "cigarette", "vape", "vaping", "tobacco"]
+canonical_questions = [
+    "is smoking allowed",
+    "can i smoke inside",
+    "smoking policy",
+    "do you allow smoking",
+    "is it a non-smoking property",
+]
+
+[[policies]]
+id = "parking_info"
+answer = "Parking availability and pricing vary by property. Many properties offer free on-site parking, while urban locations may have paid garage options nearby. Check the property listing for specific parking details."
+keywords = ["parking", "park", "car", "garage", "vehicle", "lot"]
+canonical_questions = [
+    "is there parking",
+    "do you have parking",
+    "is parking free",
+    "where can i park",
+    "parking availability",
+]
+
+[[policies]]
+id = "security_deposit"
+answer = "Some properties require a refundable security deposit at check-in, typically ranging from $100 to $500. The deposit is returned within 7 days of check-out, provided no damages are found. Deposit requirements are listed on each property page."
+keywords = ["deposit", "security", "damage", "damages", "hold", "refundable"]
+canonical_questions = [
+    "is there a security deposit",
+    "how much is the deposit",
+    "do i need to pay a deposit",
+    "security deposit policy",
+    "when do i get my deposit back",
+]
+
+[[policies]]
+id = "payment_methods"
+answer = "We accept Visa, Mastercard, American Express, and Discover credit/debit cards. Payment is processed securely through Stripe. Some properties may also accept PayPal at checkout."
+keywords = ["payment", "pay", "credit", "card", "visa", "mastercard", "method", "methods", "stripe"]
+canonical_questions = [
+    "what payment methods do you accept",
+    "how can i pay",
+    "do you accept credit cards",
+    "payment options",
+    "can i pay with paypal",
+]
+
+[[policies]]
+id = "guest_id_requirement"
+answer = "All guests must present a valid government-issued photo ID at check-in. Acceptable forms include a passport, driver's license, or national identity card. The name on the ID should match the booking name."
+keywords = ["id", "identification", "passport", "license", "identity", "verify", "verification"]
+canonical_questions = [
+    "do i need id to check in",
+    "what id do i need",
+    "identification requirements",
+    "do i need a passport",
+    "id requirement for check-in",
+]
