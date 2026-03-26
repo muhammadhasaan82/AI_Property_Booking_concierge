@@ -2,7 +2,7 @@
 from typing import List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
-from app.services.search import property_search
+from app.components.search import property_search
 
 router = APIRouter()
 

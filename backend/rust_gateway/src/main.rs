@@ -3,6 +3,8 @@ mod tools;
 mod cache;
 mod toon;
 mod config;
+mod cag;
+mod rate_limiter;
 
 use crate::tools::Tool;
 use axum::{
@@ -23,6 +25,7 @@ use tower_http::cors::{Any, CorsLayer};
 struct AppState {
     registry: tools::ToolRegistry,
     cache: cache::Cache,
+    cag_store: cag::CagStore,
     thresholds: config::ThresholdsConfig,
     vader_lexicon: config::VaderLexiconConfig,
 }
@@ -71,7 +74,31 @@ async fn execute(
     let data = parsed.get("data").cloned().unwrap_or(parsed.clone());
     let context = parsed.get("context").cloned().unwrap_or(json!({}));
 
-    // Check cache first
+    // ── CAG Zero-Latency Intercept ──────────────────────────────────
+    // Check if this is a FAQ/policy query that can be answered from RAM.
+    if let Some(query) = data.get("question").and_then(|v| v.as_str()) {
+        if let Some(hit) = state.cag_store.try_intercept(query) {
+            tracing::info!(
+                "[CAG] Cache Hit: Intercepted query '{}' (policy={}, match={}, score={:.3})",
+                query, hit.policy_id, hit.match_type, hit.score
+            );
+            let cag_response = json!({
+                "ok": true,
+                "intent": "faq",
+                "cached": true,
+                "cag": true,
+                "policy_id": hit.policy_id,
+                "match_type": hit.match_type,
+                "match_score": hit.score,
+                "answer": hit.answer,
+            });
+            return make_response(&headers, &cag_response);
+        } else {
+            tracing::info!("[CAG] Cache Miss: Passing to database for query '{}'", query);
+        }
+    }
+
+    // ── Generic result cache ────────────────────────────────────────
     let cache_key = cache::cache_key("execute", &data);
     if let Some(cached) = state.cache.get(&cache_key) {
         let mut result = cached;
@@ -184,6 +211,11 @@ async fn cache_stats(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(state.cache.stats())
 }
 
+/// CAG policy stats.
+async fn cag_stats(State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(state.cag_store.stats())
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -204,12 +236,18 @@ async fn main() {
     let registry = tools::build_default_registry(&thresholds, &vader_lexicon);
     tracing::info!("Registered {} tools", registry.list_tools().len());
 
+    // Build CAG store
+    let cag_config = config::load_cag_config();
+    let cag_store = cag::CagStore::new(cag_config);
+    tracing::info!("[CAG] Initialized with {} policies", cag_store.policy_count());
+
     // Build cache
     let cache = cache::Cache::new(10_000);
 
     let state = Arc::new(AppState {
         registry,
         cache,
+        cag_store,
         thresholds,
         vader_lexicon,
     });
@@ -227,6 +265,7 @@ async fn main() {
         .route("/execute", post(execute))
         .route("/tools", get(list_tools))
         .route("/cache/stats", get(cache_stats))
+        .route("/cag/stats", get(cag_stats))
         // Direct tool endpoints
         .route("/tools/search", post(tool_search))
         .route("/tools/validate-booking", post(tool_validate_booking))
@@ -234,6 +273,8 @@ async fn main() {
         .route("/tools/sentiment", post(tool_sentiment))
         .route("/tools/fraud", post(tool_fraud))
         .layer(DefaultBodyLimit::disable())
+        // Phase 3: Per-IP rate limiter (anomaly detection)
+        .layer(rate_limiter::RateLimitLayer::from_env())
         .layer(cors)
         .with_state(state);
 

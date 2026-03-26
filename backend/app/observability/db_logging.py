@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, Dict, Any
 
-from . import db_client
+from ..services import db_client
 
 
 async def log_chat(user_message: str, bot_response: str) -> bool:

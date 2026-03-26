@@ -6,14 +6,14 @@ import re
 import inspect
 import asyncio
 from langgraph.graph import StateGraph, END
-from .tracing import span
-from .db_logging import log_chat
-from .guardrails import sanitize_input, sanitize_output
-from . import nlp_engine
+from ..observability.tracing import span
+from ..observability.db_logging import log_chat
+from ..security.guardrails import sanitize_input, sanitize_output
+from ..components import nlp_engine
 
 logger = logging.getLogger(__name__)
 
-from .agents import (
+from ..agents.agents import (
     triage_intent,
     greeting_agent, faq_agent, property_agent, booking_agent, status_agent, payment_agent,
     confirmation_agent
@@ -67,7 +67,7 @@ def node_triage(state: ChatState) -> ChatState:
 
         # Lazy context enrichments (only evaluated if needed by policy)
         if ctx["has_booking_context"] and intent == "property_search":
-            from app.services.agents import _parse_name, _parse_phone, _parse_email, _parse_dates, _parse_guests, _detect_requested_fields
+            from app.agents.agents import _parse_name, _parse_phone, _parse_email, _parse_dates, _parse_guests, _detect_requested_fields
             ctx["has_field_data"] = bool(
                 _parse_name(user_text) or _parse_phone(user_text) or _parse_email(user_text) or
                 _parse_dates(user_text) or _parse_guests(user_text) or _detect_requested_fields(user_text)
@@ -82,7 +82,7 @@ def node_triage(state: ChatState) -> ChatState:
             ctx["lacks_explicit_status_keywords"] = not explicit
 
         if intent == "confirmation" and ctx["no_selected_property"] and ctx["no_awaiting_field"] and ctx["no_active_selection"]:
-            from app.services.agents import _parse_selection_index
+            from app.agents.agents import _parse_selection_index
             ctx["no_active_selection"] = _parse_selection_index(user_text) is None
 
         # --- Evaluate policies from dynamic_config ---
@@ -261,13 +261,13 @@ async def node_payment(state: ChatState) -> ChatState:
         return {**state, **out}
 
 def node_handoff(state: ChatState) -> ChatState:
-    from .agents import handoff_agent
+    from ..agents.agents import handoff_agent
     with span("node_handoff"):
         out = handoff_agent(state.get("user_text", ""), state.get("filters", {}) or {})
         return {**state, **out}
 
 def node_availability(state: ChatState) -> ChatState:
-    from .agents import availability_agent
+    from ..agents.agents import availability_agent
     with span("node_availability"):
         out = availability_agent(state.get("filters", {}) or {})
         return {**state, **out}

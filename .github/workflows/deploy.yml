@@ -21,13 +21,12 @@ jobs:
             # Pull latest changes
             git pull origin main
             
-            # Rebuild Rust Gateway
-            cd backend/infrastructure/database/rust_db_gateway
+            # Rebuild Rust Gateway (now at root level)
+            cd rust_gateway
             cargo build --release
+            cd ..
             
-            # Update Python dependencies
-            cd ../../../../
-            cd backend
+            # Update Python dependencies (run from root, not backend/)
             source .venv/bin/activate
             uv pip install -r requirements.txt
             
