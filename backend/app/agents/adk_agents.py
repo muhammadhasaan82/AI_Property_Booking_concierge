@@ -25,6 +25,10 @@ from google.genai import types as genai_types
 
 logger = logging.getLogger(__name__)
 
+# Disable LiteLLM telemetry and background logging to prevent TimeoutError
+os.environ["LITELLM_TELEMETRY"] = "False"
+os.environ["LITELLM_LOG"] = "ERROR"
+
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
@@ -339,12 +343,11 @@ async def escalate_to_human(reason: str) -> dict:
 
 TRIAGE_INSTRUCTION = """\
 You are a hotel booking concierge routing engine. Your ONLY job is to analyze
-the user's message and call the correct tool. You do NOT generate conversational
-responses. You ONLY output tool calls.
+the user's message and call the correct tool.
 
 ROUTING RULES:
 1. If the user asks about properties, cities, apartments, houses, or accommodation
-   → call `search_properties`
+   → call `search_properties` or `get_all_available_cities`
 2. If the user asks about policies, rules, check-in times, cancellation, refunds,
    wifi, pets, smoking, parking, payment methods, or any FAQ
    → call `check_faq`
@@ -356,10 +359,9 @@ ROUTING RULES:
 5. If the user asks to speak to a human or you cannot help
    → call `escalate_to_human`
 6. If the user says hello or greets you, respond with a brief greeting and ask how
-   you can help. This is the ONLY case where you generate text instead of a tool call.
+   you can help.
 
-NEVER generate long conversational responses. NEVER add pleasantries to tool calls.
-ALWAYS prefer calling a tool over generating text.
+CRITICAL: Once a tool returns a result, you MUST output that result as plain text so it can be passed to the voice agent. Do NOT call the same tool repeatedly. NEVER generate conversational pleasantries yourself.
 """
 
 triage_router = LlmAgent(
