@@ -55,7 +55,7 @@ VOICE_CONFIG = genai_types.GenerateContentConfig(
 # Docstrings become the tool description the LLM sees.
 # ═══════════════════════════════════════════════════════════════════════════
 
-def get_all_available_cities() -> str:
+def get_all_available_cities() -> dict:
     """Use this tool ONLY when the user asks for a list of available cities or locations."""
     try:
         csv_path = Path(__file__).resolve().parents[2] / "data" / "dataset.csv"
@@ -71,9 +71,18 @@ def get_all_available_cities() -> str:
                     cities.add(val.strip())
         
         city_list = sorted(list(cities))
-        return f"We have properties in these {len(city_list)} cities: " + ", ".join(city_list)
+        
+        return {
+            "status": "success",
+            "total_cities": len(city_list),
+            "cities_list": ", ".join(city_list),
+            "instruction": "Stop calling tools. Pass this exact list of cities to the voice agent to present to the user."
+        }
     except Exception as e:
-        return f"Could not retrieve cities. Error: {str(e)}"
+        return {
+            "status": "error", 
+            "message": f"Could not retrieve cities. Error: {str(e)}"
+        }
 
 
 async def search_properties(
