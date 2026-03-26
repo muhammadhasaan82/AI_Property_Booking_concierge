@@ -105,7 +105,7 @@ async def search_properties(
     apartments, houses, villas, or any accommodation.
 
     Args:
-        city: The city or location to search in (required).
+        city: The exact city name (required). CRITICAL: Preserve multi-word cities like "New York" completely. Do not treat "new" as an adjective.
         budget: Maximum nightly price in USD (optional).
         beds: Minimum number of bedrooms (optional).
         property_type: Type of property — apartment, house, villa, condo, loft, studio, townhouse (optional).
@@ -144,6 +144,14 @@ async def search_properties(
             beds=beds,
             property_type=property_type,
         )
+
+    # ---> STRICT PROPERTY TYPE FILTER <---
+    if results and property_type:
+        results = [
+            r for r in results
+            if r.get("property_type") and property_type.lower() in str(r.get("property_type")).lower()
+        ]
+    # --------------------------------------
 
     if not results:
         return {
