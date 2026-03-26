@@ -160,8 +160,8 @@ async def search_properties(
             "suggestion": "Try a different city, adjust budget, or broaden filters.",
         }
 
-    # Return top 10 for the LLM to present
-    top = results[:10]
+    # V2: Uncapped results. Show exactly what the database found.
+    top = results
     formatted = []
     for i, r in enumerate(top, 1):
         entry = {
