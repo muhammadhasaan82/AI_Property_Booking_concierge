@@ -927,73 +927,54 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
 
 
 def extract_cardinal(text: str) -> Optional[int]:
-    """Extract ordinal/cardinal number from text for selection index."""
+    """V2 Soft-Coded: Use the LLM's semantic reasoning to extract the selection index."""
     if not text:
         return None
     tl = text.strip().lower()
-    
-    # --- NATIVE STRUCTURAL FAST-PATH ---
+
+    # 1. Native Digit Check (Keep this ONLY for 0ms latency when the user types '9')
     if tl.isdigit():
         val = int(tl)
         return val if val >= 1 else None
-        
-    import re
-    fallback_m = re.search(r'\b(?:option|number|opt|choose|select|pick|go with)\s*(\d+)\b', tl)
-    if fallback_m:
-        val = int(fallback_m.group(1))
-        return val if val >= 1 else None
-    # -----------------------------------
 
-    vocab = _get_vocab()
-    has_selection_context = any(
-        re.search(rx, tl) is not None for rx in vocab.selection_context_patterns
+    # 2. V2 True Semantic Extraction (Self-Determination)
+    import httpx
+    import os
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    # We ask the LLM to figure out the math/language logic dynamically
+    system_prompt = (
+        "You are an extraction tool. The user is selecting an option from a numbered list. "
+        "Extract the number they are choosing based on their language. "
+        "Return ONLY the raw integer (e.g., '9'). If no selection is detected, return '0'."
     )
 
-    # Regex patterns for explicit selection
-    for rx in vocab.selection_patterns:
-        m = re.search(rx, tl)
-        if m:
-            val = int(m.group(1))
-            return val if val >= 1 else None
+    try:
+        payload = {
+            "model": "gpt-5-nano",
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+        }
 
-    # Ordinal words
-    ordinals = {str(k).lower(): int(v) for k, v in vocab.selection_ordinals.items()}
-    for word, idx in ordinals.items():
-        rendered = [tpl.format(word=word) for tpl in vocab.selection_ordinal_templates]
-        if (
-            tl in set(rendered)
-            or (has_selection_context and re.search(rf"\b{re.escape(word)}\b", tl))
-        ):
-            return idx
+        with httpx.Client(timeout=4.0) as client:
+            r = client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
 
-    # Cardinal words
-    cardinals = {str(k).lower(): int(v) for k, v in vocab.selection_cardinals.items()}
-    if tl in cardinals:
-        return cardinals[tl]
-    if any(re.search(rx, tl) for rx in vocab.selection_referential_patterns):
-        return None
-    if vocab.selection_cardinal_context_pattern and cardinals:
-        cardinals_alt = "|".join(re.escape(w) for w in cardinals.keys())
-        rx = vocab.selection_cardinal_context_pattern.replace("{cardinals}", cardinals_alt)
-        m = re.search(rx, tl)
-        if m:
-            return cardinals.get(m.group(1))
-
-    # spaCy ORDINAL/CARDINAL fallback
-    nlp = _get_spacy()
-    if nlp and has_selection_context:
-        doc = nlp(text)
-        entity_labels = tuple(_get_vocab().selection_entity_labels)
-        for ent in doc.ents:
-            if ent.label_ in entity_labels:
-                try:
-                    val = int(ent.text)
-                    if val >= 1:
-                        return val
-                except ValueError:
-                    mapped = ordinals.get(ent.text.lower()) or cardinals.get(ent.text.lower())
-                    if mapped:
-                        return mapped
+        if r.status_code == 200:
+            content = r.json()["choices"][0]["message"]["content"].strip()
+            if content.isdigit() and int(content) >= 1:
+                return int(content)
+    except Exception:
+        pass
 
     return None
 

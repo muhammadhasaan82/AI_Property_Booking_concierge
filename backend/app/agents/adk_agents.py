@@ -35,6 +35,9 @@ os.environ["LITELLM_LOG"] = "ERROR"
 DISPATCHER_MODEL = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-5-nano")
 VOICE_MODEL = os.getenv("ADK_VOICE_MODEL", "groq/llama-3.3-70b-versatile")
 
+# Bridge memory between V2 ADK and V1 Checkout Vault
+SHARED_SEARCH_RESULTS: List[dict] = []
+
 # ---------------------------------------------------------------------------
 # Dual-Model Backends (via LiteLLM — no Google Cloud dependency)
 # ---------------------------------------------------------------------------
@@ -165,6 +168,9 @@ async def search_properties(
         }
         formatted.append(entry)
 
+    global SHARED_SEARCH_RESULTS
+    SHARED_SEARCH_RESULTS = top
+
     return {
         "status": "success",
         "total_found": len(results),
@@ -290,10 +296,17 @@ async def trigger_checkout_flow(
     """
     from ..services.checkout_graph import run_checkout_flow
 
+    global SHARED_SEARCH_RESULTS
     try:
         session_state = json.loads(session_state_json) if session_state_json else {}
     except (json.JSONDecodeError, TypeError):
         session_state = {}
+
+    # Inject the fresh search results into the V1 Vault's memory
+    if "filters" not in session_state:
+        session_state["filters"] = {}
+    if SHARED_SEARCH_RESULTS:
+        session_state["filters"]["last_results"] = SHARED_SEARCH_RESULTS
 
     result = await run_checkout_flow(
         user_text=user_text,
