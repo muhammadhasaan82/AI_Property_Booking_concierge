@@ -23,6 +23,10 @@ from google.adk.agents.sequential_agent import SequentialAgent
 from google.adk.models.lite_llm import LiteLlm
 from google.genai import types as genai_types
 
+# Disable LiteLLM telemetry at Python level
+import litellm
+litellm.telemetry = False
+
 logger = logging.getLogger(__name__)
 
 # Disable LiteLLM telemetry and background logging to prevent TimeoutError
