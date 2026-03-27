@@ -19,7 +19,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -75,28 +75,36 @@ async def run_adk_turn(
     user_id: str,
     session_id: str,
     message: str,
-) -> str:
-    """Process a single conversation turn through the ADK pipeline.
+) -> AsyncGenerator[str, None]:
+    """Process a single conversation turn, yielding text chunks as an async generator.
+
+    Two-Speed Rule:
+      - triage_router events (tool calls, routing) are silently consumed.
+      - concierge_voice text deltas are yielded immediately to the caller.
 
     Args:
         user_id: Unique user identifier (from Chainlit session).
         session_id: Conversation thread ID.
         message: The user's message text.
 
-    Returns:
-        The agent's response string.
+    Yields:
+        Text chunks from the concierge_voice agent as they arrive.
     """
     # --- Feature flag: V1 fallback ---
     if not ADK_ENABLED:
-        return await _v1_fallback(message)
+        async for chunk in _v1_fallback_stream(message):
+            yield chunk
+        return
 
     # --- Sanitize input ---
     cleaned_message, is_safe = sanitize_input(message)
     if not is_safe:
-        return "I'm sorry, I can't process that request. Could you rephrase?"
+        yield "I'm sorry, I can't process that request. Could you rephrase?"
+        return
 
     if not cleaned_message.strip():
-        return "I didn't catch that. Could you repeat your question?"
+        yield "I didn't catch that. Could you repeat your question?"
+        return
 
     runner = _get_runner()
     session_service = _get_session_service()
@@ -123,7 +131,7 @@ async def run_adk_turn(
     user_content = Content(parts=[Part(text=cleaned_message)])
     t0 = time.monotonic()
 
-    final_reply = ""
+    streamed_parts: List[str] = []
     tool_calls_log: List[Dict[str, Any]] = []
     anomaly_triggered = False
 
@@ -133,10 +141,9 @@ async def run_adk_turn(
             session_id=session_id,
             new_message=user_content,
         ):
-            # --- Phase 3: Capture tool call events for telemetry ---
+            # --- Tool call events: capture silently, never stream to user ---
             tool_name, tool_params = _extract_tool_call(event)
             if tool_name:
-                # Anomaly check BEFORE recording
                 if anomaly.check_tool_loop(session_id, tool_name, tool_params):
                     anomaly_triggered = True
                     tool_calls_log.append({
@@ -155,25 +162,44 @@ async def run_adk_turn(
                     ).hexdigest()[:12],
                     "result_status": "ok",
                 })
+                continue  # SILENT: never stream tool calls
 
+            # --- INSTANT VOICE: stream text deltas from concierge_voice only ---
+            author = getattr(event, "author", None)
+            if author == "concierge_voice" and event.content and event.content.parts:
+                for part in event.content.parts:
+                    if hasattr(part, "text") and part.text:
+                        streamed_parts.append(part.text)
+                        yield part.text
+
+            # --- Final response: fallback yield if voice produced nothing yet ---
             if event.is_final_response():
-                if event.content and event.content.parts:
-                    final_reply = "".join(
-                        part.text for part in event.content.parts if hasattr(part, "text") and part.text
+                if not streamed_parts and event.content and event.content.parts:
+                    fallback_text = "".join(
+                        p.text for p in event.content.parts
+                        if hasattr(p, "text") and p.text
                     )
+                    if fallback_text:
+                        streamed_parts.append(fallback_text)
+                        yield fallback_text
                 break
+
     except Exception as e:
         logger.error("[ADK] Pipeline execution error: %s", e, exc_info=True)
         logger.warning("[ADK] Falling back to V1 pipeline due to error")
-        return await _v1_fallback(message)
+        async for chunk in _v1_fallback_stream(message):
+            streamed_parts.append(chunk)
+            yield chunk
 
     latency_ms = (time.monotonic() - t0) * 1000.0
+    final_reply = "".join(streamed_parts)
 
-    # --- Phase 3: Anomaly — return graceful fallback ---
+    # --- Anomaly: yield graceful fallback message ---
     if anomaly_triggered:
         final_reply = anomaly.GRACEFUL_FALLBACK_REPLY
+        yield final_reply
 
-    # --- Try to get final_reply from session state if event didn't have it ---
+    # --- Session state fallback if nothing was streamed ---
     if not final_reply:
         try:
             updated_session = await session_service.get_session(
@@ -190,9 +216,10 @@ async def run_adk_turn(
 
     if not final_reply:
         final_reply = "I'm sorry, I couldn't process your request. Could you try again?"
+        yield final_reply
 
-    # --- Sanitize output ---
-    final_reply = sanitize_output(final_reply)
+    # --- Sanitize for logging only (chunks already delivered) ---
+    logged_reply = sanitize_output(final_reply)
 
     # --- Phase 3: Fire-and-forget telemetry + chat logging ---
     try:
@@ -202,7 +229,7 @@ async def run_adk_turn(
                 user_id=user_id,
                 user_message=cleaned_message,
                 tool_calls=tool_calls_log,
-                final_reply=final_reply,
+                final_reply=logged_reply,
                 latency_ms=latency_ms,
             )
         )
@@ -211,11 +238,9 @@ async def run_adk_turn(
 
     try:
         from ..observability.db_logging import log_chat
-        asyncio.create_task(log_chat(cleaned_message, final_reply))
+        asyncio.create_task(log_chat(cleaned_message, logged_reply))
     except Exception:
         pass
-
-    return final_reply
 
 
 def _extract_tool_call(event: Any) -> tuple:
@@ -238,9 +263,10 @@ def _extract_tool_call(event: Any) -> tuple:
     return (None, None)
 
 
-async def _v1_fallback(message: str) -> str:
-    """Fall back to the V1 LangGraph pipeline."""
+async def _v1_fallback_stream(message: str) -> AsyncGenerator[str, None]:
+    """Fall back to the V1 LangGraph pipeline, yielding reply as a single chunk."""
     from .graph import run_chat_graph
 
     result = await run_chat_graph(message=message)
-    return result.get("reply", "Sorry, I didn't understand that.")
+    reply = result.get("reply", "Sorry, I didn't understand that.")
+    yield reply

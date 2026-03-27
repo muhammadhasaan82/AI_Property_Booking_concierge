@@ -138,14 +138,16 @@ async def cmd_chat(args: argparse.Namespace) -> int:
         session_id = "cli_test_session_001"
         user_id = args.user_id if hasattr(args, 'user_id') and args.user_id else "cli_user"
 
-        # Run the message through the ADK
-        reply = await run_adk_turn(
+        # Run the message through the ADK (streaming)
+        print("\nConcierge: ", end="", flush=True)
+        async for chunk in run_adk_turn(
             user_id=user_id,
             session_id=session_id,
-            message=user
-        )
-
-        print(f"\nConcierge: {reply}\n")
+            message=user,
+        ):
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+        print("\n")
 
 async def cmd_say(args: argparse.Namespace) -> int:
     def stream_cb(chunk: str):
