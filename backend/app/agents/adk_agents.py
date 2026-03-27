@@ -129,7 +129,7 @@ async def search_properties(
         city: The exact city name (required). CRITICAL: Preserve multi-word cities like "New York" completely. Do not treat "new" as an adjective.
         budget: Maximum nightly price in USD (optional).
         beds: Minimum number of bedrooms (optional).
-        property_type: Type of property — apartment, house, villa, condo, loft, studio, townhouse (optional).
+        property_type: Type of property — apartment, house, villa, condo, loft, studio, townhouse. CRITICAL: You MUST extract this if mentioned by the user. Do not leave blank if the user specifies a type.
         amenities: Comma-separated list of required amenities like wifi, pool, parking (optional).
     """
     from .tools.rust_client import search_properties as rust_search
