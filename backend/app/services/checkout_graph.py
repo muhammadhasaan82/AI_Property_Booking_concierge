@@ -214,5 +214,6 @@ async def run_checkout_flow(
 
     if result.get("reply"):
         result["reply"] = sanitize_output(result["reply"])
+        result["instruction"] = "Stop calling tools. Pass this exact reply to the voice agent to present to the user."
 
     return result
