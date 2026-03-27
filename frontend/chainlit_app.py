@@ -321,19 +321,18 @@ async def on_message(message: cl.Message):
     msg = cl.Message(content="")
     await msg.send()
 
-    # ── V2 ADK Pipeline ─────────────────────────────────────────
+    # ── V2 ADK Pipeline (streaming) ─────────────────────────────
     if ADK_ENABLED:
         user_obj = cl.user_session.get("user")
         user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
         session_id = cl.user_session.get("id", "default_session")
 
-        reply = await run_adk_turn(
+        async for chunk in run_adk_turn(
             user_id=user_id,
             session_id=session_id,
             message=message.content,
-        )
-
-        msg.content = reply
+        ):
+            await msg.stream_token(chunk)
         await msg.update()
         return
 

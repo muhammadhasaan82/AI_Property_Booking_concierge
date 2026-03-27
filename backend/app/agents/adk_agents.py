@@ -50,6 +50,11 @@ voice_llm = LiteLlm(model=VOICE_MODEL)
 
 # ---------------------------------------------------------------------------
 # Generation configs
+# Two-Speed Streaming Rule:
+#   DISPATCHER_CONFIG — triage_router. Tool-call + routing events only.
+#                       Stream is SILENTLY CONSUMED by the runner. Never shown to user.
+#   VOICE_CONFIG      — concierge_voice. Text deltas are STREAMED to the UI
+#                       via run_adk_turn() AsyncGenerator in adk_runner.py.
 # ---------------------------------------------------------------------------
 DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
     temperature=1,
