@@ -164,6 +164,10 @@ async def search_properties(
             "suggestion": "Try a different city, adjust budget, or broaden filters.",
         }
 
+    # Bridge: Save raw results for V1 Checkout Vault
+    global SHARED_SEARCH_RESULTS
+    SHARED_SEARCH_RESULTS = results
+
     # V2: Uncapped results. Show exactly what the database found.
     top = results
     formatted = []
@@ -179,9 +183,6 @@ async def search_properties(
             "id": r.get("id"),
         }
         formatted.append(entry)
-
-    global SHARED_SEARCH_RESULTS
-    SHARED_SEARCH_RESULTS = top
 
     return {
         "status": "success",
@@ -319,6 +320,10 @@ async def trigger_checkout_flow(
         session_state["filters"] = {}
     if SHARED_SEARCH_RESULTS:
         session_state["filters"]["last_results"] = SHARED_SEARCH_RESULTS
+        # Dynamically build the index map (1: ID, 2: ID, etc.) so V1 knows exactly how many options exist
+        session_state["filters"]["results_index_map"] = {
+            i + 1: r.get("id") for i, r in enumerate(SHARED_SEARCH_RESULTS)
+        }
 
     result = await run_checkout_flow(
         user_text=user_text,
