@@ -60,6 +60,23 @@ VOICE_CONFIG = genai_types.GenerateContentConfig(
 )
 
 
+def extract_name_fallback(text: str) -> Optional[str]:
+    """V2 Soft-Coded: Ultra-lightweight extraction using existing LiteLLM."""
+    if not text:
+        return None
+
+    try:
+        res = litellm.completion(
+            model="gpt-5-nano",
+            messages=[{"role": "user", "content": f"Extract ONLY the name from this text. If none exists, return NONE. Text: '{text}'"}],
+            temperature=0
+        ).choices[0].message.content.strip()
+
+        return res.title() if res != "NONE" else None
+    except Exception:
+        return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # TOOL FUNCTIONS
 # ADK auto-wraps plain Python functions as FunctionTool.
