@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from google.adk.agents import LlmAgent
 from google.adk.agents.sequential_agent import SequentialAgent
 from google.adk.models.lite_llm import LiteLlm
+from google.adk.tools import ToolContext
 from google.genai import types as genai_types
 
 # Disable LiteLLM telemetry at Python level
@@ -312,6 +313,7 @@ async def check_booking_status(booking_id: str) -> dict:
 
 async def trigger_checkout_flow(
     user_text: str,
+    tool_context: ToolContext,
     session_state_json: str = "{}",
 ) -> dict:
     """Start or continue the property booking checkout process.
@@ -321,6 +323,7 @@ async def trigger_checkout_flow(
     - The user is providing booking details (dates, name, email, phone, guests).
     - The user confirms or modifies a booking receipt.
     - The user says "yes" to confirm a booking.
+    - An active checkout session is in progress (awaiting name, phone, email, dates, guests).
 
     This tool manages the full checkout pipeline: collecting details,
     showing a receipt, and processing payment.
@@ -332,19 +335,39 @@ async def trigger_checkout_flow(
     from ..services.checkout_graph import run_checkout_flow
 
     global SHARED_SEARCH_RESULTS
-    try:
-        session_state = json.loads(session_state_json) if session_state_json else {}
-    except (json.JSONDecodeError, TypeError):
-        session_state = {}
 
-    # Inject the fresh search results into the V1 Vault's memory
+    # --- Restore persisted checkout state from ADK session (cross-turn memory) ---
+    persisted_checkout: Dict[str, Any] = {}
+    try:
+        raw = tool_context.state.get("checkout_state")
+        if raw:
+            persisted_checkout = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        persisted_checkout = {}
+
+    # --- Merge: persisted state is the base; caller-supplied state overrides ---
+    try:
+        caller_state = json.loads(session_state_json) if session_state_json else {}
+    except (json.JSONDecodeError, TypeError):
+        caller_state = {}
+
+    # Deep-merge: persisted checkout_state carries booking progress; caller state can add to it
+    session_state: Dict[str, Any] = {}
+    for key in ("filters", "booking_args", "status_args", "payment_args"):
+        merged = {**(persisted_checkout.get(key) or {}), **(caller_state.get(key) or {})}
+        session_state[key] = merged
+
+    # --- Inject fresh search results into filters (always available as long as a search happened) ---
     if "filters" not in session_state:
         session_state["filters"] = {}
     if SHARED_SEARCH_RESULTS:
-        session_state["filters"]["last_results"] = SHARED_SEARCH_RESULTS
-        # Dynamically build the index map (1: ID, 2: ID, etc.) so V1 knows exactly how many options exist
+        # Only inject if filters don't already have last_results (preserves booking-in-progress state)
+        if not session_state["filters"].get("last_results"):
+            session_state["filters"]["last_results"] = SHARED_SEARCH_RESULTS
+        # Always keep the index map in sync with whatever last_results is present
+        current_results = session_state["filters"].get("last_results") or SHARED_SEARCH_RESULTS
         session_state["filters"]["results_index_map"] = {
-            i + 1: r.get("id") for i, r in enumerate(SHARED_SEARCH_RESULTS)
+            i + 1: r.get("id") for i, r in enumerate(current_results)
         }
 
     result = await run_checkout_flow(
@@ -355,15 +378,22 @@ async def trigger_checkout_flow(
         payment_args=session_state.get("payment_args", {}),
     )
 
+    # --- Persist updated checkout state back into the ADK session for next turn ---
+    updated_state = {
+        "filters": result.get("filters", {}),
+        "booking_args": result.get("booking_args", {}),
+        "status_args": result.get("status_args", {}),
+        "payment_args": result.get("payment_args", {}),
+    }
+    try:
+        tool_context.state["checkout_state"] = updated_state
+    except Exception as e:
+        logger.warning("[checkout] Could not persist checkout state to session: %s", e)
+
     return {
         "status": "checkout_response",
         "reply": result.get("reply", ""),
-        "updated_state": {
-            "filters": result.get("filters", {}),
-            "booking_args": result.get("booking_args", {}),
-            "status_args": result.get("status_args", {}),
-            "payment_args": result.get("payment_args", {}),
-        },
+        "updated_state": updated_state,
         "tool_result": result.get("tool_result", {}),
     }
 
@@ -412,6 +442,17 @@ ROUTING RULES:
    → call `escalate_to_human`
 6. If the user says hello or greets you, respond with a brief greeting and ask how
    you can help.
+
+ACTIVE CHECKOUT SESSION RULES (HIGHEST PRIORITY — check these first):
+- If the session state contains `checkout_state` with any of these keys set:
+  `awaiting_selection_confirm`, `awaiting_field`, `receipt_shown`, `selected_property`,
+  `awaiting_post_mod_choice`, `awaiting_post_cancel_choice`
+  → you MUST call `trigger_checkout_flow` regardless of what the user says.
+  This includes: the user picking a numbered option from a property list, saying "yes",
+  "no", providing their name, phone, email, dates, number of guests, or any booking detail.
+- When a property card has been shown and the system is waiting for the user to confirm
+  ("Would you like to book this one?"), ANY response from the user must go to
+  `trigger_checkout_flow` — do NOT call `search_properties` again.
 
 CRITICAL: Once a tool returns a result, you MUST output that result as plain text so it can be passed to the voice agent. Do NOT call the same tool repeatedly. NEVER generate conversational pleasantries yourself.
 """
