@@ -1,14 +1,14 @@
 # services/adk_agents.py
 """
-ADK 2.0 — Nested Hybrid Graph (Phase 2: V2 Brain)
+ADK 2.0 — Native V2 Agentic Architecture
 
 Dual-Model Architecture:
-  Node 1 (triage_router)  → GPT-5 Nano via LiteLLM  (temperature=1, top_p=0.95, top_k=50)
+  Node 1 (triage_router)  → GPT-5 Nano via LiteLLM  (temperature=1)
   Node 2 (concierge_voice) → Llama-3.3-70B via Groq   (temperature=0.6)
 
 The SequentialAgent pipeline: triage_router → concierge_voice.
-The triage_router has access to 5 tools that bridge into our Rust gateway
-and the isolated LangGraph checkout flow (the Deterministic Vault).
+The triage_router has access to tools that bridge into our Rust gateway
+and two native V2 booking tools (request_booking_details, process_v2_booking).
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ import json
 import logging
 import os
 import csv
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from google.adk.agents import LlmAgent
@@ -39,9 +41,6 @@ os.environ["LITELLM_LOG"] = "ERROR"
 # ---------------------------------------------------------------------------
 DISPATCHER_MODEL = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-5-nano")
 VOICE_MODEL = os.getenv("ADK_VOICE_MODEL", "groq/llama-3.3-70b-versatile")
-
-# Bridge memory between V2 ADK and V1 Checkout Vault
-SHARED_SEARCH_RESULTS: List[dict] = []
 
 # ---------------------------------------------------------------------------
 # Dual-Model Backends (via LiteLLM — no Google Cloud dependency)
@@ -187,10 +186,6 @@ async def search_properties(
             "suggestion": "Try a different city, adjust budget, or broaden filters.",
         }
 
-    # Bridge: Save raw results for V1 Checkout Vault
-    global SHARED_SEARCH_RESULTS
-    SHARED_SEARCH_RESULTS = results
-
     # V2: Uncapped results. Show exactly what the database found.
     top = results
     formatted = []
@@ -212,7 +207,7 @@ async def search_properties(
         "total_found": len(results),
         "showing": len(formatted),
         "properties": formatted,
-        "instruction": "Present these as a numbered list. Ask the user to pick one by number.",
+        "instruction": "Present these as a numbered list. Ask the user to pick one by number. Remember the property details (id, title, price_per_night) for when they want to book.",
     }
 
 
@@ -311,90 +306,99 @@ async def check_booking_status(booking_id: str) -> dict:
     }
 
 
-async def trigger_checkout_flow(
-    user_text: str,
-    tool_context: ToolContext,
-    session_state_json: str = "{}",
-) -> dict:
-    """Start or continue the property booking checkout process.
+# ═══════════════════════════════════════════════════════════════════════════
+# V2 NATIVE BOOKING TOOLS (Replaces the entire LangGraph checkout_graph.py)
+# ═══════════════════════════════════════════════════════════════════════════
 
-    Use this tool when:
-    - The user has selected a property and wants to book it.
-    - The user is providing booking details (dates, name, email, phone, guests).
-    - The user confirms or modifies a booking receipt.
-    - The user says "yes" to confirm a booking.
-    - An active checkout session is in progress (awaiting name, phone, email, dates, guests).
+async def request_booking_details(missing_info: str) -> dict:
+    """Use this tool when you need to gather missing booking information from the user.
 
-    This tool manages the full checkout pipeline: collecting details,
-    showing a receipt, and processing payment.
+    CRITICAL: Call this tool whenever the user wants to book a property but has NOT
+    yet provided ALL of the following: full name, email, phone, check-in date,
+    check-out date, and number of guests.
 
     Args:
-        user_text: The user's latest message.
-        session_state_json: JSON string of the current booking session state (filters, booking_args, etc.).
+        missing_info: A comma-separated list of what is still needed (e.g., "full name, email, phone, check-in date, check-out date, number of guests").
     """
-    from ..services.checkout_graph import run_checkout_flow
-
-    global SHARED_SEARCH_RESULTS
-
-    # --- Restore persisted checkout state from ADK session (cross-turn memory) ---
-    persisted_checkout: Dict[str, Any] = {}
-    try:
-        raw = tool_context.state.get("checkout_state")
-        if raw:
-            persisted_checkout = json.loads(raw) if isinstance(raw, str) else raw
-    except Exception:
-        persisted_checkout = {}
-
-    # --- Merge: persisted state is the base; caller-supplied state overrides ---
-    try:
-        caller_state = json.loads(session_state_json) if session_state_json else {}
-    except (json.JSONDecodeError, TypeError):
-        caller_state = {}
-
-    # Deep-merge: persisted checkout_state carries booking progress; caller state can add to it
-    session_state: Dict[str, Any] = {}
-    for key in ("filters", "booking_args", "status_args", "payment_args"):
-        merged = {**(persisted_checkout.get(key) or {}), **(caller_state.get(key) or {})}
-        session_state[key] = merged
-
-    # --- Inject fresh search results into filters (always available as long as a search happened) ---
-    if "filters" not in session_state:
-        session_state["filters"] = {}
-    if SHARED_SEARCH_RESULTS:
-        # Only inject if filters don't already have last_results (preserves booking-in-progress state)
-        if not session_state["filters"].get("last_results"):
-            session_state["filters"]["last_results"] = SHARED_SEARCH_RESULTS
-        # Always keep the index map in sync with whatever last_results is present
-        current_results = session_state["filters"].get("last_results") or SHARED_SEARCH_RESULTS
-        session_state["filters"]["results_index_map"] = {
-            i + 1: r.get("id") for i, r in enumerate(current_results)
-        }
-
-    result = await run_checkout_flow(
-        user_text=user_text,
-        filters=session_state.get("filters", {}),
-        booking_args=session_state.get("booking_args", {}),
-        status_args=session_state.get("status_args", {}),
-        payment_args=session_state.get("payment_args", {}),
-    )
-
-    # --- Persist updated checkout state back into the ADK session for next turn ---
-    updated_state = {
-        "filters": result.get("filters", {}),
-        "booking_args": result.get("booking_args", {}),
-        "status_args": result.get("status_args", {}),
-        "payment_args": result.get("payment_args", {}),
+    return {
+        "status": "gathering_info",
+        "instruction": f"Stop calling tools. Ask the user to provide the following missing information to continue their booking: {missing_info}"
     }
+
+
+async def process_v2_booking(
+    property_id: str,
+    property_title: str,
+    guest_name: str,
+    guest_email: str,
+    guest_phone: str,
+    check_in: str,
+    check_out: str,
+    guests: int,
+    price_per_night: float,
+) -> dict:
+    """Process the final booking ONLY when ALL details have been collected from the user.
+
+    CRITICAL: Never guess or invent these details. If any are missing, call
+    'request_booking_details' instead. All dates must be in YYYY-MM-DD format.
+
+    Args:
+        property_id: The unique ID of the property to book.
+        property_title: The display title of the property.
+        guest_name: The guest's full name.
+        guest_email: The guest's email address.
+        guest_phone: The guest's phone number.
+        check_in: Check-in date in YYYY-MM-DD format.
+        check_out: Check-out date in YYYY-MM-DD format.
+        guests: Number of guests.
+        price_per_night: The nightly price of the property.
+    """
     try:
-        tool_context.state["checkout_state"] = updated_state
+        d1 = datetime.strptime(check_in, "%Y-%m-%d")
+        d2 = datetime.strptime(check_out, "%Y-%m-%d")
+        nights = max((d2 - d1).days, 1)
+    except Exception:
+        nights = 1
+
+    total_price = nights * price_per_night
+    booking_id = str(uuid.uuid4())
+
+    # Log to database if available
+    try:
+        from ..observability.db_logging import log_successful_booking
+        await log_successful_booking({
+            "booking_id": booking_id,
+            "property_id": property_id,
+            "property_title": property_title,
+            "guest_name": guest_name,
+            "guest_email": guest_email,
+            "guest_phone": guest_phone,
+            "check_in": check_in,
+            "check_out": check_out,
+            "guests": guests,
+            "nights": nights,
+            "price_per_night": price_per_night,
+            "total_price": total_price,
+            "status": "confirmed",
+        })
     except Exception as e:
-        logger.warning("[checkout] Could not persist checkout state to session: %s", e)
+        logger.warning("[V2 Booking] Could not log booking to DB: %s", e)
 
     return {
-        "status": "checkout_response",
-        "reply": result.get("reply", ""),
-        "updated_state": updated_state,
-        "tool_result": result.get("tool_result", {}),
+        "status": "booking_confirmed",
+        "receipt": {
+            "booking_id": booking_id,
+            "property": property_title,
+            "guest": guest_name,
+            "email": guest_email,
+            "phone": guest_phone,
+            "dates": f"{check_in} to {check_out}",
+            "nights": nights,
+            "guests": guests,
+            "price_per_night": f"${price_per_night:.2f}",
+            "total": f"${total_price:.2f}",
+        },
+        "instruction": "Stop calling tools. Announce that the booking is confirmed and display the full receipt details to the user in a clear, formatted way."
     }
 
 
@@ -435,24 +439,22 @@ ROUTING RULES:
    → call `check_faq`
 3. If the user provides a booking ID or asks about booking status
    → call `check_booking_status`
-4. If the user is in a booking flow (selecting property, providing dates/name/email/phone,
-   confirming receipt, saying "yes" to book)
-   → call `trigger_checkout_flow`
+4. If the user wants to book a property, determine if you have their name, email,
+   phone, check-in date, check-out date, and guest count:
+   - If ANY of these are missing → call `request_booking_details` with a list of what's missing
+   - If ALL are present AND you know which property → call `process_v2_booking` with all details
 5. If the user asks to speak to a human or you cannot help
    → call `escalate_to_human`
 6. If the user says hello or greets you, respond with a brief greeting and ask how
    you can help.
 
-ACTIVE CHECKOUT SESSION RULES (HIGHEST PRIORITY — check these first):
-- If the session state contains `checkout_state` with any of these keys set:
-  `awaiting_selection_confirm`, `awaiting_field`, `receipt_shown`, `selected_property`,
-  `awaiting_post_mod_choice`, `awaiting_post_cancel_choice`
-  → you MUST call `trigger_checkout_flow` regardless of what the user says.
-  This includes: the user picking a numbered option from a property list, saying "yes",
-  "no", providing their name, phone, email, dates, number of guests, or any booking detail.
-- When a property card has been shown and the system is waiting for the user to confirm
-  ("Would you like to book this one?"), ANY response from the user must go to
-  `trigger_checkout_flow` — do NOT call `search_properties` again.
+BOOKING DETAIL RULES (CRITICAL — prevents hallucination):
+- You MUST NOT invent, guess, or assume any booking details (dates, guest count, name, email, phone).
+- If the user says "book this" or "I want to book" but has not provided ALL required details,
+  you MUST call `request_booking_details` with the missing fields.
+- Only call `process_v2_booking` when you have EXPLICIT, user-provided values for ALL fields.
+- When the user provides details across multiple messages, accumulate them. Once all are collected,
+  call `process_v2_booking`.
 
 CRITICAL: Once a tool returns a result, you MUST output that result as plain text so it can be passed to the voice agent. Do NOT call the same tool repeatedly. NEVER generate conversational pleasantries yourself.
 """
@@ -466,7 +468,8 @@ triage_router = LlmAgent(
         search_properties,
         check_faq,
         check_booking_status,
-        trigger_checkout_flow,
+        request_booking_details,
+        process_v2_booking,
         escalate_to_human,
         get_all_available_cities,
     ],
@@ -487,8 +490,11 @@ RULES:
   the property you'd like to book."
 - If the output contains an FAQ answer, present it conversationally.
 - If the output contains booking status, present it clearly with dates and status.
-- If the output contains a checkout response, pass the reply through as-is (it
-  comes from the deterministic booking system and must not be modified).
+- If the output contains a booking receipt (booking_confirmed), present the receipt
+  in a clean, formatted way with all details (booking ID, property, guest, dates,
+  nights, total price). Congratulate the user on their booking.
+- If the output is requesting missing booking details (gathering_info), ask the user
+  warmly for the missing information listed.
 - If the output is a handoff, present the handoff message warmly.
 - If the output is a greeting or simple text, respond naturally.
 - Keep responses concise. Do not repeat raw JSON to the user.
