@@ -203,7 +203,7 @@ def classify_trajectory(
         return "DROP_OFF_PATH"
 
     if len(tool_calls) >= 5 and not any(
-        tc.get("tool") == "trigger_checkout_flow" for tc in tool_calls
+        tc.get("tool") == "process_v2_booking" for tc in tool_calls
     ):
         return "DROP_OFF_PATH"
 

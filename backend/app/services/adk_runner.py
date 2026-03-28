@@ -7,9 +7,7 @@ Manages per-user sessions via InMemorySessionService and provides
 
 Phase 2: Core ADK pipeline.
 Phase 3: DPO telemetry capture + tool-loop anomaly detection.
-
-Feature flag: ADK_ENABLED (env var, default "1"). Set to "0" to fall back
-to the V1 LangGraph pipeline (run_chat_graph).
+Phase 4 (V2): Removed V1 LangGraph fallback — pure ADK pipeline.
 """
 from __future__ import annotations
 
@@ -32,9 +30,9 @@ from ..observability import telemetry
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Feature flag
+# Feature flag (kept for backward compat — V2 is always enabled)
 # ---------------------------------------------------------------------------
-ADK_ENABLED = os.getenv("ADK_ENABLED", "1") not in ("0", "false", "False")
+ADK_ENABLED = True
 
 # ---------------------------------------------------------------------------
 # Lazy-init globals (created on first call to avoid import-time side effects)
@@ -90,12 +88,6 @@ async def run_adk_turn(
     Yields:
         Text chunks from the concierge_voice agent as they arrive.
     """
-    # --- Feature flag: V1 fallback ---
-    if not ADK_ENABLED:
-        async for chunk in _v1_fallback_stream(message):
-            yield chunk
-        return
-
     # --- Sanitize input ---
     cleaned_message, is_safe = sanitize_input(message)
     if not is_safe:
@@ -186,10 +178,7 @@ async def run_adk_turn(
 
     except Exception as e:
         logger.error("[ADK] Pipeline execution error: %s", e, exc_info=True)
-        logger.warning("[ADK] Falling back to V1 pipeline due to error")
-        async for chunk in _v1_fallback_stream(message):
-            streamed_parts.append(chunk)
-            yield chunk
+        yield "I'm sorry, something went wrong. Please try again."
 
     latency_ms = (time.monotonic() - t0) * 1000.0
     final_reply = "".join(streamed_parts)
@@ -261,12 +250,3 @@ def _extract_tool_call(event: Any) -> tuple:
     except Exception:
         pass
     return (None, None)
-
-
-async def _v1_fallback_stream(message: str) -> AsyncGenerator[str, None]:
-    """Fall back to the V1 LangGraph pipeline, yielding reply as a single chunk."""
-    from .graph import run_chat_graph
-
-    result = await run_chat_graph(message=message)
-    reply = result.get("reply", "Sorry, I didn't understand that.")
-    yield reply

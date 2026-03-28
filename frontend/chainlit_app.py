@@ -20,9 +20,7 @@ from sqlalchemy import text
 _backend_root = Path(__file__).resolve().parents[1]
 sys.path.append(str(_backend_root))
 
-from app.services.graph import run_chat_graph
-from app.services.state_keys import SK
-from app.services.adk_runner import run_adk_turn, ADK_ENABLED
+from app.services.adk_runner import run_adk_turn
 
 # ---------------------------------------------------------------------------
 # Authentication - Password Login
@@ -255,13 +253,6 @@ def _get_data_layer():
         return None
 
 
-def _make_stream_callback(msg: cl.Message):
-    def _callback(token: str) -> None:
-        asyncio.create_task(msg.stream_token(token))
-
-    return _callback
-
-
 async def _rename_thread(message: cl.Message, question: str) -> None:
     if not question:
         return
@@ -287,12 +278,10 @@ async def on_chat_resume(thread):
         if past_thread_id:
             cl.user_session.set("past_thread_id", past_thread_id)
 
-    # await cl.Message(content="Chat session restored from memory.").send()
-
 
 @cl.on_chat_start
 async def on_chat_start():
-    # --- NEW: Safely ensure tables exist ---
+    # --- Safely ensure tables exist ---
     data_layer = cl_data.get_data_layer()
     if data_layer and hasattr(data_layer, "engine"):
         conninfo = _resolve_history_conninfo()
@@ -306,11 +295,6 @@ async def on_chat_start():
             print(f"Schema Error: {e}")
     # ---------------------------------------
 
-    cl.user_session.set("filters", {})
-    cl.user_session.set("booking_args", {})
-    cl.user_session.set("status_args", {})
-    cl.user_session.set("payment_args", {})
-    
     await cl.Message(content=WELCOME_MESSAGE).send()
 
 
@@ -321,63 +305,15 @@ async def on_message(message: cl.Message):
     msg = cl.Message(content="")
     await msg.send()
 
-    # ── V2 ADK Pipeline (streaming) ─────────────────────────────
-    if ADK_ENABLED:
-        user_obj = cl.user_session.get("user")
-        user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
-        session_id = cl.user_session.get("id", "default_session")
+    # ── V2 ADK Pipeline (streaming) — sole path ─────────────
+    user_obj = cl.user_session.get("user")
+    user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
+    session_id = cl.user_session.get("id", "default_session")
 
-        async for chunk in run_adk_turn(
-            user_id=user_id,
-            session_id=session_id,
-            message=message.content,
-        ):
-            await msg.stream_token(chunk)
-        await msg.update()
-        return
-
-    # ── V1 LangGraph Fallback ───────────────────────────────────
-    filters = dict(cl.user_session.get("filters", {}) or {})
-    booking_args = dict(cl.user_session.get("booking_args", {}) or {})
-    status_args = dict(cl.user_session.get("status_args", {}) or {})
-    payment_args = dict(cl.user_session.get("payment_args", {}) or {})
-
-    filters["stream"] = True
-    filters["stream_callback"] = _make_stream_callback(msg)
-
-    result = await run_chat_graph(
+    async for chunk in run_adk_turn(
+        user_id=user_id,
+        session_id=session_id,
         message=message.content,
-        filters=filters,
-        booking_args=booking_args,
-        status_args=status_args,
-        payment_args=payment_args,
-    )
-    result = result or {}
-
-    cl.user_session.set("filters", result.get("filters", {}))
-    cl.user_session.set("booking_args", result.get("booking_args", {}))
-    cl.user_session.set("status_args", result.get("status_args", {}))
-    cl.user_session.set("payment_args", result.get("payment_args", {}))
-
-    reply = result.get("reply", "Sorry, I didn't understand that.")
-    active_filters = result.get("filters", {})
-    is_active_flow = (
-        active_filters.get(SK.awaiting_property_type_choice)
-        or active_filters.get(SK.awaiting_selection_confirm)
-        or active_filters.get(SK.awaiting_city_selection)
-        or active_filters.get(SK.awaiting_field)
-        or active_filters.get(SK.awaiting_unavailable_city_choice)
-    )
-
-    if is_active_flow and reply:
-        formatted_lines = []
-        for line in reply.split("\n"):
-            if "?" in line or "please" in line.lower() or "reply" in line.lower():
-                formatted_lines.append(f"**{line}**")
-            else:
-                formatted_lines.append(line)
-        reply = "\n".join(formatted_lines)
-
-    msg.content = reply
+    ):
+        await msg.stream_token(chunk)
     await msg.update()
-
