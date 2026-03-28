@@ -414,8 +414,10 @@ def is_property_search(text: str) -> bool:
         if conf >= threshold:
             return True
 
-    # Keyword + NER fallback
-    from .nlp_extractor import KNOWN_CITIES, CITY_ALIASES, PROPERTY_TYPES
+    # Keyword + NER fallback (V2: vocabulary provided by dynamic_config/dataset_loader)
+    KNOWN_CITIES: set = set()
+    CITY_ALIASES: dict = {}
+    PROPERTY_TYPES: list = []
 
     money_pat = None
     if vocab.money_intent_pattern:
