@@ -3,7 +3,7 @@
 ADK 2.0 Runner — Execution bridge between Chainlit and the ADK SequentialAgent.
 
 Manages per-user sessions via InMemorySessionService and provides
-`run_adk_turn()` as the single async entry point for the Chainlit UI.
+[run_adk_turn()](cci:1://file:///c:/Users/ASUS/Desktop/Hotel%20booking/backend/app/services/adk_runner.py:233:0-388:12) as the single async entry point for the Chainlit UI.
 
 Phase 2: Core ADK pipeline.
 Phase 3: DPO telemetry capture + tool-loop anomaly detection.
@@ -293,7 +293,7 @@ async def run_adk_turn(
             # --- Tool call events: capture silently, never stream to user ---
             tool_name, tool_params = _extract_tool_call(event)
             if tool_name:
-                if await anomaly.check_tool_loop(session_id, tool_name, tool_params):
+                if anomaly.check_tool_loop(session_id, tool_name, tool_params):
                     anomaly_triggered = True
                     tool_calls_log.append({
                         "tool": tool_name,
@@ -303,7 +303,7 @@ async def run_adk_turn(
                         "result_status": "anomaly_blocked",
                     })
                     break
-                await anomaly.record_tool_call(session_id, tool_name, tool_params)
+                anomaly.record_tool_call(session_id, tool_name, tool_params)
                 tool_calls_log.append({
                     "tool": tool_name,
                     "params_hash": hashlib.md5(
