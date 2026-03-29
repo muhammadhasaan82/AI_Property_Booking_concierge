@@ -3,7 +3,7 @@ version: "3.9"
 services:
   fastapi:
     build:
-      context: .
+      context: ./backend
       dockerfile: app/Dockerfile
     ports:
       - "8000:8000"
@@ -19,7 +19,7 @@ services:
 
   chainlit:
     build:
-      context: .
+      context: ./frontend
       dockerfile: frontend/Dockerfile
     ports:
       - "8501:8501"
@@ -32,7 +32,7 @@ services:
 
   rust_gateway:
     build:
-      context: ./rust_gateway
+      context: ./backend/rust_gateway
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
