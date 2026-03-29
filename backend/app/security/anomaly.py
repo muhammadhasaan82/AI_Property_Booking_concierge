@@ -19,6 +19,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..services.redis_store import get_redis_client
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -40,6 +42,10 @@ GRACEFUL_FALLBACK_REPLY = (
 _session_tool_history: Dict[str, List[Tuple[str, str, float]]] = {}
 _lock = threading.Lock()
 _last_eviction = time.monotonic()
+
+
+def _session_key(session_id: str) -> str:
+    return f"adk:anomaly:{session_id}"
 
 
 def _param_hash(params: Any) -> str:
@@ -71,11 +77,65 @@ def _evict_stale_sessions() -> None:
         logger.debug("[Anomaly] Evicted %d stale sessions", len(stale_keys))
 
 
+def _load_local_history(session_id: str) -> List[Tuple[str, str, float]]:
+    with _lock:
+        _evict_stale_sessions()
+        return list(_session_tool_history.get(session_id, []))
+
+
+def _record_local_history(session_id: str, tool_name: str, param_hash: str, timestamp: float) -> None:
+    with _lock:
+        _evict_stale_sessions()
+        history = _session_tool_history.setdefault(session_id, [])
+        history.append((tool_name, param_hash, timestamp))
+
+
+def _clear_local_history(session_id: str) -> None:
+    with _lock:
+        _session_tool_history.pop(session_id, None)
+
+
+def _parse_history_entry(entry: Any) -> Optional[Tuple[str, str, float]]:
+    try:
+        if isinstance(entry, (bytes, bytearray)):
+            entry = entry.decode("utf-8")
+        if isinstance(entry, str):
+            entry = json.loads(entry)
+        if not isinstance(entry, dict):
+            return None
+        tool_name = entry.get("tool")
+        param_hash = entry.get("param_hash")
+        timestamp = float(entry.get("timestamp", time.monotonic()))
+        if not tool_name or not param_hash:
+            return None
+        return (str(tool_name), str(param_hash), timestamp)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+async def _load_history(session_id: str) -> List[Tuple[str, str, float]]:
+    client = await get_redis_client()
+    if client is None:
+        return _load_local_history(session_id)
+
+    try:
+        entries = await client.lrange(_session_key(session_id), 0, -1)
+        history: List[Tuple[str, str, float]] = []
+        for entry in entries:
+            parsed = _parse_history_entry(entry)
+            if parsed is not None:
+                history.append(parsed)
+        return history
+    except Exception as exc:
+        logger.error("[Anomaly] Failed to read Redis history for session %s: %s", session_id, exc)
+        return _load_local_history(session_id)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def record_tool_call(
+async def record_tool_call(
     session_id: str,
     tool_name: str,
     tool_params: Any = None,
@@ -87,13 +147,25 @@ def record_tool_call(
     ph = _param_hash(tool_params)
     now = time.monotonic()
 
-    with _lock:
-        _evict_stale_sessions()
-        history = _session_tool_history.setdefault(session_id, [])
-        history.append((tool_name, ph, now))
+    client = await get_redis_client()
+    if client is None:
+        _record_local_history(session_id, tool_name, ph, now)
+        return
+
+    try:
+        payload = json.dumps(
+            {"tool": tool_name, "param_hash": ph, "timestamp": now},
+            sort_keys=True,
+        )
+        await client.rpush(_session_key(session_id), payload)
+        await client.expire(_session_key(session_id), _SESSION_TTL_SECONDS)
+        _clear_local_history(session_id)
+    except Exception as exc:
+        logger.error("[Anomaly] Failed to record Redis tool call for session %s: %s", session_id, exc)
+        _record_local_history(session_id, tool_name, ph, now)
 
 
-def check_tool_loop(
+async def check_tool_loop(
     session_id: str,
     tool_name: str,
     tool_params: Any = None,
@@ -105,12 +177,11 @@ def check_tool_loop(
     """
     ph = _param_hash(tool_params)
 
-    with _lock:
-        history = _session_tool_history.get(session_id, [])
-        identical_count = sum(
-            1 for (tn, p, _ts) in history
-            if tn == tool_name and p == ph
-        )
+    history = await _load_history(session_id)
+    identical_count = sum(
+        1 for (tn, p, _ts) in history
+        if tn == tool_name and p == ph
+    )
 
     if identical_count >= TOOL_LOOP_THRESHOLD:
         logger.warning(
@@ -126,10 +197,9 @@ def check_tool_loop(
     return False
 
 
-def get_session_stats(session_id: str) -> Dict[str, Any]:
+async def get_session_stats(session_id: str) -> Dict[str, Any]:
     """Return tool call statistics for a session (for debugging/telemetry)."""
-    with _lock:
-        history = _session_tool_history.get(session_id, [])
+    history = await _load_history(session_id)
 
     tool_counts: Dict[str, int] = {}
     for tn, _ph, _ts in history:
@@ -143,7 +213,12 @@ def get_session_stats(session_id: str) -> Dict[str, Any]:
     }
 
 
-def clear_session(session_id: str) -> None:
+async def clear_session(session_id: str) -> None:
     """Clean up session data when a conversation ends."""
-    with _lock:
-        _session_tool_history.pop(session_id, None)
+    client = await get_redis_client()
+    if client is not None:
+        try:
+            await client.delete(_session_key(session_id))
+        except Exception as exc:
+            logger.error("[Anomaly] Failed to clear Redis history for session %s: %s", session_id, exc)
+    _clear_local_history(session_id)

@@ -35,6 +35,8 @@ elif _env_services.exists():
 DATASET_PATH: str = os.getenv("DATASET_PATH", "data/dataset.csv")
 MOCK_MODE: bool = os.getenv("MOCK_MODE", "false").lower() in ("1", "true", "yes")
 PAYMENT_BASE_URL: str = os.getenv("PAYMENT_BASE_URL", "https://example.com/pay")
+REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_SESSION_TTL_SECONDS: int = int(os.getenv("REDIS_SESSION_TTL_SECONDS", "86400"))
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 # route/mobile.py - Mobile API endpoints
 from typing import Any, Dict, Optional, List
+from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from app.services.adk_runner import run_adk_turn
@@ -226,7 +227,7 @@ async def mobile_chat(request: MobileChatRequest):
     """
     try:
         user_id = request.user_id or "mobile_user"
-        session_id = request.session_id or "mobile_session_default"
+        session_id = request.session_id or str(uuid4())
 
         chunks = []
         async for chunk in run_adk_turn(
