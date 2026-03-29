@@ -249,6 +249,7 @@ async def mobile_chat(request: MobileChatRequest):
             response=f"Sorry, I encountered an error: {str(e)}"
         )
 
+
 # ==================== MOBILE FAQ ====================
 
 @router.get("/mobile/faq")
