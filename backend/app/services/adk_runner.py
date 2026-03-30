@@ -293,7 +293,7 @@ async def run_adk_turn(
             # --- Tool call events: capture silently, never stream to user ---
             tool_name, tool_params = _extract_tool_call(event)
             if tool_name:
-                if anomaly.check_tool_loop(session_id, tool_name, tool_params):
+                if await anomaly.check_tool_loop(session_id, tool_name, tool_params):
                     anomaly_triggered = True
                     tool_calls_log.append({
                         "tool": tool_name,
@@ -303,7 +303,7 @@ async def run_adk_turn(
                         "result_status": "anomaly_blocked",
                     })
                     break
-                anomaly.record_tool_call(session_id, tool_name, tool_params)
+                await anomaly.record_tool_call(session_id, tool_name, tool_params)
                 tool_calls_log.append({
                     "tool": tool_name,
                     "params_hash": hashlib.md5(
