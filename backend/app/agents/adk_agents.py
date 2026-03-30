@@ -93,28 +93,23 @@ def get_all_available_cities() -> dict:
     try:
         csv_path = Path(__file__).resolve().parents[2] / "data" / "dataset.csv"
         cities = set()
-        
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             col_name = 'city' if 'city' in reader.fieldnames else 'location'
-            
             for row in reader:
                 val = row.get(col_name)
                 if val:
                     cities.add(val.strip())
-        
         city_list = sorted(list(cities))
-        
         return {
-            "status": "success",
+            "status": "cities_found",
             "total_cities": len(city_list),
-            "cities_list": ", ".join(city_list),
-            "instruction": "Stop calling tools. Pass this exact list of cities to the voice agent to present to the user."
+            "cities": city_list,
         }
     except Exception as e:
         return {
-            "status": "error", 
-            "message": f"Could not retrieve cities. Error: {str(e)}"
+            "status": "error",
+            "error": str(e),
         }
 
 
@@ -182,32 +177,38 @@ async def search_properties(
     if not results:
         return {
             "status": "no_results",
-            "message": f"No properties found in {city} matching your criteria.",
-            "suggestion": "Try a different city, adjust budget, or broaden filters.",
+            "city": city,
+            "filters_applied": {
+                "budget": budget,
+                "beds": beds,
+                "property_type": property_type,
+                "amenities": amenities,
+            },
         }
 
-    # V2: Uncapped results. Show exactly what the database found.
-    top = results
     formatted = []
-    for i, r in enumerate(top, 1):
-        entry = {
+    for i, r in enumerate(results, 1):
+        formatted.append({
             "number": i,
+            "id": r.get("id"),
             "title": r.get("title", "Property"),
             "city": (r.get("city") or "").title(),
             "price_per_night": r.get("price_per_night"),
             "bedrooms": r.get("bedrooms"),
             "property_type": r.get("property_type", ""),
             "rating": r.get("rating"),
-            "id": r.get("id"),
-        }
-        formatted.append(entry)
+        })
 
     return {
-        "status": "success",
+        "status": "properties_found",
         "total_found": len(results),
-        "showing": len(formatted),
         "properties": formatted,
-        "instruction": "Present these as a numbered list. Ask the user to pick one by number. Remember the property details (id, title, price_per_night) for when they want to book.",
+        "query_context": {
+            "city": city,
+            "budget": budget,
+            "beds": beds,
+            "property_type": property_type,
+        },
     }
 
 
@@ -223,6 +224,7 @@ async def get_property_details(property_id: str) -> dict:
             return {
                 "status": "property_details",
                 "property": {
+                    "id": property_id,
                     "title": r.get("title"),
                     "city": r.get("city"),
                     "price_per_night": r.get("price_per_night"),
@@ -230,24 +232,55 @@ async def get_property_details(property_id: str) -> dict:
                     "bathrooms": r.get("bathrooms"),
                     "amenities": r.get("amenities"),
                     "description": r.get("description"),
-                    "rating": r.get("rating")
+                    "rating": r.get("rating"),
                 },
-                "instruction": "Present the property details beautifully using markdown (Title, City, Beds/Baths, Price, Amenities, Description). CRITICAL: Do NOT write the words 'Property Card' at the top. Just show the details naturally. End by asking: 'Would you like to proceed with booking this property?'"
             }
 
-    return {"status": "error", "message": "Property not found."}
+    return {"status": "not_found", "property_id": property_id}
+
+
+def handle_small_talk(message_type: str, user_message: str = "") -> dict:
+    """Handle greetings, thanks, casual conversation, and acknowledgements.
+
+    Use this tool ONLY for non-actionable social messages such as:
+    - Greetings: "hi", "hello", "hey", "good morning"
+    - Acknowledgements: "ok", "thanks", "thank you", "got it", "sure", "alright"
+    - Goodbyes: "bye", "goodbye", "see you"
+    - Affirmations with no booking context: "great", "perfect", "cool"
+
+    Do NOT use this for booking intent, property questions, or policy questions.
+
+    Args:
+        message_type: One of 'greeting', 'thanks', 'goodbye', 'acknowledgement'.
+        user_message: The user's raw message text.
+    """
+    return {
+        "status": "casual_interaction",
+        "message_type": message_type,
+        "user_input": user_message,
+    }
 
 
 async def check_faq(question: str) -> dict:
     """Look up a policy or FAQ question about the booking platform.
 
-    Use this tool when the user asks about rules, policies, check-in times,
-    cancellation, refunds, wifi, pets, smoking, parking, payment methods,
-    security deposits, or any other platform/property question.
+    Use this tool ONLY when the user asks a genuine question about rules,
+    policies, check-in/check-out times, cancellation, refunds, wifi, pets,
+    smoking, parking, payment methods, or security deposits.
+
+    DO NOT call this for greetings, thanks, or casual chat — use handle_small_talk.
+    DO NOT call this with an empty or vague question string.
 
     Args:
-        question: The user's policy or FAQ question.
+        question: The user's specific policy or FAQ question (must not be empty).
     """
+    # Guard: reject empty or extremely short queries immediately
+    if not question or len(question.strip()) < 4:
+        return {
+            "status": "not_found",
+            "message": "Please ask a specific question about our policies or services.",
+        }
+
     from .tools.rust_client import execute_tool
 
     # Send to Rust gateway — the CAG layer will intercept known policies
@@ -255,9 +288,9 @@ async def check_faq(question: str) -> dict:
         result = await execute_tool(
             data={"intent": "faq", "question": question},
         )
-        if result and not result.get("fallback"):
-            # CAG hit or database result
-            answer = result.get("answer") or result.get("result", {}).get("answer")
+        # Guard against None return (Rust gateway offline) — prevents NoneType crash
+        if result is not None and not result.get("fallback"):
+            answer = result.get("answer") or (result.get("result") or {}).get("answer")
             if answer:
                 return {"status": "answered", "answer": answer, "source": "policy_database"}
     except Exception as e:
@@ -270,19 +303,21 @@ async def check_faq(question: str) -> dict:
         reply = faq_result.get("reply", "")
         if reply:
             return {"status": "answered", "answer": reply, "source": "rag_pipeline"}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("FAQ enhanced agent failed: %s", e)
 
     # Basic fallback
-    from ..services.faq import faq_lookup
-    ans = faq_lookup(question)
-    if ans:
-        return {"status": "answered", "answer": ans, "source": "basic_faq"}
+    try:
+        from ..services.faq import faq_lookup
+        ans = faq_lookup(question)
+        if ans:
+            return {"status": "answered", "answer": ans, "source": "basic_faq"}
+    except Exception as e:
+        logger.warning("Basic FAQ fallback failed: %s", e)
 
     return {
-        "status": "not_found",
-        "message": "I couldn't find a specific answer to that question.",
-        "suggestion": "Would you like me to connect you with a human agent?",
+        "status": "faq_not_found",
+        "question": question,
     }
 
 
@@ -327,9 +362,8 @@ async def check_booking_status(booking_id: str) -> dict:
         pass
 
     return {
-        "status": "not_found",
-        "message": f"Could not find booking {booking_id}.",
-        "suggestion": "Please double-check the booking ID and try again.",
+        "status": "booking_not_found",
+        "booking_id": booking_id,
     }
 
 
@@ -347,9 +381,10 @@ async def request_booking_details(missing_info: str) -> dict:
     Args:
         missing_info: A comma-separated list of what is still needed (e.g., "full name, email, phone, check-in date, check-out date, number of guests").
     """
+    missing_fields = [f.strip() for f in missing_info.split(",") if f.strip()]
     return {
         "status": "gathering_info",
-        "instruction": f"Stop calling tools. Ask the user to provide the following missing information to continue their booking: {missing_info}"
+        "missing_fields": missing_fields,
     }
 
 
@@ -404,10 +439,9 @@ async def review_booking_details(
             "check_out": check_out,
             "nights": nights,
             "guests": guests,
-            "price_per_night": f"${price_per_night:.2f}",
-            "total": f"${total_price:.2f}",
+            "price_per_night": price_per_night,
+            "total": round(total_price, 2),
         },
-        "instruction": "Stop calling tools. Present this booking summary beautifully and ask: 'Everything looks great! Shall I go ahead and confirm this booking, or would you like to change anything?'"
     }
 
 
@@ -476,17 +510,17 @@ async def process_v2_booking(
         "status": "booking_confirmed",
         "receipt": {
             "booking_id": booking_id,
-            "property": property_title,
-            "guest": guest_name,
-            "email": guest_email,
-            "phone": guest_phone,
-            "dates": f"{check_in} to {check_out}",
+            "property_title": property_title,
+            "guest_name": guest_name,
+            "guest_email": guest_email,
+            "guest_phone": guest_phone,
+            "check_in": check_in,
+            "check_out": check_out,
             "nights": nights,
             "guests": guests,
-            "price_per_night": f"${price_per_night:.2f}",
-            "total": f"${total_price:.2f}",
+            "price_per_night": price_per_night,
+            "total_amount": round(total_price, 2),
         },
-        "instruction": "Stop calling tools. Congratulate the user and display the full receipt beautifully."
     }
 
 
@@ -502,12 +536,8 @@ async def escalate_to_human(reason: str) -> dict:
         reason: Brief description of why the handoff is needed.
     """
     return {
-        "status": "handoff",
-        "message": (
-            f"I'll connect you with a human specialist right away. "
-            f"Reason: {reason}\n\n"
-            "Please share your email or phone number and a preferred contact time."
-        ),
+        "status": "handoff_required",
+        "reason": reason,
     }
 
 
@@ -516,45 +546,55 @@ async def escalate_to_human(reason: str) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 
 TRIAGE_INSTRUCTION = """\
-You are a hotel booking concierge routing engine. Your ONLY job is to analyze
-the user's message and call the correct tool.
+You are a pure routing switchboard for a hotel booking concierge system.
+Your ONLY job is to classify the user's intent and call exactly ONE tool with the
+correct extracted arguments. You do NOT generate any conversational text.
+You do NOT greet, explain, apologize, or add pleasantries.
+You are a machine. The Voice Agent handles all conversation.
 
-ROUTING RULES:
-1. Property search / browsing
-   → call `search_properties` or `get_all_available_cities`
-2. Policies, FAQ, rules, cancellation, refunds, amenities
-   → call `check_faq`
-3. User gives a booking ID or asks about an existing booking
-   → call `check_booking_status`
-4. User selects a numbered property from search results (e.g. "option 3", "the second one")
-   → call `get_property_details` with that property's ID. Do NOT request booking details yet.
-5. User asks to book — strict 3-step sequence:
-   STEP A — Gather: If ANY of (name, email, phone, check-in, check-out, guests) are missing
-            → call `request_booking_details` listing exactly what is still needed.
-   STEP B — Review: Once ALL details are present but the user has NOT yet confirmed
-            → call `review_booking_details` with all collected values.
-            If the user wants to correct a detail (e.g. "change the dates"),
-            silently update your context and call `review_booking_details` again
-            with the corrected values. Do NOT call `process_v2_booking` yet.
-   STEP C — Confirm: ONLY after the user explicitly replies "yes", "confirm",
-            "go ahead", "book it", or any clear affirmation after seeing the review
-            → call `process_v2_booking` with the final agreed values.
-6. User asks for a human or cannot be helped
-   → call `escalate_to_human`
-7. Greeting only
-   → respond with a brief greeting via the voice agent.
+ROUTING RULES (evaluate in order):
 
-ANTI-HALLUCINATION RULES (strictly enforced):
-- NEVER invent, guess, or assume dates, guest count, name, email, or phone.
-- NEVER call `process_v2_booking` without the user having seen and verbally confirmed
-  the review summary. The review step is mandatory — there are NO shortcuts.
-- Accumulate details provided across multiple messages. Do NOT re-ask for details
-  the user has already given.
-- If the user tries to correct a mistake during review, update and re-show the review
-  (call `review_booking_details` again) — never escalate to human for corrections.
+0. CASUAL / SOCIAL — greetings, thanks, acknowledgements, goodbyes, small talk
+   with no actionable intent (e.g. "hi", "ok", "thanks", "bye", "great", "sure")
+   → call `handle_small_talk`
+     - message_type: one of 'greeting' | 'thanks' | 'goodbye' | 'acknowledgement'
+     - user_message: the user's raw message verbatim
+   CRITICAL: NEVER call `check_faq` for social messages.
 
-CRITICAL: Once a tool returns a result, output it as plain text for the voice agent.
-Do NOT call the same tool twice in a row. NEVER generate conversational text yourself.
+1. PROPERTY SEARCH — user wants to find or browse accommodation
+   → call `search_properties` with: city (required), and any of budget/beds/
+     property_type/amenities the user mentioned.
+   → call `get_all_available_cities` ONLY if user asks for the city list.
+
+2. FAQ / POLICY — user asks a specific question about rules, cancellation,
+   refunds, check-in/out, pets, wifi, parking, payments, deposits
+   → call `check_faq` with the user's verbatim question.
+   CRITICAL: `question` argument must be the user's EXACT words. NEVER empty.
+
+3. BOOKING STATUS — user gives a booking ID or asks about a reservation
+   → call `check_booking_status` with the booking_id.
+
+4. PROPERTY SELECTION — user picks a number from a previous search list
+   → call `get_property_details` with the property's ID from context.
+
+5. BOOKING FLOW — strict 3-step gate:
+   STEP A (Gather): ANY of [name, email, phone, check-in, check-out, guests]
+     is missing → call `request_booking_details` with missing_info as a
+     comma-separated list of the missing fields.
+   STEP B (Review): ALL details present, user NOT yet confirmed
+     → call `review_booking_details` with all values.
+     If user corrects a value, re-call `review_booking_details` with updated data.
+   STEP C (Confirm): User explicitly confirmed ("yes", "confirm", "book it",
+     "go ahead") AFTER seeing the review → call `process_v2_booking`.
+
+6. HUMAN ESCALATION — user asks for a human, or you cannot resolve with tools
+   → call `escalate_to_human` with a brief reason.
+
+HARD CONSTRAINTS:
+- Extract only EXPLICIT user-provided values. Never invent dates, names, or emails.
+- `process_v2_booking` requires prior review confirmation. No shortcuts.
+- Call each tool exactly once per message. Never loop.
+- Output only the raw tool result for the Voice Agent. No extra text.
 """
 
 triage_router = LlmAgent(
@@ -563,6 +603,7 @@ triage_router = LlmAgent(
     description="Routes user intent to the correct tool. Does not generate conversational text.",
     instruction=TRIAGE_INSTRUCTION,
     tools=[
+        handle_small_talk,
         search_properties,
         get_property_details,
         check_faq,
@@ -578,45 +619,97 @@ triage_router = LlmAgent(
 )
 
 VOICE_INSTRUCTION = """\
-You are a warm, professional hotel booking concierge. Your job is to take the
-raw tool output from the routing engine and transform it into a friendly,
-human-like response for the user.
+You are a dynamic, generative AI hotel booking concierge — warm, witty, and
+professionally charming. You do NOT follow a script. You reason probabilistically
+from the structured state data you receive and generate context-aware, natural
+language responses that feel genuinely human.
 
-The routing engine's output is available as: {router_output}
+The routing engine's structured output is available as: {router_output}
 
-RULES:
-- search results (status: success): Present as a clean numbered list — title, city,
-  price/night, bedrooms. End with: "Which one catches your eye?"
+YOUR OPERATING PHILOSOPHY:
+- You are the conversational brain. The router is just a data collector.
+- Read the `status` field to understand the current state.
+- Generate your response dynamically based on the data, the user's apparent
+  tone, and the conversation context. Adapt your register — be warmer for
+  excited users, more reassuring for uncertain ones.
+- Never expose raw JSON, status codes, field names, or tool internals.
+- Never write pre-scripted text verbatim. Every response is freshly generated.
 
-- property details (status: property_details): Format beautifully with markdown.
-  DO NOT write the words "Property Card". Show title, city, beds/baths, price,
-  amenities, description. End with: "Would you like to book this property?"
+STATE HANDLERS — what to do for each status:
 
-- gathering info (status: gathering_info): Sound like a warm concierge.
-  Open with "Great choice! I just need a few details to secure this for you:"
-  or "Almost there! Could you share...". Ask naturally. Never mention YYYY-MM-DD
-  format — just say 'check-in date' or 'arrival date'.
+`casual_interaction`:
+  The router captured a social/casual message. Read `message_type` (greeting,
+  thanks, goodbye, acknowledgement) and `user_input`. Respond naturally and
+  warmly as a real concierge would — vary your phrasing, match the user's energy,
+  and gently offer to help further if appropriate.
 
-- review pending (status: review_pending): Present the booking summary as a
-  clean, elegant card. Use this structure:
-    ✨ **Booking Review**
-    🏠 **Property:** <property>
-    👤 **Guest:** <guest_name>
-    📧 **Email:** <guest_email>
-    📞 **Phone:** <guest_phone>
-    📅 **Check-in:** <check_in>  →  **Check-out:** <check_out>
-    🌙 **Nights:** <nights>  |  👥 **Guests:** <guests>
-    💰 **Price/night:** <price_per_night>  |  **Total:** <total>
-  Then ask warmly: "Everything looks perfect! Shall I go ahead and confirm this
-  booking, or would you like to adjust anything?"
+`cities_found`:
+  Present the city list from `cities` in a clean, readable format.
+  Invite the user to pick one or ask for more filters.
 
-- booking confirmed (status: booking_confirmed): Congratulate enthusiastically!
-  Show the receipt as a clean summary with all fields. End with the booking ID
-  prominently so they can reference it later.
+`properties_found`:
+  Format the `properties` array as an elegant numbered list:
+  property name, city, price per night, bedrooms, rating.
+  Close with an inviting question to pick one.
 
-- handoff (status: handoff): Deliver the message warmly.
+`no_results`:
+  The search returned nothing. Empathetically acknowledge it, summarise
+  the filters from `filters_applied`, and suggest broadening the criteria.
 
-- Keep all responses warm, concise, and human. Never expose raw JSON or tool names.
+`property_details`:
+  Render the property from `property` beautifully in markdown:
+  title, location, beds/baths, price, amenities, description, rating.
+  Do NOT use the phrase "Property Card". Close naturally by asking if they'd
+  like to proceed with a booking.
+
+`answered` (FAQ):
+  Deliver the `answer` field naturally. Do not add disclaimers unless the
+  answer itself warrants one. Keep it concise and informative.
+
+`faq_not_found`:
+  Acknowledge you couldn't find specific info on the `question`, apologise
+  briefly, and offer to escalate or rephrase.
+
+`gathering_info`:
+  The `missing_fields` list tells you what the user hasn't provided yet.
+  Ask for those fields in the most natural, conversational way possible —
+  never list them robotically. Vary your opener each time.
+
+`review_pending`:
+  The `summary` object contains all booking details. Present them as a clean,
+  elegant visual summary (use markdown: bold labels, emoji where tasteful).
+  Include: property, guest name, email, phone, dates, nights, guests, price/night, total.
+  Close with an open, warm confirmation question — not a yes/no binary.
+
+`booking_confirmed`:
+  The booking is done! The `receipt` object has all details.
+  Respond with genuine enthusiasm. Display the receipt clearly.
+  Always highlight the `booking_id` prominently so the user can reference it.
+  Wish them a wonderful stay.
+
+`found` (booking status):
+  Report the booking status, check-in, check-out from the data. Be clear and helpful.
+
+`booking_not_found`:
+  Gently inform the user the booking_id wasn't found and suggest they verify it.
+
+`handoff_required`:
+  Craft a warm, empathetic handoff message. Acknowledge the `reason` naturally.
+  Apologise that you couldn't resolve it yourself, express that a specialist
+  will be better suited, and ask for the user's preferred contact method
+  (email or phone) and a convenient time to reach them.
+
+`error`:
+  Acknowledge the issue gracefully. Do not expose technical details.
+  Offer an alternative path.
+
+GENERAL RULES:
+- Match the user's energy and tone probabilistically.
+- Never start two consecutive responses with the same opener.
+- Use markdown formatting (bold, bullets) for structured data, but keep
+  conversational passages as flowing prose.
+- Keep responses appropriately concise — no padding, no unnecessary repetition.
+- You are an LLM. Think. Reason. Generate. Do not recite.
 """
 
 concierge_voice = LlmAgent(
