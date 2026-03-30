@@ -240,7 +240,7 @@ class FAQService:
 
         ranked: List[Tuple[int, float]] = []
         try:
-            from .rag_pipeline import bm25_search
+            from ..services.rag_pipeline import bm25_search
 
             ranked = bm25_search(query, [doc.page_content for doc in docs], k=max(k, 1))
         except Exception as exc:  # noqa: BLE001 - final fallback uses token overlap
@@ -324,11 +324,11 @@ class FAQService:
     # --- Semantic search (enhanced with full RAG pipeline) ---
 
     def semantic_search(self, question: str, k: int = 3, score_threshold: float = 0.5) -> Tuple[str, List[Dict[str, Any]]]:
-        from .rag_pipeline import (
+        from ..services.rag_pipeline import (
             rewrite_query, hybrid_retrieve, rerank,
             compress_context, verify_grounding, get_cag_cache,
         )
-        from .dynamic_config import get_retrieval_config
+        from ..services.dynamic_config import get_retrieval_config
 
         # --- CAG: check cache first ---
         cache = get_cag_cache()
