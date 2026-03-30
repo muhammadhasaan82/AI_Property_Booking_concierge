@@ -211,6 +211,33 @@ async def search_properties(
     }
 
 
+async def get_property_details(property_id: str) -> dict:
+    """Get full details of a specific property by its ID.
+
+    Call this when the user selects a property from search results (for example, 'option 7').
+    """
+    from ..components.search import _DATASET
+
+    for r in _DATASET:
+        if str(r.get("id")) == property_id:
+            return {
+                "status": "property_details",
+                "property": {
+                    "title": r.get("title"),
+                    "city": r.get("city"),
+                    "price_per_night": r.get("price_per_night"),
+                    "bedrooms": r.get("bedrooms"),
+                    "bathrooms": r.get("bathrooms"),
+                    "amenities": r.get("amenities"),
+                    "description": r.get("description"),
+                    "rating": r.get("rating"),
+                },
+                "instruction": "Present a detailed, ChatGPT-style property card. Then ask: 'Would you like to proceed with booking this property?'",
+            }
+
+    return {"status": "error", "message": "Property not found."}
+
+
 async def check_faq(question: str) -> dict:
     """Look up a policy or FAQ question about the booking platform.
 
@@ -439,19 +466,25 @@ ROUTING RULES:
    → call `check_faq`
 3. If the user provides a booking ID or asks about booking status
    → call `check_booking_status`
-4. If the user wants to book a property, determine if you have their name, email,
-   phone, check-in date, check-out date, and guest count:
+4. If the user selects a property from search results (for example, "option 7"),
+   call `get_property_details` using the property ID from the previous list.
+   Do NOT ask for booking details yet.
+5. If the user explicitly confirms they want to proceed with booking after seeing
+   the property card, determine if you have their name, email, phone, check-in date,
+   check-out date, and guest count:
    - If ANY of these are missing → call `request_booking_details` with a list of what's missing
    - If ALL are present AND you know which property → call `process_v2_booking` with all details
-5. If the user asks to speak to a human or you cannot help
+6. If the user asks to speak to a human or you cannot help
    → call `escalate_to_human`
-6. If the user says hello or greets you, respond with a brief greeting and ask how
+7. If the user says hello or greets you, respond with a brief greeting and ask how
    you can help.
 
 BOOKING DETAIL RULES (CRITICAL — prevents hallucination):
 - You MUST NOT invent, guess, or assume any booking details (dates, guest count, name, email, phone).
 - If the user says "book this" or "I want to book" but has not provided ALL required details,
   you MUST call `request_booking_details` with the missing fields.
+- If the user selects a property from search results, you MUST call `get_property_details`
+  first and show the property card before asking for booking details.
 - Only call `process_v2_booking` when you have EXPLICIT, user-provided values for ALL fields.
 - When the user provides details across multiple messages, accumulate them. Once all are collected,
   call `process_v2_booking`.
@@ -466,6 +499,7 @@ triage_router = LlmAgent(
     instruction=TRIAGE_INSTRUCTION,
     tools=[
         search_properties,
+        get_property_details,
         check_faq,
         check_booking_status,
         request_booking_details,
@@ -488,6 +522,9 @@ RULES:
 - If the output contains property search results, present them as a clean numbered
   list with title, city, price, and bedrooms. End with "Reply with the number of
   the property you'd like to book."
+- If the output contains a property card, present it as a polished confirmation
+  card with the title, city, price, bedrooms, bathrooms, rating, amenities, and
+  description. Then ask exactly: "Would you like to proceed with booking this property?"
 - If the output contains an FAQ answer, present it conversationally.
 - If the output contains booking status, present it clearly with dates and status.
 - If the output contains a booking receipt (booking_confirmed), present the receipt
