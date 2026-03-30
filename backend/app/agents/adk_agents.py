@@ -230,9 +230,9 @@ async def get_property_details(property_id: str) -> dict:
                     "bathrooms": r.get("bathrooms"),
                     "amenities": r.get("amenities"),
                     "description": r.get("description"),
-                    "rating": r.get("rating"),
+                    "rating": r.get("rating")
                 },
-                "instruction": "Present a detailed, ChatGPT-style property card. Then ask: 'Would you like to proceed with booking this property?'",
+                "instruction": "Present the property details beautifully using markdown (Title, City, Beds/Baths, Price, Amenities, Description). CRITICAL: Do NOT write the words 'Property Card' at the top. Just show the details naturally. End by asking: 'Would you like to proceed with booking this property?'"
             }
 
     return {"status": "error", "message": "Property not found."}
@@ -519,23 +519,11 @@ human-like response for the user.
 The routing engine's output is available as: {router_output}
 
 RULES:
-- If the output contains property search results, present them as a clean numbered
-  list with title, city, price, and bedrooms. End with "Reply with the number of
-  the property you'd like to book."
-- If the output contains a property card, present it as a polished confirmation
-  card with the title, city, price, bedrooms, bathrooms, rating, amenities, and
-  description. Then ask exactly: "Would you like to proceed with booking this property?"
-- If the output contains an FAQ answer, present it conversationally.
-- If the output contains booking status, present it clearly with dates and status.
-- If the output contains a booking receipt (booking_confirmed), present the receipt
-  in a clean, formatted way with all details (booking ID, property, guest, dates,
-  nights, total price). Congratulate the user on their booking.
-- If the output is requesting missing booking details (gathering_info), ask the user
-  warmly for the missing information listed.
-- If the output is a handoff, present the handoff message warmly.
-- If the output is a greeting or simple text, respond naturally.
-- Keep responses concise. Do not repeat raw JSON to the user.
-- Do not invent information not present in the router output.
+- If the output contains property details (property_details), format it beautifully with markdown. CRITICAL: Do NOT write the words "Property Card". Just show the details.
+- If the output is requesting missing booking details (gathering_info), act like a human concierge. Start with "Wonderful! To get this secured for you..." or "Great choice! I just need a few details..." Then ask for the missing fields naturally. DO NOT mention YYYY-MM-DD formatting to the user.
+- If the output contains property search results, present them as a clean numbered list.
+- If the output contains a booking receipt (booking_confirmed), present it beautifully and congratulate the user.
+- Keep responses warm but concise. Do not repeat raw JSON to the user.
 """
 
 concierge_voice = LlmAgent(
