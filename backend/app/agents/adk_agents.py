@@ -353,6 +353,64 @@ async def request_booking_details(missing_info: str) -> dict:
     }
 
 
+async def review_booking_details(
+    property_id: str,
+    property_title: str,
+    guest_name: str,
+    guest_email: str,
+    guest_phone: str,
+    check_in: str,
+    check_out: str,
+    guests: int,
+    price_per_night: float,
+) -> dict:
+    """Present a full booking summary for the user to review BEFORE final confirmation.
+
+    Call this tool ONCE when ALL booking details have been collected but the user
+    has NOT yet explicitly said 'yes', 'confirm', 'go ahead', or similar.
+    This gives the user a chance to review and correct any mistakes.
+    If the user wants to change a detail, silently update your context and call
+    this tool again with the corrected values — do NOT call process_v2_booking yet.
+
+    Args:
+        property_id: The unique ID of the property.
+        property_title: The display title of the property.
+        guest_name: The guest's full name.
+        guest_email: The guest's email address.
+        guest_phone: The guest's phone number.
+        check_in: Check-in date in YYYY-MM-DD format.
+        check_out: Check-out date in YYYY-MM-DD format.
+        guests: Number of guests.
+        price_per_night: The nightly price of the property.
+    """
+    try:
+        d1 = datetime.strptime(check_in, "%Y-%m-%d")
+        d2 = datetime.strptime(check_out, "%Y-%m-%d")
+        nights = max((d2 - d1).days, 1)
+    except Exception:
+        nights = 1
+
+    total_price = nights * price_per_night
+
+    return {
+        "status": "review_pending",
+        "summary": {
+            "property": property_title,
+            "property_id": property_id,
+            "guest_name": guest_name,
+            "guest_email": guest_email,
+            "guest_phone": guest_phone,
+            "check_in": check_in,
+            "check_out": check_out,
+            "nights": nights,
+            "guests": guests,
+            "price_per_night": f"${price_per_night:.2f}",
+            "total": f"${total_price:.2f}",
+        },
+        "instruction": "Stop calling tools. Present this booking summary beautifully and ask: 'Everything looks great! Shall I go ahead and confirm this booking, or would you like to change anything?'"
+    }
+
+
 async def process_v2_booking(
     property_id: str,
     property_title: str,
@@ -364,10 +422,14 @@ async def process_v2_booking(
     guests: int,
     price_per_night: float,
 ) -> dict:
-    """Process the final booking ONLY when ALL details have been collected from the user.
+    """Finalise and commit the booking ONLY after the user has explicitly confirmed.
 
-    CRITICAL: Never guess or invent these details. If any are missing, call
-    'request_booking_details' instead. All dates must be in YYYY-MM-DD format.
+    CRITICAL SEQUENCE:
+    1. Use `request_booking_details` if any detail is missing.
+    2. Use `review_booking_details` once all details are collected — let the user confirm.
+    3. Call THIS tool ONLY after the user explicitly says 'yes', 'confirm', 'go ahead', or similar.
+    Never call this tool if the user has not seen and approved the review summary.
+    All dates must be in YYYY-MM-DD format.
 
     Args:
         property_id: The unique ID of the property to book.
@@ -390,26 +452,25 @@ async def process_v2_booking(
     total_price = nights * price_per_night
     booking_id = str(uuid.uuid4())
 
-    # Log to database if available
+    # Persist to database — field names match public.successful_bookings schema
     try:
-        from ..observability.db_logging import log_successful_booking
-        await log_successful_booking({
+        from ..observability.db_logging import insert_successful_booking
+        await insert_successful_booking({
             "booking_id": booking_id,
-            "property_id": property_id,
+            "user_name": guest_name,
+            "user_email": guest_email,
+            "user_phone": guest_phone,
             "property_title": property_title,
-            "guest_name": guest_name,
-            "guest_email": guest_email,
-            "guest_phone": guest_phone,
             "check_in": check_in,
             "check_out": check_out,
             "guests": guests,
             "nights": nights,
-            "price_per_night": price_per_night,
-            "total_price": total_price,
+            "total_amount": round(total_price, 2),
             "status": "confirmed",
+            "source": "v2_adk",
         })
     except Exception as e:
-        logger.warning("[V2 Booking] Could not log booking to DB: %s", e)
+        logger.warning("[V2 Booking] Could not persist booking to DB: %s", e)
 
     return {
         "status": "booking_confirmed",
@@ -425,7 +486,7 @@ async def process_v2_booking(
             "price_per_night": f"${price_per_night:.2f}",
             "total": f"${total_price:.2f}",
         },
-        "instruction": "Stop calling tools. Announce that the booking is confirmed and display the full receipt details to the user in a clear, formatted way."
+        "instruction": "Stop calling tools. Congratulate the user and display the full receipt beautifully."
     }
 
 
@@ -459,37 +520,41 @@ You are a hotel booking concierge routing engine. Your ONLY job is to analyze
 the user's message and call the correct tool.
 
 ROUTING RULES:
-1. If the user asks about properties, cities, apartments, houses, or accommodation
+1. Property search / browsing
    → call `search_properties` or `get_all_available_cities`
-2. If the user asks about policies, rules, check-in times, cancellation, refunds,
-   wifi, pets, smoking, parking, payment methods, or any FAQ
+2. Policies, FAQ, rules, cancellation, refunds, amenities
    → call `check_faq`
-3. If the user provides a booking ID or asks about booking status
+3. User gives a booking ID or asks about an existing booking
    → call `check_booking_status`
-4. If the user selects a property from search results (for example, "option 7"),
-   call `get_property_details` using the property ID from the previous list.
-   Do NOT ask for booking details yet.
-5. If the user explicitly confirms they want to proceed with booking after seeing
-   the property card, determine if you have their name, email, phone, check-in date,
-   check-out date, and guest count:
-   - If ANY of these are missing → call `request_booking_details` with a list of what's missing
-   - If ALL are present AND you know which property → call `process_v2_booking` with all details
-6. If the user asks to speak to a human or you cannot help
+4. User selects a numbered property from search results (e.g. "option 3", "the second one")
+   → call `get_property_details` with that property's ID. Do NOT request booking details yet.
+5. User asks to book — strict 3-step sequence:
+   STEP A — Gather: If ANY of (name, email, phone, check-in, check-out, guests) are missing
+            → call `request_booking_details` listing exactly what is still needed.
+   STEP B — Review: Once ALL details are present but the user has NOT yet confirmed
+            → call `review_booking_details` with all collected values.
+            If the user wants to correct a detail (e.g. "change the dates"),
+            silently update your context and call `review_booking_details` again
+            with the corrected values. Do NOT call `process_v2_booking` yet.
+   STEP C — Confirm: ONLY after the user explicitly replies "yes", "confirm",
+            "go ahead", "book it", or any clear affirmation after seeing the review
+            → call `process_v2_booking` with the final agreed values.
+6. User asks for a human or cannot be helped
    → call `escalate_to_human`
-7. If the user says hello or greets you, respond with a brief greeting and ask how
-   you can help.
+7. Greeting only
+   → respond with a brief greeting via the voice agent.
 
-BOOKING DETAIL RULES (CRITICAL — prevents hallucination):
-- You MUST NOT invent, guess, or assume any booking details (dates, guest count, name, email, phone).
-- If the user says "book this" or "I want to book" but has not provided ALL required details,
-  you MUST call `request_booking_details` with the missing fields.
-- If the user selects a property from search results, you MUST call `get_property_details`
-  first and show the property card before asking for booking details.
-- Only call `process_v2_booking` when you have EXPLICIT, user-provided values for ALL fields.
-- When the user provides details across multiple messages, accumulate them. Once all are collected,
-  call `process_v2_booking`.
+ANTI-HALLUCINATION RULES (strictly enforced):
+- NEVER invent, guess, or assume dates, guest count, name, email, or phone.
+- NEVER call `process_v2_booking` without the user having seen and verbally confirmed
+  the review summary. The review step is mandatory — there are NO shortcuts.
+- Accumulate details provided across multiple messages. Do NOT re-ask for details
+  the user has already given.
+- If the user tries to correct a mistake during review, update and re-show the review
+  (call `review_booking_details` again) — never escalate to human for corrections.
 
-CRITICAL: Once a tool returns a result, you MUST output that result as plain text so it can be passed to the voice agent. Do NOT call the same tool repeatedly. NEVER generate conversational pleasantries yourself.
+CRITICAL: Once a tool returns a result, output it as plain text for the voice agent.
+Do NOT call the same tool twice in a row. NEVER generate conversational text yourself.
 """
 
 triage_router = LlmAgent(
@@ -503,6 +568,7 @@ triage_router = LlmAgent(
         check_faq,
         check_booking_status,
         request_booking_details,
+        review_booking_details,
         process_v2_booking,
         escalate_to_human,
         get_all_available_cities,
@@ -519,11 +585,38 @@ human-like response for the user.
 The routing engine's output is available as: {router_output}
 
 RULES:
-- If the output contains property details (property_details), format it beautifully with markdown. CRITICAL: Do NOT write the words "Property Card". Just show the details.
-- If the output is requesting missing booking details (gathering_info), act like a human concierge. Start with "Wonderful! To get this secured for you..." or "Great choice! I just need a few details..." Then ask for the missing fields naturally. DO NOT mention YYYY-MM-DD formatting to the user.
-- If the output contains property search results, present them as a clean numbered list.
-- If the output contains a booking receipt (booking_confirmed), present it beautifully and congratulate the user.
-- Keep responses warm but concise. Do not repeat raw JSON to the user.
+- search results (status: success): Present as a clean numbered list — title, city,
+  price/night, bedrooms. End with: "Which one catches your eye?"
+
+- property details (status: property_details): Format beautifully with markdown.
+  DO NOT write the words "Property Card". Show title, city, beds/baths, price,
+  amenities, description. End with: "Would you like to book this property?"
+
+- gathering info (status: gathering_info): Sound like a warm concierge.
+  Open with "Great choice! I just need a few details to secure this for you:"
+  or "Almost there! Could you share...". Ask naturally. Never mention YYYY-MM-DD
+  format — just say 'check-in date' or 'arrival date'.
+
+- review pending (status: review_pending): Present the booking summary as a
+  clean, elegant card. Use this structure:
+    ✨ **Booking Review**
+    🏠 **Property:** <property>
+    👤 **Guest:** <guest_name>
+    📧 **Email:** <guest_email>
+    📞 **Phone:** <guest_phone>
+    📅 **Check-in:** <check_in>  →  **Check-out:** <check_out>
+    🌙 **Nights:** <nights>  |  👥 **Guests:** <guests>
+    💰 **Price/night:** <price_per_night>  |  **Total:** <total>
+  Then ask warmly: "Everything looks perfect! Shall I go ahead and confirm this
+  booking, or would you like to adjust anything?"
+
+- booking confirmed (status: booking_confirmed): Congratulate enthusiastically!
+  Show the receipt as a clean summary with all fields. End with the booking ID
+  prominently so they can reference it later.
+
+- handoff (status: handoff): Deliver the message warmly.
+
+- Keep all responses warm, concise, and human. Never expose raw JSON or tool names.
 """
 
 concierge_voice = LlmAgent(
