@@ -364,9 +364,11 @@ async def run_adk_turn(
         logger.debug("[ADK] Could not fetch cognitive context: %s", e)
 
     try:
-        if not getattr(session, "state", None):
-            session.state = {}
-        session.state["user_cognitive_context"] = user_cognitive_context
+        session_state = getattr(session, "state", None)
+        if not isinstance(session_state, dict):
+            session_state = {}
+            session.state = session_state
+        session_state["user_cognitive_context"] = user_cognitive_context
     except Exception as e:
         logger.debug("[ADK] Could not attach cognitive context to session: %s", e)
 
