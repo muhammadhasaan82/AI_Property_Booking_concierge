@@ -9,8 +9,8 @@ Architecture:
   - LLM extraction uses the project's existing provider keys such as
     `OPENAI_API_KEY` or `GROQ_API_KEY`.
   - Vector storage stays on infrastructure we control:
-      - default: local Chroma persistence on disk
-      - optional: PostgreSQL/pgvector via the existing database connection string
+      - default: PostgreSQL/pgvector via the existing database connection string
+      - optional: local disk persistence (for example, Chroma)
   - All public functions are async and failure-safe.
   - Sync Mem0 SDK calls are offloaded with `asyncio.to_thread(...)`.
 """
@@ -33,17 +33,17 @@ logger = logging.getLogger(__name__)
 MEM0_TIMEOUT: float = float(os.getenv("MEM0_TIMEOUT", "3.0"))
 MEM0_SEARCH_LIMIT: int = int(os.getenv("MEM0_SEARCH_LIMIT", "5"))
 
-MEM0_LLM_PROVIDER: str = os.getenv("MEM0_LLM_PROVIDER", "openai").strip().lower()
-MEM0_LLM_MODEL: str = os.getenv("MEM0_LLM_MODEL", "gpt-4.1-nano-2025-04-14").strip()
-MEM0_EMBEDDER_PROVIDER: str = os.getenv("MEM0_EMBEDDER_PROVIDER", "openai").strip().lower()
-MEM0_EMBEDDER_MODEL: str = os.getenv("MEM0_EMBEDDER_MODEL", "text-embedding-3-small").strip()
+MEM0_LLM_PROVIDER: str = os.getenv("MEM0_LLM_PROVIDER", "groq").strip().lower()
+MEM0_LLM_MODEL: str = os.getenv("MEM0_LLM_MODEL", "llama-3.3-70b-versatile").strip()
+MEM0_EMBEDDER_PROVIDER: str = os.getenv("MEM0_EMBEDDER_PROVIDER", "huggingface").strip().lower()
+MEM0_EMBEDDER_MODEL: str = os.getenv("MEM0_EMBEDDER_MODEL", "BAAI/bge-large-en-v1.5").strip()
 
-MEM0_VECTOR_STORE: str = os.getenv("MEM0_VECTOR_STORE", "chroma").strip().lower()
+MEM0_VECTOR_STORE: str = os.getenv("MEM0_VECTOR_STORE", "pgvector").strip().lower()
 MEM0_COLLECTION_NAME: str = os.getenv("MEM0_COLLECTION_NAME", "ai_concierge_memories").strip()
 
-_MEM0_ROOT = Path(os.getenv("MEM0_STORAGE_DIR", "")).expanduser() if os.getenv("MEM0_STORAGE_DIR") else Path(__file__).resolve().parents[2] / ".mem0"
-MEM0_HISTORY_DB_PATH = Path(os.getenv("MEM0_HISTORY_DB_PATH", str(_MEM0_ROOT / "history.db"))).expanduser()
-MEM0_CHROMA_PATH = Path(os.getenv("MEM0_CHROMA_PATH", str(_MEM0_ROOT / "chroma"))).expanduser()
+MEM0_STORAGE_DIR: str = os.getenv("MEM0_STORAGE_DIR", "backend/.mem0").strip()
+MEM0_STORAGE_PATH = Path(MEM0_STORAGE_DIR).expanduser()
+MEM0_HISTORY_DB_PATH: str = os.getenv("MEM0_HISTORY_DB_PATH", "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -119,24 +119,29 @@ def _build_vector_store_config() -> dict[str, Any]:
             },
         }
 
-    MEM0_CHROMA_PATH.mkdir(parents=True, exist_ok=True)
+    MEM0_STORAGE_PATH.mkdir(parents=True, exist_ok=True)
     return {
-        "provider": "chroma",
+        "provider": provider,
         "config": {
             "collection_name": MEM0_COLLECTION_NAME,
-            "path": str(MEM0_CHROMA_PATH),
+            "path": str(MEM0_STORAGE_PATH),
         },
     }
 
 
 def _build_mem0_config() -> dict[str, Any]:
-    MEM0_HISTORY_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return {
+    config: dict[str, Any] = {
         "vector_store": _build_vector_store_config(),
         "llm": _build_llm_config(),
         "embedder": _build_embedder_config(),
-        "history_db_path": str(MEM0_HISTORY_DB_PATH),
     }
+
+    if MEM0_HISTORY_DB_PATH:
+        history_path = Path(MEM0_HISTORY_DB_PATH).expanduser()
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        config["history_db_path"] = str(history_path)
+
+    return config
 
 
 def _camelize_vector_store(config: dict[str, Any]) -> dict[str, Any]:
@@ -152,7 +157,8 @@ def _camelize_vector_store(config: dict[str, Any]) -> dict[str, Any]:
 
     alt = dict(config)
     alt["vector_store"] = vector_store
-    alt["historyDbPath"] = alt.pop("history_db_path")
+    if "history_db_path" in alt:
+        alt["historyDbPath"] = alt.pop("history_db_path")
     return alt
 
 
