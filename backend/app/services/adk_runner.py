@@ -42,6 +42,7 @@ _session_service: Optional[InMemorySessionService] = None
 _runner: Optional[Runner] = None
 
 APP_NAME = "ai_concierge"
+DEFAULT_COGNITIVE_CONTEXT = "No prior memory context available."
 
 
 def _get_runner() -> Runner:
@@ -126,6 +127,12 @@ def _extract_text_parts(event: Any) -> str:
     return ""
 
 
+def _normalize_cognitive_context(value: Optional[str]) -> str:
+    if value and str(value).strip():
+        return str(value).strip()
+    return DEFAULT_COGNITIVE_CONTEXT
+
+
 async def _render_voice_from_router_output(
     router_output: str,
     user_cognitive_context: str,
@@ -141,7 +148,7 @@ async def _render_voice_from_router_output(
         system_prompt = (
             VOICE_INSTRUCTION
             .replace("{router_output}", router_output)
-            .replace("{user_cognitive_context}", user_cognitive_context or "")
+            .replace("{user_cognitive_context}", _normalize_cognitive_context(user_cognitive_context))
         )
         temperature = getattr(VOICE_CONFIG, "temperature", 0.6)
 
@@ -344,6 +351,25 @@ async def run_adk_turn(
         )
         logger.info("[ADK] Created new session %s for user %s", session_id, user_id)
 
+    user_cognitive_context = DEFAULT_COGNITIVE_CONTEXT
+    try:
+        from .memory_engine import fetch_user_context
+
+        mem0_context = await fetch_user_context(
+            user_id=user_id,
+            current_query=cleaned_message,
+        )
+        user_cognitive_context = _normalize_cognitive_context(mem0_context)
+    except Exception as e:
+        logger.debug("[ADK] Could not fetch cognitive context: %s", e)
+
+    try:
+        if not getattr(session, "state", None):
+            session.state = {}
+        session.state["user_cognitive_context"] = user_cognitive_context
+    except Exception as e:
+        logger.debug("[ADK] Could not attach cognitive context to session: %s", e)
+
     # --- Execute the pipeline ---
     user_content = Content(parts=[Part(text=cleaned_message)])
     t0 = time.monotonic()
@@ -352,7 +378,6 @@ async def run_adk_turn(
     tool_calls_log: List[Dict[str, Any]] = []
     anomaly_triggered = False
     router_output = ""
-    user_cognitive_context = ""
 
     try:
         async for event in runner.run_async(
@@ -425,20 +450,11 @@ async def run_adk_turn(
     try:
         if updated_session and updated_session.state:
             router_output = router_output or str(updated_session.state.get("router_output", "") or "")
-            user_cognitive_context = str(updated_session.state.get("user_cognitive_context", "") or "")
+            user_cognitive_context = _normalize_cognitive_context(
+                updated_session.state.get("user_cognitive_context", user_cognitive_context)
+            )
     except Exception:
         pass
-
-    if not user_cognitive_context:
-        try:
-            from .memory_engine import fetch_user_context
-
-            user_cognitive_context = await fetch_user_context(
-                user_id=user_id,
-                current_query=cleaned_message,
-            )
-        except Exception as e:
-            logger.debug("[ADK] Could not fetch cognitive context: %s", e)
 
     # --- Anomaly: yield graceful fallback message ---
     if anomaly_triggered:
