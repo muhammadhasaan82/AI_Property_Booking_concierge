@@ -38,7 +38,7 @@ MEM0_LLM_MODEL: str = os.getenv("MEM0_LLM_MODEL", "llama-3.3-70b-versatile").str
 MEM0_EMBEDDER_PROVIDER: str = os.getenv("MEM0_EMBEDDER_PROVIDER", "huggingface").strip().lower()
 MEM0_EMBEDDER_MODEL: str = os.getenv("MEM0_EMBEDDER_MODEL", "BAAI/bge-large-en-v1.5").strip()
 
-MEM0_VECTOR_STORE: str = os.getenv("MEM0_VECTOR_STORE", "pgvector").strip().lower()
+MEM0_VECTOR_STORE: str = os.getenv("MEM0_VECTOR_STORE", "chroma").strip().lower()
 MEM0_COLLECTION_NAME: str = os.getenv("MEM0_COLLECTION_NAME", "ai_concierge_memories").strip()
 
 MEM0_STORAGE_DIR: str = os.getenv("MEM0_STORAGE_DIR", "backend/.mem0").strip()
