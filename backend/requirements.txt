@@ -48,5 +48,8 @@ pydantic>=2.11.1,<3.0.0
 litellm
 google-adk>=1.27.1
 
+# --- cognitive memory ---
+mem0ai>=0.1.0
+
 # --- tests ---
 pytest>=9.0.2

@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS dpo_trajectories (
     booking_id TEXT,
     turn_count INTEGER DEFAULT 1,
     latency_ms REAL,
+    cognitive_context TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -90,6 +91,7 @@ def _write_sqlite(
     booking_id: Optional[str],
     turn_count: int,
     latency_ms: Optional[float],
+    cognitive_context: Optional[str] = None,
 ) -> bool:
     """Synchronous SQLite insert (runs in thread pool)."""
     try:
@@ -99,8 +101,9 @@ def _write_sqlite(
             """
             INSERT INTO dpo_trajectories
                 (session_id, user_id, trajectory_tag, user_message,
-                 tool_calls, final_reply, booking_id, turn_count, latency_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 tool_calls, final_reply, booking_id, turn_count, latency_ms,
+                 cognitive_context)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -112,6 +115,7 @@ def _write_sqlite(
                 booking_id,
                 turn_count,
                 latency_ms,
+                cognitive_context,
             ),
         )
         conn.commit()
@@ -132,6 +136,7 @@ async def _mirror_supabase(
     booking_id: Optional[str],
     turn_count: int,
     latency_ms: Optional[float],
+    cognitive_context: Optional[str] = None,
 ) -> bool:
     """Best-effort mirror to Supabase via db_client."""
     try:
@@ -140,8 +145,9 @@ async def _mirror_supabase(
             """
             INSERT INTO public.dpo_trajectories
                 (session_id, user_id, trajectory_tag, user_message,
-                 tool_calls, final_reply, booking_id, turn_count, latency_ms)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 tool_calls, final_reply, booking_id, turn_count, latency_ms,
+                 cognitive_context)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 session_id,
@@ -153,6 +159,7 @@ async def _mirror_supabase(
                 booking_id,
                 turn_count,
                 latency_ms,
+                cognitive_context,
             ),
         )
         return True
@@ -230,6 +237,7 @@ async def log_trajectory(
     booking_id: Optional[str] = None,
     turn_count: int = 1,
     latency_ms: Optional[float] = None,
+    cognitive_context: Optional[str] = None,
 ) -> None:
     """Log a full trajectory turn. Fire-and-forget — never blocks the caller.
 
@@ -242,6 +250,7 @@ async def log_trajectory(
         booking_id: Extracted booking ID if any.
         turn_count: Turn number in the session.
         latency_ms: Pipeline execution time in milliseconds.
+        cognitive_context: Mem0 user preference context active during this turn.
     """
     if not DPO_TELEMETRY_ENABLED:
         return
@@ -265,6 +274,7 @@ async def log_trajectory(
         booking_id,
         turn_count,
         latency_ms,
+        cognitive_context,
     )
 
     asyncio.create_task(
@@ -278,10 +288,12 @@ async def log_trajectory(
             booking_id,
             turn_count,
             latency_ms,
+            cognitive_context,
         )
     )
 
     logger.debug(
-        "[Telemetry] Logged [%s] session=%s tools=%d booking=%s",
+        "[Telemetry] Logged [%s] session=%s tools=%d booking=%s mem0=%s",
         tag, session_id, len(tool_calls), booking_id or "none",
+        "yes" if cognitive_context else "no",
     )
