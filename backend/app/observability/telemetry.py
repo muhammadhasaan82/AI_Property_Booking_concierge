@@ -63,22 +63,48 @@ CREATE INDEX IF NOT EXISTS idx_dpo_created ON dpo_trajectories(created_at);
 """
 
 
-def _ensure_sqlite_schema() -> None:
-    """Create the SQLite DB and schema if they don't exist."""
+def init_db() -> None:
+    """Create/upgrade the SQLite DB schema used for telemetry."""
     global _DB_INITIALIZED
     if _DB_INITIALIZED:
         return
+
     with _DB_LOCK:
         if _DB_INITIALIZED:
             return
+
+        conn = None
         try:
-            conn = sqlite3.connect(DPO_SQLITE_PATH)
+            db_path = Path(DPO_SQLITE_PATH)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+
+            conn = sqlite3.connect(str(db_path))
             conn.executescript(_SCHEMA_SQL)
-            conn.close()
+
+            # Migration path for existing DBs created before cognitive_context existed.
+            cursor = conn.cursor()
+            try:
+                cursor.execute("ALTER TABLE dpo_trajectories ADD COLUMN cognitive_context TEXT")
+            except sqlite3.OperationalError as alter_error:
+                if "duplicate column name" not in str(alter_error).lower():
+                    logger.warning(
+                        "[Telemetry] SQLite migration failed for cognitive_context: %s",
+                        alter_error,
+                    )
+
+            conn.commit()
             _DB_INITIALIZED = True
             logger.info("[Telemetry] SQLite schema ready at %s", DPO_SQLITE_PATH)
         except Exception as e:
             logger.warning("[Telemetry] SQLite schema init failed: %s", e)
+        finally:
+            if conn is not None:
+                conn.close()
+
+
+def _ensure_sqlite_schema() -> None:
+    """Backward-compatible wrapper for schema initialization."""
+    init_db()
 
 
 def _write_sqlite(

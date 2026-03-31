@@ -113,6 +113,74 @@ def _deserialize_event(event_payload: Any) -> Optional[Any]:
     return None
 
 
+def _extract_text_parts(event: Any) -> str:
+    """Extract concatenated text parts from an ADK event content payload."""
+    try:
+        if event.content and event.content.parts:
+            return "".join(
+                part.text for part in event.content.parts
+                if hasattr(part, "text") and part.text
+            )
+    except Exception:
+        pass
+    return ""
+
+
+async def _render_voice_from_router_output(
+    router_output: str,
+    user_cognitive_context: str,
+) -> str:
+    """Force Node-2 voice synthesis when only router JSON is available."""
+    if not router_output or not router_output.strip():
+        return ""
+
+    try:
+        import litellm
+        from ..agents.adk_agents import VOICE_CONFIG, VOICE_INSTRUCTION, VOICE_MODEL
+
+        system_prompt = (
+            VOICE_INSTRUCTION
+            .replace("{router_output}", router_output)
+            .replace("{user_cognitive_context}", user_cognitive_context or "")
+        )
+        temperature = getattr(VOICE_CONFIG, "temperature", 0.6)
+
+        def _generate() -> str:
+            response = litellm.completion(
+                model=VOICE_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": "Generate the final concierge response for this turn.",
+                    },
+                ],
+                temperature=temperature,
+            )
+
+            if getattr(response, "choices", None):
+                choice0 = response.choices[0]
+                message = getattr(choice0, "message", None)
+                content = getattr(message, "content", "") if message else ""
+                if isinstance(content, str):
+                    return content.strip()
+
+            if isinstance(response, dict):
+                return (
+                    response.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                    .strip()
+                )
+
+            return ""
+
+        return await asyncio.to_thread(_generate)
+    except Exception as e:
+        logger.warning("[ADK] Voice handoff fallback failed: %s", e)
+        return ""
+
+
 async def _load_or_create_session(
     session_service: InMemorySessionService,
     user_id: str,
@@ -283,6 +351,8 @@ async def run_adk_turn(
     streamed_parts: List[str] = []
     tool_calls_log: List[Dict[str, Any]] = []
     anomaly_triggered = False
+    router_output = ""
+    user_cognitive_context = ""
 
     try:
         async for event in runner.run_async(
@@ -313,25 +383,32 @@ async def run_adk_turn(
                 })
                 continue  # SILENT: never stream tool calls
 
-            # --- INSTANT VOICE: stream text deltas from concierge_voice only ---
             author = getattr(event, "author", None)
+            event_text = _extract_text_parts(event)
+
+            # Capture structured router JSON for guaranteed handoff to voice.
+            if author == "triage_router" and event_text:
+                router_output = event_text
+
+            # --- INSTANT VOICE: stream text deltas from concierge_voice only ---
             if author == "concierge_voice" and event.content and event.content.parts:
                 for part in event.content.parts:
                     if hasattr(part, "text") and part.text:
                         streamed_parts.append(part.text)
                         yield part.text
 
-            # --- Final response: fallback yield if voice produced nothing yet ---
+            # --- Final response handling ---
             if event.is_final_response():
-                if not streamed_parts and event.content and event.content.parts:
-                    fallback_text = "".join(
-                        p.text for p in event.content.parts
-                        if hasattr(p, "text") and p.text
-                    )
-                    if fallback_text:
-                        streamed_parts.append(fallback_text)
-                        yield fallback_text
-                break
+                # Never terminate on triage final payload; voice formatting comes next.
+                if author == "triage_router":
+                    continue
+
+                # End once Node-2 has produced its final response.
+                if author == "concierge_voice":
+                    if not streamed_parts and event_text:
+                        streamed_parts.append(event_text)
+                        yield event_text
+                    break
 
     except Exception as e:
         logger.error("[ADK] Pipeline execution error: %s", e, exc_info=True)
@@ -345,6 +422,24 @@ async def run_adk_turn(
         session_id=session_id,
     )
 
+    try:
+        if updated_session and updated_session.state:
+            router_output = router_output or str(updated_session.state.get("router_output", "") or "")
+            user_cognitive_context = str(updated_session.state.get("user_cognitive_context", "") or "")
+    except Exception:
+        pass
+
+    if not user_cognitive_context:
+        try:
+            from .memory_engine import fetch_user_context
+
+            user_cognitive_context = await fetch_user_context(
+                user_id=user_id,
+                current_query=cleaned_message,
+            )
+        except Exception as e:
+            logger.debug("[ADK] Could not fetch cognitive context: %s", e)
+
     # --- Anomaly: yield graceful fallback message ---
     if anomaly_triggered:
         final_reply = anomaly.GRACEFUL_FALLBACK_REPLY
@@ -354,11 +449,20 @@ async def run_adk_turn(
     if not final_reply:
         try:
             if updated_session and updated_session.state:
-                final_reply = updated_session.state.get("final_reply", "")
-                if not final_reply:
-                    final_reply = updated_session.state.get("router_output", "")
+                final_reply = str(updated_session.state.get("final_reply", "") or "")
         except Exception:
             pass
+
+    # --- Guaranteed handoff: synthesize via Voice Agent if we only have router JSON ---
+    if not final_reply and router_output:
+        voice_reply = await _render_voice_from_router_output(
+            router_output=router_output,
+            user_cognitive_context=user_cognitive_context,
+        )
+        if voice_reply:
+            final_reply = voice_reply
+            if not streamed_parts:
+                yield final_reply
 
     if not final_reply:
         final_reply = "I'm sorry, I couldn't process your request. Could you try again?"
@@ -377,6 +481,7 @@ async def run_adk_turn(
                 tool_calls=tool_calls_log,
                 final_reply=logged_reply,
                 latency_ms=latency_ms,
+                cognitive_context=user_cognitive_context or None,
             )
         )
     except Exception:
