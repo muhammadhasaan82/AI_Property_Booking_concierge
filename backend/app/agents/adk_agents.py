@@ -590,6 +590,13 @@ ROUTING RULES (evaluate in order):
 6. HUMAN ESCALATION — user asks for a human, or you cannot resolve with tools
    → call `escalate_to_human` with a brief reason.
 
+TERMINATION CLAUSE (HIGHEST PRIORITY):
+- The moment you receive an Observation/tool result payload from ANY tool,
+  you MUST STOP all further tool calls.
+- Do NOT classify again. Do NOT call another tool. Do NOT re-call the same tool.
+- Immediately return that raw JSON payload as your final string output,
+  unchanged, for downstream Voice Agent generation.
+
 HARD CONSTRAINTS:
 - Extract only EXPLICIT user-provided values. Never invent dates, names, or emails.
 - `process_v2_booking` requires prior review confirmation. No shortcuts.
