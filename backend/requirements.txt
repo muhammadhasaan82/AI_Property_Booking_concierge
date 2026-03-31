@@ -49,7 +49,7 @@ litellm
 google-adk>=1.27.1
 
 # --- cognitive memory ---
-mem0ai>=0.1.0
+mem0ai>=0.2.2
 
 # --- tests ---
 pytest>=9.0.2
