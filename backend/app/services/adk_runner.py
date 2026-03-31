@@ -276,19 +276,6 @@ async def run_adk_turn(
         )
         logger.info("[ADK] Created new session %s for user %s", session_id, user_id)
 
-    # --- Fetch cognitive memory (Mem0) BEFORE pipeline ---
-    cognitive_context = ""
-    try:
-        from .memory_engine import fetch_user_context
-        cognitive_context = await fetch_user_context(user_id, cleaned_message)
-        if cognitive_context and session:
-            try:
-                session.state["user_cognitive_context"] = cognitive_context
-            except Exception:
-                pass  # State injection is best-effort
-    except Exception as e:
-        logger.debug("[ADK] Cognitive memory fetch skipped: %s", e)
-
     # --- Execute the pipeline ---
     user_content = Content(parts=[Part(text=cleaned_message)])
     t0 = time.monotonic()
@@ -390,16 +377,8 @@ async def run_adk_turn(
                 tool_calls=tool_calls_log,
                 final_reply=logged_reply,
                 latency_ms=latency_ms,
-                cognitive_context=cognitive_context,
             )
         )
-    except Exception:
-        pass
-
-    # --- Fire-and-forget: Mem0 learns from this message ---
-    try:
-        from .memory_engine import extract_and_store
-        asyncio.create_task(extract_and_store(user_id, cleaned_message))
     except Exception:
         pass
 

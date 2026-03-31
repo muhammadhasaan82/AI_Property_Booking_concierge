@@ -1,37 +1,50 @@
 # services/memory_engine.py
 """
-Cognitive Memory Engine — Mem0 Integration Layer.
+Local Cognitive Memory Engine powered by open-source Mem0.
 
-Provides long-term user preference storage and retrieval via the Mem0
-managed platform. Acts as the "hippocampus" for the ADK 2.0 pipeline,
-enabling the Voice Agent to implicitly personalize responses based on
-historical user preferences (allergies, travel habits, accessibility
-needs, property preferences) across sessions.
+This module uses the self-hosted/open-source Mem0 runtime via
+`from mem0 import Memory` and never talks to the managed Mem0 Cloud API.
 
-Architectural Guardrails:
-  - All calls are async and wrapped in try/except — Mem0 failure = empty
-    context, never a crash.
-  - 3-second timeout on all Mem0 API calls.
-  - If MEM0_API_KEY is not set, the entire module is a no-op.
-  - extract_and_store is designed for fire-and-forget via asyncio.create_task.
-  - fetch_user_context is designed to be awaited before pipeline execution.
+Architecture:
+  - LLM extraction uses the project's existing provider keys such as
+    `OPENAI_API_KEY` or `GROQ_API_KEY`.
+  - Vector storage stays on infrastructure we control:
+      - default: local Chroma persistence on disk
+      - optional: PostgreSQL/pgvector via the existing database connection string
+  - All public functions are async and failure-safe.
+  - Sync Mem0 SDK calls are offloaded with `asyncio.to_thread(...)`.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from typing import Optional
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+from .db_client import build_conninfo
 
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-MEM0_API_KEY: str = os.getenv("MEM0_API_KEY", "")
 MEM0_TIMEOUT: float = float(os.getenv("MEM0_TIMEOUT", "3.0"))
 MEM0_SEARCH_LIMIT: int = int(os.getenv("MEM0_SEARCH_LIMIT", "5"))
-MEM0_ENABLED: bool = bool(MEM0_API_KEY)
+
+MEM0_LLM_PROVIDER: str = os.getenv("MEM0_LLM_PROVIDER", "openai").strip().lower()
+MEM0_LLM_MODEL: str = os.getenv("MEM0_LLM_MODEL", "gpt-4.1-nano-2025-04-14").strip()
+MEM0_EMBEDDER_PROVIDER: str = os.getenv("MEM0_EMBEDDER_PROVIDER", "openai").strip().lower()
+MEM0_EMBEDDER_MODEL: str = os.getenv("MEM0_EMBEDDER_MODEL", "text-embedding-3-small").strip()
+
+MEM0_VECTOR_STORE: str = os.getenv("MEM0_VECTOR_STORE", "chroma").strip().lower()
+MEM0_COLLECTION_NAME: str = os.getenv("MEM0_COLLECTION_NAME", "ai_concierge_memories").strip()
+
+_MEM0_ROOT = Path(os.getenv("MEM0_STORAGE_DIR", "")).expanduser() if os.getenv("MEM0_STORAGE_DIR") else Path(__file__).resolve().parents[2] / ".mem0"
+MEM0_HISTORY_DB_PATH = Path(os.getenv("MEM0_HISTORY_DB_PATH", str(_MEM0_ROOT / "history.db"))).expanduser()
+MEM0_CHROMA_PATH = Path(os.getenv("MEM0_CHROMA_PATH", str(_MEM0_ROOT / "chroma"))).expanduser()
+
 
 # ---------------------------------------------------------------------------
 # Lazy-init singleton
@@ -40,14 +53,143 @@ _client = None
 _init_attempted = False
 
 
-def _get_client():
-    """Lazily initialize the Mem0 AsyncMemoryClient.
+def _provider_api_key(provider: str) -> Optional[str]:
+    env_name = {
+        "openai": "OPENAI_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "xai": "XAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "together": "TOGETHER_API_KEY",
+    }.get(provider)
+    return os.getenv(env_name, "").strip() if env_name else None
 
-    Returns None if:
-      - MEM0_API_KEY is not set
-      - mem0 package is not installed
-      - Client initialization fails
-    """
+
+def _build_llm_config() -> dict[str, Any]:
+    config: dict[str, Any] = {"model": MEM0_LLM_MODEL}
+    api_key = _provider_api_key(MEM0_LLM_PROVIDER)
+    openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+
+    if api_key:
+        config["api_key"] = api_key
+    if MEM0_LLM_PROVIDER == "openai" and openai_base_url:
+        config["openai_base_url"] = openai_base_url
+
+    return {
+        "provider": MEM0_LLM_PROVIDER,
+        "config": config,
+    }
+
+
+def _build_embedder_config() -> dict[str, Any]:
+    config: dict[str, Any] = {"model": MEM0_EMBEDDER_MODEL}
+    api_key = _provider_api_key(MEM0_EMBEDDER_PROVIDER)
+    openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+
+    if api_key:
+        config["api_key"] = api_key
+    if MEM0_EMBEDDER_PROVIDER == "openai" and openai_base_url:
+        config["openai_base_url"] = openai_base_url
+
+    return {
+        "provider": MEM0_EMBEDDER_PROVIDER,
+        "config": config,
+    }
+
+
+def _build_vector_store_config() -> dict[str, Any]:
+    provider = MEM0_VECTOR_STORE
+
+    if provider in {"postgres", "postgresql", "pgvector"}:
+        return {
+            "provider": "pgvector",
+            "config": {
+                "connection_string": build_conninfo(),
+                "collection_name": MEM0_COLLECTION_NAME,
+            },
+        }
+
+    if provider == "supabase":
+        return {
+            "provider": "supabase",
+            "config": {
+                "connection_string": build_conninfo(),
+                "collection_name": MEM0_COLLECTION_NAME,
+            },
+        }
+
+    MEM0_CHROMA_PATH.mkdir(parents=True, exist_ok=True)
+    return {
+        "provider": "chroma",
+        "config": {
+            "collection_name": MEM0_COLLECTION_NAME,
+            "path": str(MEM0_CHROMA_PATH),
+        },
+    }
+
+
+def _build_mem0_config() -> dict[str, Any]:
+    MEM0_HISTORY_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    return {
+        "vector_store": _build_vector_store_config(),
+        "llm": _build_llm_config(),
+        "embedder": _build_embedder_config(),
+        "history_db_path": str(MEM0_HISTORY_DB_PATH),
+    }
+
+
+def _camelize_vector_store(config: dict[str, Any]) -> dict[str, Any]:
+    vector_store = dict(config.get("vector_store", {}))
+    inner = dict(vector_store.get("config", {}))
+
+    if "collection_name" in inner:
+        inner["collectionName"] = inner.pop("collection_name")
+    if "connection_string" in inner:
+        inner["connectionString"] = inner.pop("connection_string")
+
+    vector_store["config"] = inner
+
+    alt = dict(config)
+    alt["vector_store"] = vector_store
+    alt["historyDbPath"] = alt.pop("history_db_path")
+    return alt
+
+
+def _build_mem0_config_variants() -> list[dict[str, Any]]:
+    base = _build_mem0_config()
+    return [base, _camelize_vector_store(base)]
+
+
+def _normalize_items(result: Any) -> list[Any]:
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        for key in ("results", "memories", "data"):
+            value = result.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+def _call_with_fallbacks(attempts: list[Callable[[], Any]]) -> Any:
+    last_error: Optional[Exception] = None
+    for attempt in attempts:
+        try:
+            return attempt()
+        except TypeError as exc:
+            last_error = exc
+            continue
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("No Mem0 call attempts were provided")
+
+
+def _get_client():
+    """Lazily initialize the local open-source Mem0 Memory engine."""
     global _client, _init_attempted
 
     if _init_attempted:
@@ -55,19 +197,32 @@ def _get_client():
 
     _init_attempted = True
 
-    if not MEM0_ENABLED:
-        logger.info("[Memory] MEM0_API_KEY not set — cognitive memory disabled")
-        return None
-
     try:
-        from mem0 import AsyncMemoryClient
-        _client = AsyncMemoryClient(api_key=MEM0_API_KEY)
-        logger.info("[Memory] Mem0 AsyncMemoryClient initialized")
+        from mem0 import Memory
+
+        last_error: Optional[Exception] = None
+        for config in _build_mem0_config_variants():
+            try:
+                _client = Memory.from_config(config)
+                break
+            except Exception as exc:
+                last_error = exc
+                _client = None
+
+        if _client is None and last_error is not None:
+            raise last_error
+
+        logger.info(
+            "[Memory] Local Mem0 initialized (llm=%s, embedder=%s, vector_store=%s)",
+            MEM0_LLM_PROVIDER,
+            MEM0_EMBEDDER_PROVIDER,
+            MEM0_VECTOR_STORE,
+        )
     except ImportError:
-        logger.warning("[Memory] mem0ai package not installed — cognitive memory disabled")
+        logger.warning("[Memory] mem0ai package not installed; local memory disabled")
         _client = None
     except Exception as e:
-        logger.warning("[Memory] Failed to initialize Mem0 client: %s", e)
+        logger.warning("[Memory] Failed to initialize local Mem0 memory engine: %s", e)
         _client = None
 
     return _client
@@ -78,72 +233,68 @@ def _get_client():
 # ---------------------------------------------------------------------------
 
 async def extract_and_store(user_id: str, message: str) -> None:
-    """Extract durable user preferences from a message and store in Mem0.
-
-    This is a background function designed to be called via
-    asyncio.create_task() — fire-and-forget. It never blocks the user.
-
-    Mem0's internal LLM analyzes the message for persistent facts like:
-      - "I'm allergic to dogs"
-      - "I always travel with my partner"
-      - "I need wheelchair accessibility"
-      - "I prefer properties under $150/night"
-
-    Args:
-        user_id: Persistent user identifier (email, phone, or session-stable ID).
-        message: The user's raw message text.
-    """
+    """Extract durable user preferences from a message and store them locally."""
     client = _get_client()
     if client is None:
         return
 
     if not message or len(message.strip()) < 5:
-        return  # Skip trivially short messages
+        return
+
+    def _store() -> None:
+        messages = [{"role": "user", "content": message}]
+        _call_with_fallbacks(
+            [
+                lambda: client.add(messages, user_id=user_id),
+                lambda: client.add(messages=messages, user_id=user_id),
+                lambda: client.add(data=messages, user_id=user_id),
+            ],
+        )
 
     try:
-        messages = [{"role": "user", "content": message}]
-        await asyncio.wait_for(
-            client.add(messages, user_id=user_id),
-            timeout=MEM0_TIMEOUT,
-        )
+        await asyncio.wait_for(asyncio.to_thread(_store), timeout=MEM0_TIMEOUT)
         logger.debug("[Memory] Stored context for user %s", user_id)
     except asyncio.TimeoutError:
-        logger.warning("[Memory] Mem0 add() timed out for user %s", user_id)
+        logger.warning("[Memory] Local Mem0 add() timed out for user %s", user_id)
     except Exception as e:
         logger.warning("[Memory] Failed to store context for user %s: %s", user_id, e)
 
 
 async def fetch_user_context(user_id: str, current_query: str = "") -> str:
-    """Retrieve relevant historical user preferences from Mem0.
-
-    Called before the pipeline fires to enrich the Voice Agent's context.
-    Returns a concise string of facts, or empty string on failure.
-
-    Args:
-        user_id: Persistent user identifier.
-        current_query: The current user message — used for semantic search
-                       to retrieve the most relevant stored preferences.
-
-    Returns:
-        A semicolon-separated string of relevant user facts, e.g.:
-        "User is allergic to dogs; Prefers pet-free properties; Usually books for 2 guests"
-        Returns "" if no memories exist, Mem0 is unavailable, or an error occurs.
-    """
+    """Retrieve relevant historical user preferences from local Mem0."""
     client = _get_client()
     if client is None:
         return ""
 
-    try:
-        query = current_query if current_query.strip() else "user preferences and history"
-        results = await asyncio.wait_for(
-            client.search(query, user_id=user_id, limit=MEM0_SEARCH_LIMIT),
-            timeout=MEM0_TIMEOUT,
+    query = current_query.strip() or "user preferences and booking history"
+
+    def _search() -> list[Any]:
+        return _normalize_items(
+            _call_with_fallbacks(
+                [
+                    lambda: client.search(query, user_id=user_id, top_k=MEM0_SEARCH_LIMIT),
+                    lambda: client.search(query, user_id=user_id, limit=MEM0_SEARCH_LIMIT),
+                    lambda: client.search(query=query, user_id=user_id, top_k=MEM0_SEARCH_LIMIT),
+                    lambda: client.search(query=query, user_id=user_id, limit=MEM0_SEARCH_LIMIT),
+                    lambda: client.search(
+                        query,
+                        filters={"AND": [{"user_id": user_id}]},
+                        top_k=MEM0_SEARCH_LIMIT,
+                    ),
+                    lambda: client.search(
+                        query,
+                        filters={"AND": [{"user_id": user_id}]},
+                        limit=MEM0_SEARCH_LIMIT,
+                    ),
+                ],
+            )
         )
 
+    try:
+        results = await asyncio.wait_for(asyncio.to_thread(_search), timeout=MEM0_TIMEOUT)
         if not results:
             return ""
 
-        # Mem0 search returns a list of dicts with 'memory' key
         facts = []
         for item in results:
             memory_text = None
@@ -151,16 +302,18 @@ async def fetch_user_context(user_id: str, current_query: str = "") -> str:
                 memory_text = item.get("memory") or item.get("text") or item.get("content")
             elif hasattr(item, "memory"):
                 memory_text = item.memory
-            if memory_text and isinstance(memory_text, str) and memory_text.strip():
+            elif hasattr(item, "text"):
+                memory_text = item.text
+
+            if isinstance(memory_text, str) and memory_text.strip():
                 facts.append(memory_text.strip())
 
-        context = "; ".join(facts) if facts else ""
+        context = "; ".join(facts)
         if context:
             logger.debug("[Memory] Retrieved %d facts for user %s", len(facts), user_id)
         return context
-
     except asyncio.TimeoutError:
-        logger.warning("[Memory] Mem0 search() timed out for user %s", user_id)
+        logger.warning("[Memory] Local Mem0 search() timed out for user %s", user_id)
         return ""
     except Exception as e:
         logger.warning("[Memory] Failed to fetch context for user %s: %s", user_id, e)
@@ -168,24 +321,28 @@ async def fetch_user_context(user_id: str, current_query: str = "") -> str:
 
 
 async def get_all_memories(user_id: str) -> list:
-    """Retrieve all stored memories for a user. Utility for debugging/admin.
-
-    Args:
-        user_id: Persistent user identifier.
-
-    Returns:
-        List of memory dicts, or empty list on failure.
-    """
+    """Retrieve all stored memories for a user from the local Mem0 store."""
     client = _get_client()
     if client is None:
         return []
 
-    try:
-        result = await asyncio.wait_for(
-            client.get_all(user_id=user_id),
-            timeout=MEM0_TIMEOUT,
+    def _get_all() -> list[Any]:
+        return _normalize_items(
+            _call_with_fallbacks(
+                [
+                    lambda: client.get_all(user_id=user_id),
+                    lambda: client.get_all(filters={"AND": [{"user_id": user_id}]}),
+                    lambda: client.get_all(filters={"AND": [{"user_id": user_id}]}, version="v2"),
+                ],
+            )
         )
-        return result if isinstance(result, list) else []
+
+    try:
+        results = await asyncio.wait_for(asyncio.to_thread(_get_all), timeout=MEM0_TIMEOUT)
+        return results if isinstance(results, list) else []
+    except asyncio.TimeoutError:
+        logger.warning("[Memory] Local Mem0 get_all() timed out for user %s", user_id)
+        return []
     except Exception as e:
         logger.warning("[Memory] Failed to get all memories for user %s: %s", user_id, e)
         return []
