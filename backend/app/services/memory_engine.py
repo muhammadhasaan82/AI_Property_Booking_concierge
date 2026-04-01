@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import inspect
-import json
 import logging
 import os
 from typing import Any, Callable, Optional
@@ -29,156 +27,8 @@ logger = logging.getLogger(__name__)
 MEM0_TIMEOUT: float = float(os.getenv("MEM0_TIMEOUT", "3.0"))
 MEM0_SEARCH_LIMIT: int = int(os.getenv("MEM0_SEARCH_LIMIT", "5"))
 
-MEM0_LLM_PROVIDER: str = os.getenv("MEM0_LLM_PROVIDER", "groq")
-MEM0_LLM_MODEL: str = os.getenv("MEM0_LLM_MODEL", "llama-3.3-70b-versatile")
-MEM0_EMBEDDER_PROVIDER: str = os.getenv("MEM0_EMBEDDER_PROVIDER", "huggingface")
-MEM0_EMBEDDER_MODEL: str = os.getenv("MEM0_EMBEDDER_MODEL", "BAAI/bge-large-en-v1.5")
-
-MEM0_VECTOR_STORE: str = os.getenv("MEM0_VECTOR_STORE", "chroma")
-MEM0_COLLECTION_NAME: str = os.getenv("MEM0_COLLECTION_NAME", "ai_concierge_memories")
-MEM0_STORAGE_DIR: str = os.getenv("MEM0_STORAGE_DIR", "backend/.mem0")
-
-
-# ---------------------------------------------------------------------------
-# Lazy-init singleton
-# ---------------------------------------------------------------------------
 _client = None
 _init_attempted = False
-
-
-def _provider_module_candidates(kind: str, provider: str) -> list[str]:
-    normalized = provider.strip().replace("-", "_").replace(" ", "_").lower()
-    module_map = {
-        "vector_store": [
-            f"mem0.configs.vector_stores.{normalized}",
-            "mem0.vector_stores.configs",
-        ],
-        "embedder": [
-            f"mem0.configs.embeddings.{normalized}",
-            "mem0.embeddings.configs",
-        ],
-        "llm": [
-            f"mem0.configs.llms.{normalized}",
-            "mem0.llms.configs",
-        ],
-    }
-    return list(dict.fromkeys(module_map.get(kind, [])))
-
-
-def _resolve_provider_config_model(kind: str, provider: str) -> Optional[type]:
-    provider_token = provider.strip().replace("-", "").replace("_", "").lower()
-
-    for module_name in _provider_module_candidates(kind, provider):
-        try:
-            module = importlib.import_module(module_name)
-        except Exception:
-            continue
-
-        candidates = []
-        for value in vars(module).values():
-            if not inspect.isclass(value):
-                continue
-            if not hasattr(value, "model_fields"):
-                continue
-            if not str(getattr(value, "__module__", "")).startswith(module.__name__):
-                continue
-            candidates.append(value)
-
-        if not candidates:
-            continue
-
-        matching = [
-            candidate
-            for candidate in candidates
-            if provider_token in candidate.__name__.replace("_", "").lower()
-        ]
-        if matching:
-            return sorted(matching, key=lambda item: len(item.__name__))[0]
-
-        if len(candidates) == 1:
-            return candidates[0]
-
-    return None
-
-
-def _allowed_fields_for(kind: str, provider: str) -> set[str]:
-    model = _resolve_provider_config_model(kind, provider)
-    if model is not None:
-        return set(getattr(model, "model_fields", {}).keys())
-
-    fallback_fields = {
-        "vector_store": {
-            "port",
-            "host",
-            "path",
-            "collection_name",
-            "api_key",
-            "client",
-            "tenant",
-        },
-        "embedder": {"model"},
-        "llm": {"model"},
-    }
-    return set(fallback_fields.get(kind, set()))
-
-
-def _field_env_names(kind: str, field_name: str) -> list[str]:
-    normalized = field_name.upper()
-    prefix = {
-        "vector_store": "MEM0_VECTOR_STORE",
-        "embedder": "MEM0_EMBEDDER",
-        "llm": "MEM0_LLM",
-    }.get(kind, "MEM0")
-
-    names = [f"{prefix}_{normalized}", f"MEM0_{normalized}"]
-
-    if kind == "vector_store" and field_name == "path":
-        names.insert(1, "MEM0_STORAGE_DIR")
-    if kind == "vector_store" and field_name == "collection_name":
-        names.insert(1, "MEM0_COLLECTION_NAME")
-
-    return list(dict.fromkeys(names))
-
-
-def _coerce_config_value(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-
-    stripped = value.strip()
-    if not stripped:
-        return ""
-
-    if stripped.startswith("{") or stripped.startswith("["):
-        try:
-            return json.loads(stripped)
-        except Exception:
-            return value
-
-    return value
-
-
-def _resolve_field_value(kind: str, field_name: str, defaults: dict[str, Any]) -> Any:
-    for env_name in _field_env_names(kind, field_name):
-        env_value = os.getenv(env_name)
-        if env_value not in (None, ""):
-            return _coerce_config_value(env_value)
-
-    return defaults.get(field_name)
-
-
-def _build_component_config(kind: str, provider: str, defaults: dict[str, Any]) -> dict[str, Any]:
-    allowed_fields = _allowed_fields_for(kind, provider)
-    component_config: dict[str, Any] = {}
-
-    for field_name in allowed_fields:
-        value = _resolve_field_value(kind, field_name, defaults)
-        if value not in (None, ""):
-            component_config[field_name] = value
-
-    return {
-        "provider": provider,
-        "config": component_config,
-    }
 
 
 def initialize_memory():
@@ -191,24 +41,28 @@ def initialize_memory():
 
     try:
         config = {
-            "vector_store": _build_component_config(
-                kind="vector_store",
-                provider=MEM0_VECTOR_STORE,
-                defaults={
-                    "collection_name": MEM0_COLLECTION_NAME,
-                    "path": MEM0_STORAGE_DIR,
+            "vector_store": {
+                "provider": "chroma",
+                "config": {
+                    "collection_name": os.getenv("MEM0_COLLECTION_NAME", "ai_concierge_memories"),
+                    "path": os.getenv("MEM0_STORAGE_DIR", "backend/.mem0"),
                 },
-            ),
-            "llm": _build_component_config(
-                kind="llm",
-                provider=MEM0_LLM_PROVIDER,
-                defaults={"model": MEM0_LLM_MODEL},
-            ),
-            "embedder": _build_component_config(
-                kind="embedder",
-                provider=MEM0_EMBEDDER_PROVIDER,
-                defaults={"model": MEM0_EMBEDDER_MODEL},
-            ),
+            },
+            "llm": {
+                "provider": "litellm",
+                "config": {
+                    "model": os.getenv("MEM0_LLM_MODEL", "groq/llama-3.3-70b-versatile"),
+                },
+            },
+            "embedder": {
+                "provider": "litellm",
+                "config": {
+                    "model": os.getenv(
+                        "MEM0_EMBEDDER_MODEL",
+                        "huggingface/BAAI/bge-large-en-v1.5",
+                    ),
+                },
+            },
         }
 
         return Memory.from_config(config)
@@ -256,10 +110,10 @@ def _get_client():
 
     if _client is not None:
         logger.info(
-            "[Memory] Local Mem0 initialized (llm=%s, embedder=%s, vector_store=%s)",
-            MEM0_LLM_PROVIDER,
-            MEM0_EMBEDDER_PROVIDER,
-            MEM0_VECTOR_STORE,
+            "[Memory] Local Mem0 initialized (llm=litellm:%s, embedder=litellm:%s, vector_store=chroma:%s)",
+            os.getenv("MEM0_LLM_MODEL", "groq/llama-3.3-70b-versatile"),
+            os.getenv("MEM0_EMBEDDER_MODEL", "huggingface/BAAI/bge-large-en-v1.5"),
+            os.getenv("MEM0_COLLECTION_NAME", "ai_concierge_memories"),
         )
     else:
         logger.warning("[Memory] Local Mem0 memory disabled")
