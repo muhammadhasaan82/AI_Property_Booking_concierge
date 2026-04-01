@@ -493,7 +493,7 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         
         # Check if we found a good answer
         top_score = float((sources[0] or {}).get("score", 0.0)) if sources else 0.0
-        from .dynamic_config import get_thresholds
+        from ..services.dynamic_config import get_thresholds
         _faq_thresholds = get_thresholds().faq
         if sources and answer and top_score >= _faq_thresholds.high_confidence:
             # High confidence answer
@@ -608,70 +608,55 @@ def generate_concise_answer(question: str, context: str) -> str:
         return extract_key_sentences(context, question)
     
     try:
-        import httpx
-        
+        import litellm
+
         # Determine question complexity using VADER + heuristics
         from . import nlp_engine
         vader = nlp_engine._get_vader()
         q_lower = question.lower()
         q_words = len(q_lower.split())
         scores = vader.polarity_scores(q_lower)
-        # Simple: short, direct questions; Complex: longer, analytical questions
         is_simple = q_words <= 6 and "?" in question
-        is_complex = q_words > 10 or any(w in q_lower for w in get_vocabulary().nlp_fallback.faq_complex_indicators)
-        
-        # Set length guidance
+        is_complex = q_words > 10 or any(
+            w in q_lower for w in get_vocabulary().nlp_fallback.faq_complex_indicators
+        )
+
         if is_simple and not is_complex:
             length_guide = "Provide a brief, direct answer in 3-5 lines."
         elif is_complex:
             length_guide = "Provide a comprehensive but concise answer in 10-15 lines, covering key points."
         else:
             length_guide = "Provide a clear, concise answer in 5-10 lines."
-        
+
         system_prompt = f"""You are a polite, helpful property rental assistant. Answer questions based ONLY on the provided policy text.
 Think step by step: 1) Identify the relevant policy section, 2) Extract the specific answer, 3) Provide a clear response.
 {length_guide}
 CRITICAL FORMATTING RULES:
 - Use clean Markdown formatting with bullet points and bold text where appropriate.
-- DO NOT include raw PDF artifacts, document titles, or headers (e.g., do not say "xyz company Internal Policies & Terms v1.0").
+- DO NOT include raw PDF artifacts, document titles, or headers.
 - Speak directly and naturally to the user.
 - Do not add information not present in the context."""
-        
-        user_prompt = f"""Based on the following policy text, answer this question concisely:
 
-Question: {question}
-
-Policy Text:
-{context[:2000]}  # Limit context to avoid token limits
-
-Provide a clear, direct answer:"""
-        
-        response = httpx.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": OPENAI_CHAT_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 300
-            },
-            timeout=10.0
+        user_prompt = (
+            "Based on the following policy text, answer this question concisely:\n\n"
+            f"Question: {question}\n\n"
+            f"Policy Text:\n{context[:2000]}\n\n"
+            "Provide a clear, direct answer:"
         )
-        
-        if response.status_code == 200:
-            result = response.json()
-            answer = result["choices"][0]["message"]["content"].strip()
-            return _clean_pdf_artifacts(answer)
-        else:
-            logger.error("OpenAI API error: %s", response.status_code)
-            return extract_key_sentences(context, question)
-            
+
+        response = litellm.completion(
+            model=OPENAI_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=300,
+        )
+
+        answer = response.choices[0].message.content.strip()
+        return _clean_pdf_artifacts(answer)
+
     except Exception as e:
         logger.error("Error generating concise answer: %s", e)
         return extract_key_sentences(context, question)
