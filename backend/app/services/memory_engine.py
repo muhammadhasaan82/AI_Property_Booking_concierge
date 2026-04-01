@@ -12,11 +12,19 @@ Architecture:
 """
 from __future__ import annotations
 
+import os
+
+# Silence HuggingFace and Tokenizer warnings
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import asyncio
 import importlib
 import logging
-import os
 from typing import Any, Callable, Optional
+
+import transformers
+
+transformers.logging.set_verbosity_error()
 
 logger = logging.getLogger(__name__)
 
