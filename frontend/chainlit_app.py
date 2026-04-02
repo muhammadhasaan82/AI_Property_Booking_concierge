@@ -16,9 +16,9 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-# Fix sys.path to allow importing from the project root (app/ lives here)
-_backend_root = Path(__file__).resolve().parents[1]
-sys.path.append(str(_backend_root))
+# Fix sys.path to allow importing backend/app directly as app.*
+_backend_root = Path(__file__).resolve().parents[1] / "backend"
+sys.path.insert(0, str(_backend_root))
 
 from app.services.adk_runner import run_adk_turn
 
