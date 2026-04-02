@@ -271,6 +271,15 @@ async def on_chat_resume(thread):
 
 @cl.on_chat_start
 async def on_chat_start():
+    # --- FORCE UI CONFIGURATION ---
+    # This overrides the config.toml file
+    cl.user_session.set("app_name", "AI Booking")
+    cl.user_session.set("app_description", "AI Property Booking Concierge")
+
+    # Optional: If you want to force the theme via Python
+    # cl.user_session.set("theme", "light")
+    # ------------------------------
+
     # --- Safely ensure tables exist ---
     data_layer = cl_data.get_data_layer()
     if data_layer and hasattr(data_layer, "engine"):
