@@ -33,7 +33,7 @@ cargo run --release
 # 6. Start FastAPI backend (project root)
 uvicorn app.main:app --reload --port 8000
 
-# 7. Start Chainlit frontend (separate terminal)
+# 7. Start AI Booking frontend (separate terminal)
 chainlit run frontend/chainlit_app.py --port 8501
 ```
 
@@ -62,7 +62,7 @@ docker-compose down
 
 Services started:
 - `fastapi` → http://localhost:8000
-- `chainlit` → http://localhost:8501
+- `AI Booking UI` → http://localhost:8501
 - `rust_gateway` → http://localhost:3001
 
 ## Production Checklist

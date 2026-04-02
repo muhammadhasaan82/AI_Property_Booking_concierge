@@ -5,7 +5,7 @@
 The AI Property Booking Concierge uses a **nested hybrid multi-agent graph** composed of three phases of evolution built on top of one another.
 
 ```
-User (Chainlit UI)
+User (AI Booking UI)
         │
         ▼
   frontend/chainlit_app.py

@@ -1,7 +1,7 @@
-# AI Booking Concierge
+# AI Booking
 *v1.0*
 
-Welcome! I'm your personal booking assistant.
+Welcome to AI Booking! I'm your personal booking assistant.
 
 ## What I can help you with!
 

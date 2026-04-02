@@ -24,7 +24,7 @@ The Rust gateway sits behind the Python orchestration layer but can operate inde
 
 ```mermaid
 graph TD
-    User([User]) -->|Chat/Voice| UI[Chainlit UI]
+    User([User]) -->|Chat/Voice| UI[AI Booking UI]
     UI -->|Session State| Python_Gateway[FastAPI + LangGraph]
     
     subgraph Python Backend
@@ -141,7 +141,7 @@ Hotel booking/
 │   │   └── supabase/              # Supabase configuration
 │   └── chatbot.py                 # CLI entry point for local testing
 ├── frontend/
-│   ├── chainlit_app.py            # Chainlit UI application
+│   ├── chainlit_app.py            # AI Booking UI application
 │   └── public/                    # Static assets
 └── data/
     └── properties/                # CSV property listings
