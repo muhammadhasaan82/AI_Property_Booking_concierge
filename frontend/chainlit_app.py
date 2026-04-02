@@ -190,17 +190,7 @@ SQLITE_SCHEMA_STATEMENTS = [
     """,
 ]
 
-WELCOME_MESSAGE = """# AI Booking Concierge
-
-Welcome! I'm your personal booking assistant.
-
-I can help you:
-- **Find properties** in your preferred city
-- **Book stays** with your chosen dates and amenities
-- **Manage reservations** - check status, modify, or cancel
-
-What would you like to do today?
-"""
+WELCOME_MESSAGE = "Welcome to AI Booking! How can I help you find a stay today?"
 
 
 def _normalize_conninfo(conninfo: str) -> str:

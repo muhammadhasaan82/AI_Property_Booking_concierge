@@ -43,7 +43,7 @@ app/
 # Start FastAPI backend (from backend/)
 uvicorn app.main:app --reload --port 8000
 
-# Start Chainlit frontend
+# Start AI Booking frontend
 chainlit run frontend/chainlit_app.py --port 8501
 
 # Start Rust gateway

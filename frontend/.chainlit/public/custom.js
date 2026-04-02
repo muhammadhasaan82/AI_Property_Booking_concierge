@@ -1,97 +1,81 @@
-// Custom JS to open the sidebar/thread panel by default
-window.addEventListener('load', function() {
-    // Wait for Chainlit UI to fully load
-    setTimeout(function() {
-        // Try to find and click the sidebar toggle button to open it
-        const sidebarToggle = document.querySelector('[data-testid="sidebar-toggle"], .sidebar-toggle, button[aria-label*="sidebar"], button[aria-label*="history"]');
-        
-        // Alternative: look for thread history button
-        const threadButton = document.querySelector('button[aria-label="Toggle thread history"], button[aria-label="thread history"]');
-        
-        if (sidebarToggle) {
-            sidebarToggle.click();
-        } else if (threadButton) {
-            threadButton.click();
-        }
-        
-        // Also try to ensure the sidebar/threads panel is visible by checking localStorage
-        // Chainlit stores sidebar state, so we can force it open
-        try {
-            localStorage.setItem('chainlit-sidebar-open', 'true');
-        } catch (e) {
-            // Ignore localStorage errors
-        }
-    }, 1000); // Wait 1 second for UI to initialize
+const SIDEBAR_STATE_KEY = "chainlit-sidebar-open";
+const BRAND_NAME = "AI Booking";
+
+function findSidebarToggle() {
+  return document.querySelector(
+    [
+      '[data-testid="sidebar-toggle"]',
+      'button[aria-label*="Open sidebar"]',
+      'button[aria-label*="Toggle sidebar"]',
+      'button[aria-label*="thread history"]',
+      'button[aria-label*="history"]',
+    ].join(", ")
+  );
+}
+
+function sidebarLooksClosed(toggle) {
+  const label = (toggle.getAttribute("aria-label") || "").toLowerCase();
+  const expanded = toggle.getAttribute("aria-expanded");
+  return expanded === "false" || label.includes("open");
+}
+
+function ensureSidebarOpen() {
+  const toggle = findSidebarToggle();
+  if (!toggle) {
+    return false;
+  }
+
+  if (sidebarLooksClosed(toggle)) {
+    toggle.click();
+  }
+
+  try {
+    localStorage.setItem(SIDEBAR_STATE_KEY, "true");
+  } catch (error) {}
+
+  return true;
+}
+
+function forceHeaderTitle() {
+  const titleSelectors = [
+    "header .MuiTypography-h6",
+    "header h1",
+    "header h6",
+    ".MuiAppBar-root .MuiTypography-h6",
+    ".MuiAppBar-root h1",
+    ".MuiAppBar-root h6",
+  ];
+
+  document.querySelectorAll(titleSelectors.join(", ")).forEach((node) => {
+    const text = (node.textContent || "").trim();
+    if (/chainlit|ai booking concierge/i.test(text)) {
+      node.textContent = BRAND_NAME;
+    }
+  });
+
+  if (/chainlit|ai booking concierge/i.test(document.title || "")) {
+    document.title = document.title.replace(/chainlit|ai booking concierge/gi, BRAND_NAME);
+  }
+}
+
+window.addEventListener("load", () => {
+  let attempts = 0;
+  const interval = window.setInterval(() => {
+    attempts += 1;
+    const opened = ensureSidebarOpen();
+    forceHeaderTitle();
+    if (opened || attempts >= 20) {
+      window.clearInterval(interval);
+    }
+  }, 500);
+
+  const observer = new MutationObserver(() => {
+    ensureSidebarOpen();
+    forceHeaderTitle();
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+  window.setTimeout(() => observer.disconnect(), 15000);
+
+  forceHeaderTitle();
 });
-
-// Replace "Chainlit" with "AI Booking Concierge" on login page
-const BRAND_TOKEN = 'Chainlit';
-const BRAND_NAME = 'AI Booking Concierge';
-
-function replaceBrandText() {
-    if (!document.body) return;
-
-    // Replace text nodes containing "Chainlit"
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-    let node;
-    while ((node = walker.nextNode())) {
-        if (node.nodeValue && node.nodeValue.includes(BRAND_TOKEN)) {
-            node.nodeValue = node.nodeValue.split(BRAND_TOKEN).join(BRAND_NAME);
-        }
-    }
-
-    // Replace common attributes
-    const attrTargets = document.querySelectorAll('[aria-label], [title]');
-    attrTargets.forEach(el => {
-        ['aria-label', 'title'].forEach(attr => {
-            const value = el.getAttribute(attr);
-            if (value && value.includes(BRAND_TOKEN)) {
-                el.setAttribute(attr, value.split(BRAND_TOKEN).join(BRAND_NAME));
-            }
-        });
-    });
-
-    // Replace document title if needed
-    if (document.title && document.title.includes(BRAND_TOKEN)) {
-        document.title = document.title.split(BRAND_TOKEN).join(BRAND_NAME);
-    }
-}
-
-function ensureLogoText() {
-    const logoCandidates = document.querySelectorAll('img, svg');
-    logoCandidates.forEach(logo => {
-        const src = logo.getAttribute('src') || '';
-        const aria = logo.getAttribute('aria-label') || '';
-        const looksLikeLogo = src.toLowerCase().includes('chainlit') ||
-            src.toLowerCase().includes('logo') ||
-            aria.toLowerCase().includes('chainlit');
-
-        if (!looksLikeLogo) return;
-
-        const parent = logo.parentElement;
-        if (!parent) return;
-
-        const parentText = (parent.textContent || '').trim();
-        if (parentText.includes(BRAND_NAME)) return;
-
-        if (!parentText || parentText === BRAND_TOKEN) {
-            let label = parent.querySelector('[data-brand-name="true"]');
-            if (!label) {
-                label = document.createElement('span');
-                label.setAttribute('data-brand-name', 'true');
-                label.style.fontSize = '24px';
-                label.style.fontWeight = '700';
-                label.style.color = '#F80061';
-                label.style.marginLeft = '10px';
-                label.style.fontFamily = 'inherit';
-                parent.appendChild(label);
-            }
-            label.textContent = BRAND_NAME;
-        }
-    });
-}
-
-setInterval(function() {
-    replaceBrandText();
-    ensureLogoText();
-}, 500);
