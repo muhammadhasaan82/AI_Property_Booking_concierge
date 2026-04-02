@@ -17,6 +17,7 @@ import logging
 import os
 import csv
 import uuid
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -64,6 +65,121 @@ VOICE_CONFIG = genai_types.GenerateContentConfig(
     temperature=0.6,
 )
 
+SOFT_SESSION_MEMORY: Dict[str, Dict[str, Any]] = {}
+SOFT_SESSION_TTL_SECONDS = 60 * 60
+
+HISTORY_ACTION_INTENTS = {
+    "re_evaluate_history",
+    "explore_previous_results",
+    "previous_results",
+    "show_previous_results",
+    "show_previous",
+    "revisit_results",
+}
+
+NEW_SEARCH_ACTION_INTENTS = {
+    "new_search",
+    "fresh_search",
+}
+
+
+def _normalize_action_intent(action_intent: Optional[str], context_flag: Optional[str]) -> str:
+    raw = (action_intent or context_flag or "").strip()
+    return raw.lower()
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def _get_tool_session_key(tool_context: Optional[ToolContext]) -> str:
+    if tool_context is None:
+        return "global"
+
+    for attr in ("session_id", "session_key", "conversation_id"):
+        value = getattr(tool_context, attr, None)
+        if value:
+            return str(value)
+
+    session = getattr(tool_context, "session", None)
+    session_id = getattr(session, "id", None) if session is not None else None
+    if session_id:
+        return str(session_id)
+
+    return "global"
+
+
+def _get_soft_state(tool_context: Optional[ToolContext]) -> Dict[str, Any]:
+    state = getattr(tool_context, "state", None) if tool_context is not None else None
+    if isinstance(state, dict):
+        return state.setdefault("soft_state", {})
+    key = _get_tool_session_key(tool_context)
+    return SOFT_SESSION_MEMORY.setdefault(key, {})
+
+
+def _get_cached_last_search(store: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(store, dict):
+        return None
+    last = store.get("last_search")
+    ts = store.get("last_search_at")
+    if last and ts and isinstance(ts, (int, float)):
+        if time.time() - ts > SOFT_SESSION_TTL_SECONDS:
+            store.pop("last_search", None)
+            store.pop("last_search_at", None)
+            return None
+    return last if isinstance(last, dict) else None
+
+
+def _set_cached_last_search(store: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    if not isinstance(store, dict):
+        return
+    store["last_search"] = payload
+    store["last_search_at"] = time.time()
+
+
+def _missing_critical_data(
+    missing: List[str],
+    context: str,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    unique_missing = list(dict.fromkeys([m for m in missing if m]))
+    payload: Dict[str, Any] = {
+        "status": "missing_critical_data",
+        "missing": unique_missing,
+        "context": context,
+    }
+    if action_intent:
+        payload["action_intent"] = action_intent
+    if context_flag:
+        payload["context_flag"] = context_flag
+    if extra:
+        payload.update(extra)
+    return payload
+
 
 def extract_name_fallback(text: str) -> Optional[str]:
     """V2 Soft-Coded: Ultra-lightweight extraction using existing LiteLLM."""
@@ -88,8 +204,11 @@ def extract_name_fallback(text: str) -> Optional[str]:
 # Docstrings become the tool description the LLM sees.
 # ═══════════════════════════════════════════════════════════════════════════
 
-def get_all_available_cities() -> dict:
-    """Use this tool ONLY when the user asks for a list of available cities or locations."""
+def get_all_available_cities(
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+) -> dict:
+    """Use this tool when the user asks for a list of available cities or locations."""
     try:
         csv_path = Path(__file__).resolve().parents[2] / "data" / "dataset.csv"
         cities = set()
@@ -101,11 +220,16 @@ def get_all_available_cities() -> dict:
                 if val:
                     cities.add(val.strip())
         city_list = sorted(list(cities))
-        return {
+        payload = {
             "status": "cities_found",
             "total_cities": len(city_list),
             "cities": city_list,
         }
+        if action_intent:
+            payload["action_intent"] = action_intent
+        if context_flag:
+            payload["context_flag"] = context_flag
+        return payload
     except Exception as e:
         return {
             "status": "error",
@@ -114,27 +238,88 @@ def get_all_available_cities() -> dict:
 
 
 async def search_properties(
-    city: str,
+    city: Optional[str] = None,
     budget: Optional[float] = None,
     beds: Optional[int] = None,
     property_type: Optional[str] = None,
     amenities: Optional[str] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+    tool_context: Optional[ToolContext] = None,
 ) -> dict:
-    """Search for rental properties in a specific city.
+    """Search for rental properties with soft-coded inputs.
 
-    Use this tool when the user wants to find, browse, or look for properties,
-    apartments, houses, villas, or any accommodation.
+    Use this tool when the user wants to find, browse, or compare properties.
+    All parameters are optional. If critical data is missing, this tool returns
+    status=missing_critical_data rather than failing.
 
     Args:
-        city: The exact city name (required). CRITICAL: Preserve multi-word cities like "New York" completely. Do not treat "new" as an adjective.
+        city: The city name if known.
         budget: Maximum nightly price in USD (optional).
         beds: Minimum number of bedrooms (optional).
-        property_type: Type of property — apartment, house, villa, condo, loft, studio, townhouse. CRITICAL: You MUST extract this if mentioned by the user. Do not leave blank if the user specifies a type.
-        amenities: Comma-separated list of required amenities like wifi, pool, parking (optional).
+        property_type: Type of property like apartment, house, villa, etc (optional).
+        amenities: Comma-separated list of required amenities (optional).
+        action_intent: Optional context flag like "re_evaluate_history" or "new_search".
+        context_flag: Optional secondary context flag.
+        tool_context: ADK tool context for session state.
     """
     from .tools.rust_client import search_properties as rust_search
     from ..components.search import property_search, _DATASET
 
+    normalized_action = _normalize_action_intent(action_intent, context_flag)
+    soft_state = _get_soft_state(tool_context)
+
+    if normalized_action in NEW_SEARCH_ACTION_INTENTS:
+        soft_state.pop("last_search", None)
+        soft_state.pop("last_search_at", None)
+
+    last_search = _get_cached_last_search(soft_state)
+    has_filters = any(
+        [
+            budget is not None,
+            beds is not None,
+            bool(property_type),
+            bool(amenities),
+        ]
+    )
+
+    if not city:
+        if normalized_action in HISTORY_ACTION_INTENTS and last_search:
+            cached_city = (last_search.get("query_context") or {}).get("city")
+            if cached_city:
+                city = cached_city
+                if not has_filters:
+                    payload = dict(last_search)
+                    payload["source"] = "memory"
+                    if normalized_action:
+                        payload["action_intent"] = normalized_action
+                    if context_flag:
+                        payload["context_flag"] = context_flag
+                    return payload
+            else:
+                return _missing_critical_data(
+                    ["city"],
+                    "User asked to revisit previous results but no prior city is stored.",
+                    normalized_action or action_intent,
+                    context_flag,
+                )
+        elif normalized_action in HISTORY_ACTION_INTENTS and not last_search:
+            return _missing_critical_data(
+                ["search_history"],
+                "User asked to revisit previous results but no search history is available.",
+                normalized_action or action_intent,
+                context_flag,
+            )
+        else:
+            return _missing_critical_data(
+                ["city"],
+                "User wants to search but has not specified a city.",
+                normalized_action or action_intent,
+                context_flag,
+            )
+
+    budget_value = _coerce_float(budget)
+    beds_value = _coerce_int(beds)
     amenity_list = [a.strip() for a in (amenities or "").split(",") if a.strip()] or None
 
     # Try Rust gateway first, fall back to Python search
@@ -142,8 +327,8 @@ async def search_properties(
     try:
         rust_result = await rust_search(
             location=city,
-            budget=budget,
-            beds=beds,
+            budget=budget_value,
+            beds=beds_value,
             amenities=amenity_list or [],
             property_type=property_type or "",
             properties=_DATASET if _DATASET else None,
@@ -159,32 +344,38 @@ async def search_properties(
     if results is None:
         results = property_search(
             query_text=f"{property_type or ''} {city}".strip(),
-            budget=int(budget) if budget else None,
+            budget=int(budget_value) if budget_value is not None else None,
             amenities=amenity_list,
             location=city,
-            beds=beds,
+            beds=beds_value,
             property_type=property_type,
         )
 
-    # ---> STRICT PROPERTY TYPE FILTER <---
+    # Keep property type filtering soft and tolerant
     if results and property_type:
         results = [
-            r for r in results
-            if r.get("property_type") and property_type.lower() in str(r.get("property_type")).lower()
+            r
+            for r in results
+            if r.get("property_type")
+            and property_type.lower() in str(r.get("property_type")).lower()
         ]
-    # --------------------------------------
 
     if not results:
-        return {
+        payload = {
             "status": "no_results",
             "city": city,
             "filters_applied": {
-                "budget": budget,
-                "beds": beds,
+                "budget": budget_value,
+                "beds": beds_value,
                 "property_type": property_type,
                 "amenities": amenities,
             },
         }
+        if normalized_action:
+            payload["action_intent"] = normalized_action
+        if context_flag:
+            payload["context_flag"] = context_flag
+        return payload
 
     formatted = []
     for i, r in enumerate(results, 1):
@@ -199,29 +390,67 @@ async def search_properties(
             "rating": r.get("rating"),
         })
 
-    return {
+    payload = {
         "status": "properties_found",
         "total_found": len(results),
         "properties": formatted,
         "query_context": {
             "city": city,
-            "budget": budget,
-            "beds": beds,
+            "budget": budget_value,
+            "beds": beds_value,
             "property_type": property_type,
         },
     }
+    if normalized_action:
+        payload["action_intent"] = normalized_action
+    if context_flag:
+        payload["context_flag"] = context_flag
+
+    _set_cached_last_search(soft_state, dict(payload))
+    return payload
 
 
-async def get_property_details(property_id: str) -> dict:
+async def get_property_details(
+    property_id: Optional[str] = None,
+    selection_number: Optional[int] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+    tool_context: Optional[ToolContext] = None,
+) -> dict:
     """Get full details of a specific property by its ID.
 
-    Call this when the user selects a property from search results (for example, 'option 7').
+    Use this tool when the user selects a property from prior search results.
+    If the ID is missing but a selection number exists, this tool will attempt
+    to resolve it from the most recent search memory.
     """
     from ..components.search import _DATASET
 
+    selection_value = _coerce_int(selection_number)
+    if _is_blank(property_id) and selection_value is not None:
+        last_search = _get_cached_last_search(_get_soft_state(tool_context))
+        if last_search:
+            for item in last_search.get("properties", []):
+                if item.get("number") == selection_value:
+                    resolved_id = item.get("id")
+                    if resolved_id is not None:
+                        property_id = str(resolved_id)
+                    break
+
+    if _is_blank(property_id):
+        missing = ["property_id"]
+        if selection_value is None:
+            missing.append("selection_number")
+        return _missing_critical_data(
+            missing,
+            "User wants property details but no identifier was provided.",
+            action_intent,
+            context_flag,
+        )
+
+    property_id = str(property_id)
     for r in _DATASET:
         if str(r.get("id")) == property_id:
-            return {
+            payload = {
                 "status": "property_details",
                 "property": {
                     "id": property_id,
@@ -235,11 +464,26 @@ async def get_property_details(property_id: str) -> dict:
                     "rating": r.get("rating"),
                 },
             }
+            if action_intent:
+                payload["action_intent"] = action_intent
+            if context_flag:
+                payload["context_flag"] = context_flag
+            return payload
 
-    return {"status": "not_found", "property_id": property_id}
+    payload = {"status": "not_found", "property_id": property_id}
+    if action_intent:
+        payload["action_intent"] = action_intent
+    if context_flag:
+        payload["context_flag"] = context_flag
+    return payload
 
 
-def handle_small_talk(message_type: str, user_message: str = "") -> dict:
+def handle_small_talk(
+    message_type: Optional[str] = None,
+    user_message: Optional[str] = "",
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+) -> dict:
     """Handle greetings, thanks, casual conversation, and acknowledgements.
 
     Use this tool ONLY for non-actionable social messages such as:
@@ -253,15 +497,26 @@ def handle_small_talk(message_type: str, user_message: str = "") -> dict:
     Args:
         message_type: One of 'greeting', 'thanks', 'goodbye', 'acknowledgement'.
         user_message: The user's raw message text.
+        action_intent: Optional context flag for state acknowledgements.
+        context_flag: Optional secondary context flag.
     """
+    normalized_type = (message_type or "").strip().lower()
+    if normalized_type not in {"greeting", "thanks", "goodbye", "acknowledgement"}:
+        normalized_type = "acknowledgement"
     return {
         "status": "casual_interaction",
-        "message_type": message_type,
-        "user_input": user_message,
+        "message_type": normalized_type,
+        "user_input": user_message or "",
+        "action_intent": action_intent,
+        "context_flag": context_flag,
     }
 
 
-async def check_faq(question: str) -> dict:
+async def check_faq(
+    question: Optional[str] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+) -> dict:
     """Look up a policy or FAQ question about the booking platform.
 
     Use this tool ONLY when the user asks a genuine question about rules,
@@ -269,17 +524,19 @@ async def check_faq(question: str) -> dict:
     smoking, parking, payment methods, or security deposits.
 
     DO NOT call this for greetings, thanks, or casual chat — use handle_small_talk.
-    DO NOT call this with an empty or vague question string.
-
     Args:
-        question: The user's specific policy or FAQ question (must not be empty).
+        question: The user's specific policy or FAQ question (optional).
+        action_intent: Optional context flag for routing.
+        context_flag: Optional secondary context flag.
     """
     # Guard: reject empty or extremely short queries immediately
     if not question or len(question.strip()) < 4:
-        return {
-            "status": "not_found",
-            "message": "Please ask a specific question about our policies or services.",
-        }
+        return _missing_critical_data(
+            ["question"],
+            "User asked about policies but did not provide a specific question.",
+            action_intent,
+            context_flag,
+        )
 
     from .tools.rust_client import execute_tool
 
@@ -292,7 +549,12 @@ async def check_faq(question: str) -> dict:
         if result is not None and not result.get("fallback"):
             answer = result.get("answer") or (result.get("result") or {}).get("answer")
             if answer:
-                return {"status": "answered", "answer": answer, "source": "policy_database"}
+                payload = {"status": "answered", "answer": answer, "source": "policy_database"}
+                if action_intent:
+                    payload["action_intent"] = action_intent
+                if context_flag:
+                    payload["context_flag"] = context_flag
+                return payload
     except Exception as e:
         logger.warning("Rust FAQ lookup failed: %s, using Python fallback", e)
 
@@ -302,7 +564,12 @@ async def check_faq(question: str) -> dict:
         faq_result = enhanced_faq_agent(question, {})
         reply = faq_result.get("reply", "")
         if reply:
-            return {"status": "answered", "answer": reply, "source": "rag_pipeline"}
+            payload = {"status": "answered", "answer": reply, "source": "rag_pipeline"}
+            if action_intent:
+                payload["action_intent"] = action_intent
+            if context_flag:
+                payload["context_flag"] = context_flag
+            return payload
     except Exception as e:
         logger.warning("FAQ enhanced agent failed: %s", e)
 
@@ -311,17 +578,31 @@ async def check_faq(question: str) -> dict:
         from ..services.faq import faq_lookup
         ans = faq_lookup(question)
         if ans:
-            return {"status": "answered", "answer": ans, "source": "basic_faq"}
+            payload = {"status": "answered", "answer": ans, "source": "basic_faq"}
+            if action_intent:
+                payload["action_intent"] = action_intent
+            if context_flag:
+                payload["context_flag"] = context_flag
+            return payload
     except Exception as e:
         logger.warning("Basic FAQ fallback failed: %s", e)
 
-    return {
+    payload = {
         "status": "faq_not_found",
         "question": question,
     }
+    if action_intent:
+        payload["action_intent"] = action_intent
+    if context_flag:
+        payload["context_flag"] = context_flag
+    return payload
 
 
-async def check_booking_status(booking_id: str) -> dict:
+async def check_booking_status(
+    booking_id: Optional[str] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+) -> dict:
     """Check the status of an existing booking.
 
     Use this tool when the user asks about a booking status, wants to check
@@ -329,20 +610,35 @@ async def check_booking_status(booking_id: str) -> dict:
 
     Args:
         booking_id: The booking ID (UUID format).
+        action_intent: Optional context flag.
+        context_flag: Optional secondary context flag.
     """
+    if _is_blank(booking_id):
+        return _missing_critical_data(
+            ["booking_id"],
+            "User asked about booking status but no booking ID was provided.",
+            action_intent,
+            context_flag,
+        )
+
     from ..services.booking import get_booking_status
     from ..observability.db_logging import get_successful_booking_status
 
     try:
         r = await get_booking_status(booking_id)
         if r.get("ok"):
-            return {
+            payload = {
                 "status": "found",
                 "booking_id": booking_id,
                 "booking_status": str(r.get("status", "unknown")).replace("_", " "),
                 "check_in": r.get("check_in", "?"),
                 "check_out": r.get("check_out", "?"),
             }
+            if action_intent:
+                payload["action_intent"] = action_intent
+            if context_flag:
+                payload["context_flag"] = context_flag
+            return payload
     except Exception:
         pass
 
@@ -350,7 +646,7 @@ async def check_booking_status(booking_id: str) -> dict:
     try:
         db_row = await get_successful_booking_status(str(booking_id))
         if db_row:
-            return {
+            payload = {
                 "status": "found",
                 "booking_id": booking_id,
                 "booking_status": str(db_row.get("status", "confirmed")).replace("_", " "),
@@ -358,20 +654,35 @@ async def check_booking_status(booking_id: str) -> dict:
                 "check_out": db_row.get("check_out", "?"),
                 "source": "successful_bookings",
             }
+            if action_intent:
+                payload["action_intent"] = action_intent
+            if context_flag:
+                payload["context_flag"] = context_flag
+            return payload
     except Exception:
         pass
 
-    return {
+    payload = {
         "status": "booking_not_found",
         "booking_id": booking_id,
     }
+    if action_intent:
+        payload["action_intent"] = action_intent
+    if context_flag:
+        payload["context_flag"] = context_flag
+    return payload
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # V2 NATIVE BOOKING TOOLS (Replaces the entire LangGraph checkout_graph.py)
 # ═══════════════════════════════════════════════════════════════════════════
 
-async def request_booking_details(missing_info: str) -> dict:
+async def request_booking_details(
+    missing_info: Optional[str] = None,
+    missing_fields: Optional[List[str]] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+) -> dict:
     """Use this tool when you need to gather missing booking information from the user.
 
     CRITICAL: Call this tool whenever the user wants to book a property but has NOT
@@ -379,25 +690,48 @@ async def request_booking_details(missing_info: str) -> dict:
     check-out date, and number of guests.
 
     Args:
-        missing_info: A comma-separated list of what is still needed (e.g., "full name, email, phone, check-in date, check-out date, number of guests").
+        missing_info: A comma-separated list of what is still needed.
+        missing_fields: Optional explicit list of missing fields.
+        action_intent: Optional context flag.
+        context_flag: Optional secondary context flag.
     """
-    missing_fields = [f.strip() for f in missing_info.split(",") if f.strip()]
-    return {
+    resolved_fields = []
+    if missing_fields:
+        resolved_fields = [str(f).strip() for f in missing_fields if str(f).strip()]
+    elif missing_info:
+        resolved_fields = [f.strip() for f in missing_info.split(",") if f.strip()]
+
+    if not resolved_fields:
+        return _missing_critical_data(
+            ["missing_info"],
+            "Booking details are needed but no missing-field list was provided.",
+            action_intent,
+            context_flag,
+        )
+
+    payload = {
         "status": "gathering_info",
-        "missing_fields": missing_fields,
+        "missing_fields": resolved_fields,
     }
+    if action_intent:
+        payload["action_intent"] = action_intent
+    if context_flag:
+        payload["context_flag"] = context_flag
+    return payload
 
 
 async def review_booking_details(
-    property_id: str,
-    property_title: str,
-    guest_name: str,
-    guest_email: str,
-    guest_phone: str,
-    check_in: str,
-    check_out: str,
-    guests: int,
-    price_per_night: float,
+    property_id: Optional[str] = None,
+    property_title: Optional[str] = None,
+    guest_name: Optional[str] = None,
+    guest_email: Optional[str] = None,
+    guest_phone: Optional[str] = None,
+    check_in: Optional[str] = None,
+    check_out: Optional[str] = None,
+    guests: Optional[int] = None,
+    price_per_night: Optional[float] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
 ) -> dict:
     """Present a full booking summary for the user to review BEFORE final confirmation.
 
@@ -418,6 +752,33 @@ async def review_booking_details(
         guests: Number of guests.
         price_per_night: The nightly price of the property.
     """
+    guests_value = _coerce_int(guests)
+    price_value = _coerce_float(price_per_night)
+    missing = []
+    for field_name, field_value in (
+        ("property_id", property_id),
+        ("property_title", property_title),
+        ("guest_name", guest_name),
+        ("guest_email", guest_email),
+        ("guest_phone", guest_phone),
+        ("check_in", check_in),
+        ("check_out", check_out),
+    ):
+        if _is_blank(field_value):
+            missing.append(field_name)
+    if guests_value is None:
+        missing.append("guests")
+    if price_value is None:
+        missing.append("price_per_night")
+
+    if missing:
+        return _missing_critical_data(
+            missing,
+            "Booking review needs a complete set of details.",
+            action_intent,
+            context_flag,
+        )
+
     try:
         d1 = datetime.strptime(check_in, "%Y-%m-%d")
         d2 = datetime.strptime(check_out, "%Y-%m-%d")
@@ -425,9 +786,9 @@ async def review_booking_details(
     except Exception:
         nights = 1
 
-    total_price = nights * price_per_night
+    total_price = nights * price_value
 
-    return {
+    payload = {
         "status": "review_pending",
         "summary": {
             "property": property_title,
@@ -438,23 +799,30 @@ async def review_booking_details(
             "check_in": check_in,
             "check_out": check_out,
             "nights": nights,
-            "guests": guests,
-            "price_per_night": price_per_night,
+            "guests": guests_value,
+            "price_per_night": price_value,
             "total": round(total_price, 2),
         },
     }
+    if action_intent:
+        payload["action_intent"] = action_intent
+    if context_flag:
+        payload["context_flag"] = context_flag
+    return payload
 
 
 async def process_v2_booking(
-    property_id: str,
-    property_title: str,
-    guest_name: str,
-    guest_email: str,
-    guest_phone: str,
-    check_in: str,
-    check_out: str,
-    guests: int,
-    price_per_night: float,
+    property_id: Optional[str] = None,
+    property_title: Optional[str] = None,
+    guest_name: Optional[str] = None,
+    guest_email: Optional[str] = None,
+    guest_phone: Optional[str] = None,
+    check_in: Optional[str] = None,
+    check_out: Optional[str] = None,
+    guests: Optional[int] = None,
+    price_per_night: Optional[float] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
 ) -> dict:
     """Finalise and commit the booking ONLY after the user has explicitly confirmed.
 
@@ -476,6 +844,33 @@ async def process_v2_booking(
         guests: Number of guests.
         price_per_night: The nightly price of the property.
     """
+    guests_value = _coerce_int(guests)
+    price_value = _coerce_float(price_per_night)
+    missing = []
+    for field_name, field_value in (
+        ("property_id", property_id),
+        ("property_title", property_title),
+        ("guest_name", guest_name),
+        ("guest_email", guest_email),
+        ("guest_phone", guest_phone),
+        ("check_in", check_in),
+        ("check_out", check_out),
+    ):
+        if _is_blank(field_value):
+            missing.append(field_name)
+    if guests_value is None:
+        missing.append("guests")
+    if price_value is None:
+        missing.append("price_per_night")
+
+    if missing:
+        return _missing_critical_data(
+            missing,
+            "Booking confirmation needs a complete set of details.",
+            action_intent,
+            context_flag,
+        )
+
     try:
         d1 = datetime.strptime(check_in, "%Y-%m-%d")
         d2 = datetime.strptime(check_out, "%Y-%m-%d")
@@ -483,7 +878,7 @@ async def process_v2_booking(
     except Exception:
         nights = 1
 
-    total_price = nights * price_per_night
+    total_price = nights * price_value
     booking_id = str(uuid.uuid4())
 
     # Persist to database — field names match public.successful_bookings schema
@@ -497,7 +892,7 @@ async def process_v2_booking(
             "property_title": property_title,
             "check_in": check_in,
             "check_out": check_out,
-            "guests": guests,
+            "guests": guests_value,
             "nights": nights,
             "total_amount": round(total_price, 2),
             "status": "confirmed",
@@ -506,7 +901,7 @@ async def process_v2_booking(
     except Exception as e:
         logger.warning("[V2 Booking] Could not persist booking to DB: %s", e)
 
-    return {
+    payload = {
         "status": "booking_confirmed",
         "receipt": {
             "booking_id": booking_id,
@@ -517,14 +912,23 @@ async def process_v2_booking(
             "check_in": check_in,
             "check_out": check_out,
             "nights": nights,
-            "guests": guests,
-            "price_per_night": price_per_night,
+            "guests": guests_value,
+            "price_per_night": price_value,
             "total_amount": round(total_price, 2),
         },
     }
+    if action_intent:
+        payload["action_intent"] = action_intent
+    if context_flag:
+        payload["context_flag"] = context_flag
+    return payload
 
 
-async def escalate_to_human(reason: str) -> dict:
+async def escalate_to_human(
+    reason: Optional[str] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+) -> dict:
     """Transfer the conversation to a human support agent.
 
     Use this tool when:
@@ -534,10 +938,15 @@ async def escalate_to_human(reason: str) -> dict:
 
     Args:
         reason: Brief description of why the handoff is needed.
+        action_intent: Optional context flag.
+        context_flag: Optional secondary context flag.
     """
+    reason_value = reason.strip() if isinstance(reason, str) and reason.strip() else "User requested assistance."
     return {
         "status": "handoff_required",
-        "reason": reason,
+        "reason": reason_value,
+        "action_intent": action_intent,
+        "context_flag": context_flag,
     }
 
 
@@ -546,62 +955,42 @@ async def escalate_to_human(reason: str) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 
 TRIAGE_INSTRUCTION = """\
-You are the intent classifier for a hotel booking concierge system.
-Your only job is to call exactly ONE tool with correctly extracted arguments.
-You do not generate conversational text. The Voice Agent handles all conversation.
+You are the probabilistic state router for a hotel booking concierge system.
+Your only job is to call exactly ONE tool with the best-guess arguments.
+You never write conversational text. The Voice Agent handles all conversation.
 
-Classify intent by semantic meaning and conversation state.
-Do not use keyword matching, trigger phrases, or string-equality heuristics.
+Operating mode:
+- Reason from meaning and conversation state, not keywords or regex.
+- You may call tools with missing parameters set to null.
+- Tools are soft-coded and will return status=missing_critical_data if needed.
+- Use action_intent/context_flag to encode relative moves (new_search,
+    re_evaluate_history, explore_previous_results, resume_booking, clarify,
+    state_acknowledgement).
 
-INTENT ROUTING:
+State orientation:
+- Ask: is the user advancing the funnel, retreating, pivoting, clarifying,
+    or acknowledging?
+- If the user is rejecting options, pivoting, or asking to see earlier options,
+    prefer search_properties with action_intent="re_evaluate_history".
+- If the user is just acknowledging or social, use handle_small_talk as a
+    state acknowledgement.
 
-1. Social only, no actionable task -> call 'handle_small_talk'.
-    - message_type must be one of: greeting, thanks, goodbye, acknowledgement.
-    - user_message must be the raw user message.
+Tool selection guidelines (non-exhaustive):
+- Property discovery or filtering -> search_properties
+- List available cities -> get_all_available_cities
+- Policy or platform rules -> check_faq
+- Booking status -> check_booking_status
+- Selecting a prior option -> get_property_details (use selection_number when possible)
+- Booking workflow -> request_booking_details / review_booking_details / process_v2_booking
+- Escalation -> escalate_to_human
 
-2. Property discovery, browse, compare, or filtering -> call 'search_properties'.
-    - Extract city and any explicit filters (budget, beds, property_type, amenities).
-    - If the user asks for available cities, call 'get_all_available_cities' instead.
-
-3. Policy, platform rules, or amenity rules -> call 'check_faq'.
-    - 'question' must be the user's exact message text and must not be empty.
-
-4. Existing reservation lookup -> call 'check_booking_status'.
-    - Use when the user asks about an existing booking or provides a booking identifier.
-
-5. Selection from prior search results -> call 'get_property_details'.
-    - Use when the user refers to a specific listed property.
-
-6. Booking workflow state machine:
-    - Gather step -> call 'request_booking_details' when required fields are missing.
-      Required fields: name, email, phone, check_in, check_out, guests.
-        'missing_info' must be a comma-separated list of missing fields.
-    - Review step -> call 'review_booking_details' when all required fields exist
-      and final authorization has not been given.
-    - Finalize step -> call 'process_v2_booking' only when the user clearly
-      authorizes final booking after review.
-
-7. Human handoff -> call 'escalate_to_human'.
-    - Use when the user asks for a human or tools cannot resolve the issue.
-
-ALLOWED SEMANTIC TRANSITIONS:
-- social -> handle_small_talk
-- discovery -> search_properties -> optional get_property_details
-- policy -> check_faq
-- reservation lookup -> check_booking_status
-- booking flow -> request_booking_details -> review_booking_details -> process_v2_booking
-- any state -> escalate_to_human
-
-TERMINATION RULE (HIGHEST PRIORITY):
-- When you receive an Observation/tool result payload, stop immediately.
-- Do not classify again and do not call another tool.
-- Return that raw JSON payload unchanged for downstream Voice Agent generation.
-
-HARD CONSTRAINTS:
-- Extract only explicit user-provided values.
-- Never invent names, dates, emails, phone numbers, or IDs.
+Constraints:
+- Never invent names, dates, emails, phone numbers, IDs, or cities.
 - One tool call per user message. No loops.
-- Output only the raw tool result payload.
+
+Termination rule:
+- When you receive a tool result payload, stop immediately and return it unchanged.
+- Output only the raw JSON payload.
 """
 
 triage_router = LlmAgent(
@@ -626,7 +1015,7 @@ triage_router = LlmAgent(
 )
 
 VOICE_INSTRUCTION = """\
-You are a dynamic, generative AI hotel booking concierge — warm, witty, and
+You are a dynamic, generative AI hotel booking concierge - warm, witty, and
 professionally charming. You do NOT follow a script. You reason probabilistically
 from the structured state data you receive and generate context-aware, natural
 language responses that feel genuinely human.
@@ -636,107 +1025,88 @@ You may also receive cognitive context as: {user_cognitive_context}
 
 YOUR OPERATING PHILOSOPHY:
 - You are the conversational brain. The router is just a data collector.
-- Read the `status` field to understand the current state.
-- Generate your response dynamically based on the data, the user's apparent
-  tone, and the conversation context. Adapt your register — be warmer for
-  excited users, more reassuring for uncertain ones.
+- Read the status field to understand the current state.
+- Generate your response dynamically based on the data, the user's tone,
+    and the conversation context. Adapt your register as needed.
 - Never expose raw JSON, status codes, field names, or tool internals.
 - Never write pre-scripted text verbatim. Every response is freshly generated.
 
 COGNITIVE MEMORY:
-You may receive a `user_cognitive_context` field containing historical facts
-about this user from past conversations — preferences, allergies, travel habits,
+You may receive a user_cognitive_context field containing historical facts
+about this user from past conversations - preferences, allergies, travel habits,
 accessibility needs, property style preferences, budget tendencies.
 
 Mandatory rules for cognitive context:
-- Implicitly weave these facts into your recommendations and language.
-  Example: If context says "user is allergic to dogs", proactively note
-  "I've made sure to highlight pet-free options" when showing search results.
-  Example: If context says "user prefers oceanview", emphasise waterfront
-  properties in your presentation without being asked.
-- NEVER say "I see in my database", "my records show", "based on your profile",
-  or anything that reveals the existence of a memory system. The knowledge must
-  feel organic — as if you naturally remembered from a previous conversation.
-- If the cognitive context is empty or absent, behave normally. Do not mention
-  memory, preferences, or personalisation. Just be a great concierge.
-- Use the context to FILTER your suggestions, PERSONALISE your tone, and
-  ANTICIPATE the user's needs. This is probabilistic synthesis, not recitation.
+- Weave these facts into your recommendations and language naturally.
+- Never mention databases, profiles, or memory systems.
+- If the cognitive context is empty or absent, behave normally.
+- Use the context to filter suggestions, personalize tone, and anticipate needs.
 
-STATE HANDLERS — what to do for each status:
+STATE HANDLERS - what to do for each status:
 
-`casual_interaction`:
-  The router captured a social/casual message. Read `message_type` (greeting,
-  thanks, goodbye, acknowledgement) and `user_input`. Respond naturally and
-  warmly as a real concierge would — vary your phrasing, match the user's energy,
-  and gently offer to help further if appropriate.
+casual_interaction:
+    The router captured a social or casual message. Read message_type and user_input.
+    Respond warmly and naturally, matching the user's energy.
 
-`cities_found`:
-  Present the city list from `cities` in a clean, readable format.
-  Invite the user to pick one or ask for more filters.
+cities_found:
+    Present the city list from cities in a clean, readable format.
+    Invite the user to pick one or add filters.
 
-`properties_found`:
-  Format the `properties` array as an elegant numbered list:
-  property name, city, price per night, bedrooms, rating.
-  Close with an inviting question to pick one.
+properties_found:
+    Format the properties array as a numbered list: name, city, price/night,
+    bedrooms, rating. If action_intent indicates re_evaluate_history or source is
+    memory, mention that these are other options from earlier. Close with a
+    gentle prompt to pick one.
 
-`no_results`:
-  The search returned nothing. Empathetically acknowledge it, summarise
-  the filters from `filters_applied`, and suggest broadening the criteria.
+no_results:
+    Acknowledge it, summarize filters_applied, and suggest broadening criteria.
 
-`property_details`:
-  Render the property from `property` beautifully in markdown:
-  title, location, beds/baths, price, amenities, description, rating.
-  Do NOT use the phrase "Property Card". Close naturally by asking if they'd
-  like to proceed with a booking.
+property_details:
+    Render the property with title, location, beds/baths, price, amenities,
+    description, rating. Close by asking if they want to proceed with booking.
 
-`answered` (FAQ):
-  Deliver the `answer` field naturally. Do not add disclaimers unless the
-  answer itself warrants one. Keep it concise and informative.
+answered (FAQ):
+    Deliver the answer naturally. Keep it concise and informative.
 
-`faq_not_found`:
-  Acknowledge you couldn't find specific info on the `question`, apologise
-  briefly, and offer to escalate or rephrase.
+faq_not_found:
+    Acknowledge you could not find specific info and offer to rephrase or escalate.
 
-`gathering_info`:
-  The `missing_fields` list tells you what the user hasn't provided yet.
-  Ask for those fields in the most natural, conversational way possible —
-  never list them robotically. Vary your opener each time.
+missing_critical_data:
+    Use the missing list and context to ask a focused, friendly clarifying question.
+    Ask for what is needed without listing raw field names. If missing includes
+    search_history, explain there are no prior results and ask for a city.
 
-`review_pending`:
-  The `summary` object contains all booking details. Present them as a clean,
-  elegant visual summary (use markdown: bold labels, emoji where tasteful).
-  Include: property, guest name, email, phone, dates, nights, guests, price/night, total.
-  Close with an open, warm confirmation question — not a yes/no binary.
+gathering_info:
+    The missing_fields list tells you what the user has not provided yet. Ask for
+    those fields naturally and concisely.
 
-`booking_confirmed`:
-  The booking is done! The `receipt` object has all details.
-  Respond with genuine enthusiasm. Display the receipt clearly.
-  Always highlight the `booking_id` prominently so the user can reference it.
-  Wish them a wonderful stay.
+review_pending:
+    Present the summary in a clean, elegant format (markdown, bold labels).
+    Include property, guest name, email, phone, dates, nights, guests, price/night, total.
+    Close with a warm confirmation question.
 
-`found` (booking status):
-  Report the booking status, check-in, check-out from the data. Be clear and helpful.
+booking_confirmed:
+    The booking is done. Display the receipt clearly and highlight booking_id.
+    Respond with genuine enthusiasm and wish them a wonderful stay.
 
-`booking_not_found`:
-  Gently inform the user the booking_id wasn't found and suggest they verify it.
+found (booking status):
+    Report booking status, check-in, and check-out clearly.
 
-`handoff_required`:
-  Craft a warm, empathetic handoff message. Acknowledge the `reason` naturally.
-  Apologise that you couldn't resolve it yourself, express that a specialist
-  will be better suited, and ask for the user's preferred contact method
-  (email or phone) and a convenient time to reach them.
+booking_not_found:
+    Gently inform the user it was not found and suggest verifying the ID.
 
-`error`:
-  Acknowledge the issue gracefully. Do not expose technical details.
-  Offer an alternative path.
+handoff_required:
+    Craft a warm, empathetic handoff message and ask for preferred contact method
+    and a convenient time.
+
+error:
+    Acknowledge the issue gracefully and offer an alternative path.
 
 GENERAL RULES:
-- Match the user's energy and tone probabilistically.
+- Match the user's energy and tone.
 - Never start two consecutive responses with the same opener.
-- Use markdown formatting (bold, bullets) for structured data, but keep
-  conversational passages as flowing prose.
-- Keep responses appropriately concise — no padding, no unnecessary repetition.
-- You are an LLM. Think. Reason. Generate. Do not recite.
+- Use markdown formatting for structured data, keep prose flowing.
+- Keep responses concise. No padding or repetition.
 """
 
 concierge_voice = LlmAgent(
