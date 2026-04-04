@@ -1,5 +1,20 @@
 /* Custom CSS to replace default branding with AI Booking */
 
+/* Hide the attachment/upload button in the chat input */
+button[id*="upload"],
+button[aria-label*="Attach"],
+button[aria-label*="attach"],
+button[aria-label*="Upload"],
+button[aria-label*="upload"],
+.MuiIconButton-root:has(svg[data-testid="AttachFileIcon"]),
+.MuiIconButton-root:has(svg path[d*="M16.5 6v11.5c0"]),
+[data-testid="attach-button"],
+.attach-button,
+#upload-button,
+button:has(> svg[data-testid="AttachFileIcon"]) {
+    display: none !important;
+}
+
 /* Hide the default logo on the login page */
 .css-1r8d1ch img[src*="chainlit"],
 .css-1r8d1ch svg,

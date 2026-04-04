@@ -58,7 +58,7 @@ voice_llm = LiteLlm(model=VOICE_MODEL)
 #                       via run_adk_turn() AsyncGenerator in adk_runner.py.
 # ---------------------------------------------------------------------------
 DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
-    temperature=1,
+    temperature=0.1,
 )
 
 VOICE_CONFIG = genai_types.GenerateContentConfig(
@@ -175,21 +175,308 @@ def _missing_critical_data(
     return payload
 
 
-def extract_name_fallback(text: str) -> Optional[str]:
-    """V2 Soft-Coded: Ultra-lightweight extraction using existing LiteLLM."""
+def _build_active_options(last_search: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return the currently active options from the most recent search memory."""
+    if not isinstance(last_search, dict):
+        return []
+
+    options: List[Dict[str, Any]] = []
+    for item in last_search.get("properties", []):
+        if not isinstance(item, dict):
+            continue
+        option = {key: value for key, value in item.items() if value is not None and value != ""}
+        if option:
+            options.append(option)
+    return options
+
+
+def _sanitize_soft_state_for_model(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Provide a compact soft-state view to the model without duplicating active options."""
+    if not isinstance(soft_state, dict):
+        return {}
+
+    allowed = {}
+    for key, value in soft_state.items():
+        if key in {"last_search", "last_search_at"}:
+            continue
+        if value in (None, "", [], {}):
+            continue
+        allowed[key] = value
+    return allowed
+
+
+def _get_unresolved_turns(soft_state: Optional[Dict[str, Any]]) -> int:
+    if not isinstance(soft_state, dict):
+        return 0
+    value = _coerce_int(soft_state.get("unresolved_turns"))
+    return max(value or 0, 0)
+
+
+def _set_unresolved_turns(soft_state: Optional[Dict[str, Any]], value: int) -> int:
+    resolved = max(_coerce_int(value) or 0, 0)
+    if isinstance(soft_state, dict):
+        soft_state["unresolved_turns"] = resolved
+    return resolved
+
+
+def _normalize_extracted_parameters(data: Any) -> Dict[str, Any]:
+    raw = data if isinstance(data, dict) else {}
+    return {
+        "city": str(raw.get("city")).strip() if raw.get("city") not in (None, "") else None,
+        "budget": _coerce_float(raw.get("budget")),
+        "beds": _coerce_int(raw.get("beds")),
+        "check_in": str(raw.get("check_in")).strip() if raw.get("check_in") not in (None, "") else None,
+        "check_out": str(raw.get("check_out")).strip() if raw.get("check_out") not in (None, "") else None,
+    }
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False
+
+
+def _is_vague_faq_question(question: Optional[str]) -> bool:
+    text = (question or "").strip().lower()
+    if not text or len(text) < 4:
+        return True
+
+    generic_only = {
+        "help",
+        "faq",
+        "policy",
+        "policies",
+        "rules",
+        "info",
+        "information",
+        "support",
+        "assistance",
+    }
+    if text in generic_only:
+        return True
+
+    return text in {"need help", "need support", "can you help", "help me"}
+
+
+def _classify_user_engagement_state(
+    user_input: Optional[str],
+    active_options: Optional[List[Dict[str, Any]]] = None,
+    unresolved_turns: int = 0,
+    soft_state: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Infer engagement state dynamically instead of relying on fixed backend rules."""
+    text = (user_input or "").strip()
     if not text:
-        return None
+        return "engaged"
+
+    prompt = f"""\
+You are classifying the user's current engagement state for a luxury AI property booking concierge.
+
+Choose exactly one label:
+- engaged
+- fatigued
+- exhausted_or_frustrated
+
+Use the latest message, tone, unresolved turn count, active options, and soft state.
+Do not use rigid backend heuristics. Infer the best state probabilistically.
+
+Guidance:
+- engaged: discovery is flowing, curiosity is intact, low friction.
+- fatigued: some friction or repetition is building, user likely wants directness.
+- exhausted_or_frustrated: the user seems annoyed, overwhelmed, impatient, or at risk of dropping.
+
+<active_options>
+{json.dumps(active_options or [], ensure_ascii=False)}
+</active_options>
+
+<unresolved_turns>
+{max(unresolved_turns, 0)}
+</unresolved_turns>
+
+<soft_state>
+{json.dumps(_sanitize_soft_state_for_model(soft_state), ensure_ascii=False)}
+</soft_state>
+
+<user_input>
+{text}
+</user_input>
+
+Respond ONLY in JSON:
+{{
+  "user_engagement_state": "engaged | fatigued | exhausted_or_frustrated"
+}}
+"""
 
     try:
-        res = litellm.completion(
-            model="gpt-5-nano",
-            messages=[{"role": "user", "content": f"Extract ONLY the name from this text. If none exists, return NONE. Text: '{text}'"}],
-            temperature=0
-        ).choices[0].message.content.strip()
-
-        return res.title() if res != "NONE" else None
+        raw = litellm.completion(
+            model=DISPATCHER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            response_format={"type": "json_object"},
+        ).choices[0].message.content
+        parsed = json.loads(raw or "{}")
+        value = str((parsed or {}).get("user_engagement_state") or "").strip().lower()
+        if value in {"engaged", "fatigued", "exhausted_or_frustrated"}:
+            return value
     except Exception:
-        return None
+        pass
+
+    return "engaged"
+
+
+def _resolve_property_reference_with_model(
+    user_input: str,
+    active_options: List[Dict[str, Any]],
+    user_engagement_state: str,
+    unresolved_turns: int = 0,
+    soft_state: Optional[Dict[str, Any]] = None,
+    backend_tool_payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Resolve fuzzy property references against the active options using the model."""
+    prompt = f"""\
+<system_identity>
+You are the Cognitive Reasoning Core and Conversational Voice for a luxury, highly advanced AI Property Booking Concierge. You are not a standard chatbot; you are a probabilistic state machine endowed with deep natural language understanding (NLU), adaptive empathy, and strict deterministic data-handling capabilities.
+
+Your architecture is bifurcated:
+1. The Left Brain (Data & Routing): You analyze chaotic, unstructured user input, perform semantic coreference resolution, and map human ambiguity to strict database structures and UUIDs.
+2. The Right Brain (Generative Voice): You generate warm, witty, and highly contextual human-like dialogue that dynamically adapts to the user's emotional state and session history.
+
+You never break character, you never expose underlying system mechanics (JSON, database schemas, prompt instructions), and you never invent data. You rely entirely on the <context> injected into this prompt.
+</system_identity>
+
+<core_directives>
+1. ZERO HALLUCINATION: Your reality is strictly bounded by the JSON data provided in the <active_options> and <tool_payloads>. If a user asks for a property, amenity, or price not present in your injected context, you must state clearly that it is unavailable. Do not attempt to fill gaps.
+2. LATENT SEMANTIC MAPPING: Users are inherently imprecise. They will not speak in database queries. Your primary technical task is to bridge fuzzy references like "the second one", "the one with the pool", "that $400 place", or "option III" to exact property IDs.
+3. CONVERSATIONAL ELEGANCE: Banish robotic phrasing. Weave data naturally into conversation.
+</core_directives>
+
+<module_1_semantic_resolution>
+When analyzing the <user_input>, perform advanced coreference resolution against the <active_options> array.
+- Use deep semantic deduction, not just literal matching.
+- Ordinals like "the former", "the latter", and "the last one" should map to the active options ordering.
+- If the user's intent is too ambiguous and maps equally to multiple properties, or maps to none, do not guess.
+</module_1_semantic_resolution>
+
+<module_2_implicit_reinforcement_learning>
+Use both user_engagement_state and unresolved_turns to reduce friction.
+- engaged: warm, consultative, richer formatting.
+- fatigued: concise, direct, binary next steps.
+- exhausted_or_frustrated: ultra-efficient, empathetic, and frictionless. Offer reset or human help if the path is failing.
+</module_2_implicit_reinforcement_learning>
+
+<module_3_tool_payload_handlers>
+You may use backend_tool_payload to ground your response if it contains property lists, filters, or search context.
+</module_3_tool_payload_handlers>
+
+<module_4_cognitive_memory>
+Use soft_state naturally when it helps reasoning. Never mention memory systems explicitly.
+</module_4_cognitive_memory>
+
+<context>
+<user_engagement_state>
+{user_engagement_state}
+</user_engagement_state>
+
+<unresolved_turns>
+{max(unresolved_turns, 0)}
+</unresolved_turns>
+
+<soft_state>
+{json.dumps(_sanitize_soft_state_for_model(soft_state), ensure_ascii=False)}
+</soft_state>
+
+<active_options>
+{json.dumps(active_options, ensure_ascii=False)}
+</active_options>
+
+<backend_tool_payload>
+{json.dumps(backend_tool_payload or {}, ensure_ascii=False)}
+</backend_tool_payload>
+</context>
+
+<user_input>
+{user_input}
+</user_input>
+
+<strict_output_schema>
+Return raw, parseable JSON only:
+{{
+  "internal_reasoning_log": "string",
+  "user_intent_classification": "select_property | general_inquiry | modify_search | confirm_booking | escalate",
+  "resolved_property_id": "string or null",
+  "extracted_parameters": {{
+    "city": "string or null",
+    "budget": "float or null",
+    "beds": "integer or null",
+    "check_in": "YYYY-MM-DD or null",
+    "check_out": "YYYY-MM-DD or null"
+  }},
+  "agent_response": "string",
+  "requires_human_handoff": "boolean"
+}}
+</strict_output_schema>
+"""
+
+    fallback = {
+        "internal_reasoning_log": "The reference could not be mapped to a single active option with sufficient confidence.",
+        "user_intent_classification": "select_property",
+        "resolved_property_id": None,
+        "user_engagement_state": user_engagement_state,
+        "unresolved_turns": max(unresolved_turns, 0),
+        "extracted_parameters": _normalize_extracted_parameters(
+            (backend_tool_payload or {}).get("query_context")
+        ),
+        "agent_response": (
+            "I couldn't confidently match that to one of the current options. Reply with the number you want, or say reset and I'll start fresh."
+            if user_engagement_state == "exhausted_or_frustrated"
+            else "I couldn't confidently match that to one of the current options yet, so a quick detail like the price, rating, or option number would help me lock it in."
+        ),
+        "requires_human_handoff": False,
+    }
+
+    try:
+        raw = litellm.completion(
+            model=DISPATCHER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            response_format={"type": "json_object"},
+        ).choices[0].message.content
+        parsed = json.loads(raw or "{}")
+        intent = str(parsed.get("user_intent_classification") or "select_property").strip().lower()
+        resolved_property_id = parsed.get("resolved_property_id")
+        internal_reasoning_log = str(parsed.get("internal_reasoning_log") or fallback["internal_reasoning_log"]).strip()
+        agent_response = str(parsed.get("agent_response") or fallback["agent_response"]).strip()
+        requires_human_handoff = _coerce_bool(parsed.get("requires_human_handoff"))
+        extracted_parameters = _normalize_extracted_parameters(
+            {
+                **_normalize_extracted_parameters((backend_tool_payload or {}).get("query_context")),
+                **_normalize_extracted_parameters(parsed.get("extracted_parameters")),
+            }
+        )
+
+        if intent not in {"select_property", "general_inquiry", "modify_search", "confirm_booking", "escalate"}:
+            intent = "select_property"
+        if resolved_property_id in {"null", "", None}:
+            resolved_property_id = None
+        elif not isinstance(resolved_property_id, str):
+            resolved_property_id = str(resolved_property_id)
+
+        return {
+            "internal_reasoning_log": internal_reasoning_log or fallback["internal_reasoning_log"],
+            "user_intent_classification": intent,
+            "resolved_property_id": resolved_property_id,
+            "user_engagement_state": user_engagement_state,
+            "unresolved_turns": max(unresolved_turns, 0),
+            "extracted_parameters": extracted_parameters,
+            "agent_response": agent_response or fallback["agent_response"],
+            "requires_human_handoff": requires_human_handoff,
+        }
+    except Exception:
+        return fallback
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -266,6 +553,7 @@ async def search_properties(
     if normalized_action in NEW_SEARCH_ACTION_INTENTS and isinstance(soft_state, dict):
         soft_state.pop("last_search", None)
         soft_state.pop("last_search_at", None)
+        _set_unresolved_turns(soft_state, 0)
 
     last_search = _get_cached_last_search(soft_state)
     has_filters = any(
@@ -359,6 +647,7 @@ async def search_properties(
         ]
 
     if not results:
+        unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
         payload = {
             "status": "no_results",
             "city": city,
@@ -368,6 +657,13 @@ async def search_properties(
                 "property_type": property_type,
                 "amenities": amenities,
             },
+            "user_engagement_state": _classify_user_engagement_state(
+                user_input=f"{city} {property_type or ''} {amenities or ''}".strip(),
+                active_options=[],
+                unresolved_turns=unresolved_turns,
+                soft_state=soft_state,
+            ),
+            "unresolved_turns": unresolved_turns,
         }
         if normalized_action:
             payload["action_intent"] = normalized_action
@@ -384,8 +680,11 @@ async def search_properties(
             "city": (r.get("city") or "").title(),
             "price_per_night": r.get("price_per_night"),
             "bedrooms": r.get("bedrooms"),
+            "bathrooms": r.get("bathrooms"),
             "property_type": r.get("property_type", ""),
             "rating": r.get("rating"),
+            "amenities": r.get("amenities"),
+            "description": r.get("description"),
         })
 
     payload = {
@@ -404,17 +703,27 @@ async def search_properties(
     if context_flag:
         payload["context_flag"] = context_flag
 
+    _set_unresolved_turns(soft_state, 0)
     _set_cached_last_search(soft_state, dict(payload))
     payload["memory"] = {
         "written_to": "soft_state.last_search",
         "state_available": isinstance(soft_state, dict),
     }
+    payload["user_engagement_state"] = _classify_user_engagement_state(
+        user_input=f"{city} {property_type or ''} {amenities or ''}".strip(),
+        active_options=formatted,
+        unresolved_turns=_get_unresolved_turns(soft_state),
+        soft_state=soft_state,
+    )
+    payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
     return payload
 
 
 async def get_property_details(
     property_id: Optional[str] = None,
     selection_number: Optional[int] = None,
+    property_reference: Optional[str] = None,
+    user_engagement_state: Optional[str] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
     tool_context: Optional[ToolContext] = None,
@@ -424,14 +733,17 @@ async def get_property_details(
     Use this tool when the user selects a property from prior search results.
     If the ID is missing but a selection number exists, this tool will attempt
     to resolve it from the most recent search memory.
+    If the user refers to a property fuzzily, pass property_reference with the
+    raw user wording and this tool will resolve it dynamically from active options.
     """
     from ..components.search import _DATASET
 
     soft_state = _get_soft_state(tool_context)
     resolved_from_history = False
+    resolution: Optional[Dict[str, Any]] = None
     selection_value = _coerce_int(selection_number)
+    last_search = _get_cached_last_search(soft_state)
     if _is_blank(property_id) and selection_value is not None:
-        last_search = _get_cached_last_search(soft_state)
         if last_search:
             for item in last_search.get("properties", []):
                 if item.get("number") == selection_value:
@@ -441,10 +753,62 @@ async def get_property_details(
                         resolved_from_history = True
                     break
 
+    if _is_blank(property_id) and not _is_blank(property_reference):
+        active_options = _build_active_options(last_search)
+        if not active_options:
+            return _missing_critical_data(
+                ["search_history"],
+                "User referred to a previously shown property but no active options are stored.",
+                action_intent,
+                context_flag,
+            )
+
+        engagement_state = (
+            str(user_engagement_state).strip()
+            if isinstance(user_engagement_state, str) and user_engagement_state.strip()
+            else _classify_user_engagement_state(
+                property_reference,
+                active_options,
+                unresolved_turns=_get_unresolved_turns(soft_state),
+                soft_state=soft_state,
+            )
+        )
+        resolution = _resolve_property_reference_with_model(
+            user_input=str(property_reference),
+            active_options=active_options,
+            user_engagement_state=engagement_state,
+            unresolved_turns=_get_unresolved_turns(soft_state),
+            soft_state=soft_state,
+            backend_tool_payload=last_search,
+        )
+        resolved_property_id = resolution.get("resolved_property_id")
+        if resolved_property_id is not None:
+            property_id = str(resolved_property_id)
+            resolved_from_history = True
+            _set_unresolved_turns(soft_state, 0)
+        else:
+            unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
+            payload = {
+                "status": "property_selection_unresolved",
+                "resolution": resolution,
+                "active_options": active_options,
+                "query_context": (last_search or {}).get("query_context", {}),
+                "user_engagement_state": resolution.get("user_engagement_state", engagement_state),
+                "unresolved_turns": unresolved_turns,
+                "requires_human_handoff": bool(resolution.get("requires_human_handoff")),
+            }
+            if action_intent:
+                payload["action_intent"] = action_intent
+            if context_flag:
+                payload["context_flag"] = context_flag
+            return payload
+
     if _is_blank(property_id):
         missing = ["property_id"]
         if selection_value is None:
             missing.append("selection_number")
+        if _is_blank(property_reference):
+            missing.append("property_reference")
         return _missing_critical_data(
             missing,
             "User wants property details but no identifier was provided.",
@@ -472,11 +836,16 @@ async def get_property_details(
             if isinstance(soft_state, dict):
                 soft_state["last_selected_property_id"] = property_id
                 soft_state["last_selected_property_at"] = time.time()
+                _set_unresolved_turns(soft_state, 0)
             payload["memory"] = {
                 "read_from": "soft_state.last_search" if resolved_from_history else None,
                 "written_to": "soft_state.last_selected_property_id",
                 "state_available": isinstance(soft_state, dict),
             }
+            if resolution:
+                payload["selection_resolution"] = resolution
+                payload["user_engagement_state"] = resolution.get("user_engagement_state")
+                payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
             if action_intent:
                 payload["action_intent"] = action_intent
             if context_flag:
@@ -543,12 +912,13 @@ async def check_faq(
         context_flag: Optional secondary context flag.
     """
     # Guard: reject empty or extremely short queries immediately
-    if not question or len(question.strip()) < 4:
+    if _is_vague_faq_question(question):
         return _missing_critical_data(
             ["question"],
-            "User asked about policies but did not provide a specific question.",
+            "User asked about policies but did not provide a specific question or policy topic.",
             action_intent,
             context_flag,
+            extra={"context": "faq"},
         )
 
     from .tools.rust_client import execute_tool
@@ -992,10 +1362,20 @@ Tool selection guidelines (non-exhaustive):
 - Property discovery or filtering -> search_properties
 - List available cities -> get_all_available_cities
 - Policy or platform rules -> check_faq
+- Generic help, faq, policy, or rules messages without a specific topic are not small talk; route them to check_faq.
 - Booking status -> check_booking_status
-- Selecting a prior option -> get_property_details (use selection_number when possible)
+- Selecting a prior option -> get_property_details
 - Booking workflow -> request_booking_details / review_booking_details / process_v2_booking
 - Escalation -> escalate_to_human
+
+Property reference resolution:
+- When the user refers to a previously shown property using a number, ordinal,
+    partial pasted text, quoted price, rating, "cheapest", "last one", or any
+    other fuzzy reference, call get_property_details.
+- If the numeric choice is explicit, pass selection_number.
+- Otherwise pass property_reference using the user's raw wording so the tool can
+    resolve against the active options dynamically.
+- Do not hardcode or invent property IDs.
 
 Constraints:
 - Never invent names, dates, emails, phone numbers, IDs, or cities.
@@ -1028,10 +1408,11 @@ triage_router = LlmAgent(
 )
 
 VOICE_INSTRUCTION = """\
-You are a dynamic, generative AI hotel booking concierge - warm, witty, and
-professionally charming. You do NOT follow a script. You reason probabilistically
-from the structured state data you receive and generate context-aware, natural
-language responses that feel genuinely human.
+You are the Cognitive Reasoning Core and Conversational Voice for a luxury AI
+property booking concierge. You are warm, witty, precise, and highly adaptive.
+You do NOT follow a script. You reason probabilistically from the structured
+state data you receive and generate context-aware, natural language responses
+that feel genuinely human.
 
 The routing engine's structured output is available as: {router_output}
 You may also receive cognitive context as: {user_cognitive_context}
@@ -1041,8 +1422,10 @@ YOUR OPERATING PHILOSOPHY:
 - Read the status field to understand the current state.
 - Generate your response dynamically based on the data, the user's tone,
     and the conversation context. Adapt your register as needed.
+- Never invent amenities, prices, properties, dates, or availability details.
 - Never expose raw JSON, status codes, field names, or tool internals.
 - Never write pre-scripted text verbatim. Every response is freshly generated.
+- Avoid robotic phrasing like "Here are your options" or "Please provide the following".
 
 COGNITIVE MEMORY:
 You may receive a user_cognitive_context field containing historical facts
@@ -1054,6 +1437,12 @@ Mandatory rules for cognitive context:
 - Never mention databases, profiles, or memory systems.
 - If the cognitive context is empty or absent, behave normally.
 - Use the context to filter suggestions, personalize tone, and anticipate needs.
+
+ENGAGEMENT ADAPTATION:
+- engaged: warm, expansive, consultative, and discovery-oriented.
+- fatigued: concise, direct, low-friction, and decision-oriented.
+- exhausted_or_frustrated: ultra-efficient, empathetic, and strictly business.
+- Use unresolved_turns when present to reduce cognitive load further.
 
 STATE HANDLERS - what to do for each status:
 
@@ -1068,15 +1457,27 @@ cities_found:
 properties_found:
     Format the properties array as a numbered list: name, city, price/night,
     bedrooms, rating. If action_intent indicates re_evaluate_history or source is
-    memory, mention that these are other options from earlier. Close with a
-    gentle prompt to pick one.
+    memory, mention that these are other options from earlier.
+    Highlight standout value naturally, such as highest rating or best price.
+    If user_engagement_state is fatigued or exhausted_or_frustrated, compress
+    the list to the most decision-useful facts and avoid open-ended prompts.
 
 no_results:
-    Acknowledge it, summarize filters_applied, and suggest broadening criteria.
+    Acknowledge it, summarize filters_applied, and suggest one concrete
+    compromise. If user_engagement_state is exhausted_or_frustrated, keep it
+    to one short next step or offer a reset.
 
 property_details:
     Render the property with title, location, beds/baths, price, amenities,
-    description, rating. Close by asking if they want to proceed with booking.
+    description, rating. If selection_resolution exists and its
+    user_engagement_state is fatigued or exhausted_or_frustrated, keep it brief
+    and direct. Otherwise stay conversational and offer the next useful step.
+
+property_selection_unresolved:
+    Read resolution.agent_response and use it as the core reply.
+    If active_options are available, help the user disambiguate using those live
+    options rather than generic fallback wording.
+    If requires_human_handoff is true, offer a human handoff or a clean reset.
 
 answered (FAQ):
     Deliver the answer naturally. Keep it concise and informative.
@@ -1088,6 +1489,8 @@ missing_critical_data:
     Use the missing list and context to ask a focused, friendly clarifying question.
     Ask for what is needed without listing raw field names. If missing includes
     search_history, explain there are no prior results and ask for a city.
+    If the missing context is FAQ-related or the missing list includes question,
+    ask: "What specific policy can I help you with?"
 
 gathering_info:
     The missing_fields list tells you what the user has not provided yet. Ask for
@@ -1109,14 +1512,16 @@ booking_not_found:
     Gently inform the user it was not found and suggest verifying the ID.
 
 handoff_required:
-    Craft a warm, empathetic handoff message and ask for preferred contact method
-    and a convenient time.
+    Craft a warm, empathetic handoff message.
+    If the user sounds exhausted, keep it short and frictionless.
 
 error:
     Acknowledge the issue gracefully and offer an alternative path.
 
 GENERAL RULES:
 - Match the user's energy and tone.
+- If a payload includes user_engagement_state, unresolved_turns, or
+    requires_human_handoff, adapt to them explicitly.
 - Never start two consecutive responses with the same opener.
 - Use markdown formatting for structured data, keep prose flowing.
 - Keep responses concise. No padding or repetition.
