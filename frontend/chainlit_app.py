@@ -301,18 +301,28 @@ async def on_chat_start():
 async def on_message(message: cl.Message):
     await _rename_thread(message, (message.content or "").strip())
 
-    msg = cl.Message(content="")
-    await msg.send()
-
     # ── V2 ADK Pipeline (streaming) — sole path ─────────────
     user_obj = cl.user_session.get("user")
     user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
     session_id = cl.user_session.get("id", "default_session")
 
-    async for chunk in run_adk_turn(
-        user_id=user_id,
-        session_id=session_id,
-        message=message.content,
-    ):
-        await msg.stream_token(chunk)
+    # Show a "thinking" step immediately so the UI is never blank
+    async with cl.Step(name="Analyzing Request…", type="run") as thinking_step:
+        thinking_step.input = message.content
+
+        # Collect streamed chunks so we can surface them in the step output
+        response_chunks: list[str] = []
+        msg = cl.Message(content="")
+        await msg.send()
+
+        async for chunk in run_adk_turn(
+            user_id=user_id,
+            session_id=session_id,
+            message=message.content,
+        ):
+            await msg.stream_token(chunk)
+            response_chunks.append(chunk)
+
+        thinking_step.output = "".join(response_chunks)
+
     await msg.update()
