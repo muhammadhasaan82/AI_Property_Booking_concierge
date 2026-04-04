@@ -306,23 +306,36 @@ async def on_message(message: cl.Message):
     user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
     session_id = cl.user_session.get("id", "default_session")
 
-    # Show a "thinking" step immediately so the UI is never blank
-    async with cl.Step(name="Analyzing Request…", type="run") as thinking_step:
+    # Phase 1 — Show a "thinking" step immediately so the UI is never blank.
+    # The step closes as soon as the first chunk arrives, then the message streams
+    # in clean isolation below it. This gives instant feedback without the step
+    # overlapping the streaming reply.
+    adk_gen = run_adk_turn(
+        user_id=user_id,
+        session_id=session_id,
+        message=message.content,
+    )
+
+    # Prime the generator to get the first token before opening the message
+    first_chunk: str = ""
+    async with cl.Step(name="Consulting tools…", type="run") as thinking_step:
         thinking_step.input = message.content
+        try:
+            first_chunk = await adk_gen.__anext__()
+        except StopAsyncIteration:
+            first_chunk = ""
+        thinking_step.output = "Routing complete."
+    # Step is now closed — UI shows a clean ✓ tick next to "Consulting tools…"
 
-        # Collect streamed chunks so we can surface them in the step output
-        response_chunks: list[str] = []
-        msg = cl.Message(content="")
-        await msg.send()
+    # Phase 2 — Stream the reply character-by-character below the closed step.
+    msg = cl.Message(content="")
+    await msg.send()
 
-        async for chunk in run_adk_turn(
-            user_id=user_id,
-            session_id=session_id,
-            message=message.content,
-        ):
-            await msg.stream_token(chunk)
-            response_chunks.append(chunk)
+    if first_chunk:
+        await msg.stream_token(first_chunk)
 
-        thinking_step.output = "".join(response_chunks)
+    async for chunk in adk_gen:
+        await msg.stream_token(chunk)
 
+    # Finalise (flushes any buffered content and marks the message complete)
     await msg.update()
