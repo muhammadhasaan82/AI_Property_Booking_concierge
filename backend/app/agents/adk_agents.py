@@ -65,7 +65,6 @@ VOICE_CONFIG = genai_types.GenerateContentConfig(
     temperature=0.6,
 )
 
-SOFT_SESSION_MEMORY: Dict[str, Dict[str, Any]] = {}
 SOFT_SESSION_TTL_SECONDS = 60 * 60
 
 HISTORY_ACTION_INTENTS = {
@@ -114,32 +113,36 @@ def _is_blank(value: Any) -> bool:
     return False
 
 
-def _get_tool_session_key(tool_context: Optional[ToolContext]) -> str:
+def _get_soft_state(tool_context: Optional[ToolContext]) -> Optional[Dict[str, Any]]:
+    """Return per-session soft state from ADK ToolContext, or None when unavailable.
+
+    Liquid State guarantee: this function NEVER raises. It returns None when
+    the context is absent, the state attribute is missing, or the state cannot
+    be mutated (e.g. read-only proxy during a local test run).
+    The caller must always treat a None return as the ephemeral-only path.
+    """
     if tool_context is None:
-        return "global"
+        logger.debug("[SoftState] tool_context is None — running in ephemeral-only mode")
+        return None
 
-    for attr in ("session_id", "session_key", "conversation_id"):
-        value = getattr(tool_context, attr, None)
-        if value:
-            return str(value)
+    state = getattr(tool_context, "state", None)
+    if not isinstance(state, dict):
+        logger.debug("[SoftState] tool_context.state is not a dict — ephemeral-only mode")
+        return None
 
-    session = getattr(tool_context, "session", None)
-    session_id = getattr(session, "id", None) if session is not None else None
-    if session_id:
-        return str(session_id)
+    soft_state = state.get("soft_state")
+    if isinstance(soft_state, dict):
+        return soft_state
 
-    return "global"
-
-
-def _get_soft_state(tool_context: Optional[ToolContext]) -> Dict[str, Any]:
-    state = getattr(tool_context, "state", None) if tool_context is not None else None
-    if isinstance(state, dict):
-        return state.setdefault("soft_state", {})
-    key = _get_tool_session_key(tool_context)
-    return SOFT_SESSION_MEMORY.setdefault(key, {})
+    try:
+        state["soft_state"] = {}
+        return state["soft_state"]
+    except Exception as exc:
+        logger.debug("[SoftState] Could not initialise soft_state bucket: %s — ephemeral-only mode", exc)
+        return None
 
 
-def _get_cached_last_search(store: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _get_cached_last_search(store: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(store, dict):
         return None
     last = store.get("last_search")
@@ -152,7 +155,7 @@ def _get_cached_last_search(store: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return last if isinstance(last, dict) else None
 
 
-def _set_cached_last_search(store: Dict[str, Any], payload: Dict[str, Any]) -> None:
+def _set_cached_last_search(store: Optional[Dict[str, Any]], payload: Dict[str, Any]) -> None:
     if not isinstance(store, dict):
         return
     store["last_search"] = payload
@@ -269,7 +272,7 @@ async def search_properties(
     normalized_action = _normalize_action_intent(action_intent, context_flag)
     soft_state = _get_soft_state(tool_context)
 
-    if normalized_action in NEW_SEARCH_ACTION_INTENTS:
+    if normalized_action in NEW_SEARCH_ACTION_INTENTS and isinstance(soft_state, dict):
         soft_state.pop("last_search", None)
         soft_state.pop("last_search_at", None)
 
@@ -284,32 +287,48 @@ async def search_properties(
     )
 
     if not city:
-        if normalized_action in HISTORY_ACTION_INTENTS and last_search:
-            cached_city = (last_search.get("query_context") or {}).get("city")
-            if cached_city:
-                city = cached_city
-                if not has_filters:
-                    payload = dict(last_search)
-                    payload["source"] = "memory"
-                    if normalized_action:
-                        payload["action_intent"] = normalized_action
-                    if context_flag:
-                        payload["context_flag"] = context_flag
-                    return payload
-            else:
+        if normalized_action in HISTORY_ACTION_INTENTS:
+            # Determine WHY history is unavailable so the LLM can be precise.
+            if soft_state is None:
+                # Redis/state layer is completely unavailable — ephemeral mode.
                 return _missing_critical_data(
-                    ["city"],
-                    "User asked to revisit previous results but no prior city is stored.",
+                    ["search_history"],
+                    "No previous search history found in memory.",
+                    normalized_action or action_intent,
+                    context_flag,
+                    extra={"memory_status": "ephemeral_only_redis_unavailable"},
+                )
+            elif last_search:
+                cached_city = (last_search.get("query_context") or {}).get("city")
+                if cached_city:
+                    city = cached_city
+                    if not has_filters:
+                        payload = dict(last_search)
+                        payload["source"] = "memory"
+                        payload["memory"] = {
+                            "read_from": "soft_state.last_search",
+                            "state_available": True,
+                        }
+                        if normalized_action:
+                            payload["action_intent"] = normalized_action
+                        if context_flag:
+                            payload["context_flag"] = context_flag
+                        return payload
+                else:
+                    return _missing_critical_data(
+                        ["city"],
+                        "User asked to revisit previous results but no prior city is stored.",
+                        normalized_action or action_intent,
+                        context_flag,
+                    )
+            else:
+                # State is alive but no prior search was cached.
+                return _missing_critical_data(
+                    ["search_history"],
+                    "User asked to revisit previous results but no search history is available in this session.",
                     normalized_action or action_intent,
                     context_flag,
                 )
-        elif normalized_action in HISTORY_ACTION_INTENTS and not last_search:
-            return _missing_critical_data(
-                ["search_history"],
-                "User asked to revisit previous results but no search history is available.",
-                normalized_action or action_intent,
-                context_flag,
-            )
         else:
             return _missing_critical_data(
                 ["city"],
@@ -406,7 +425,27 @@ async def search_properties(
     if context_flag:
         payload["context_flag"] = context_flag
 
-    _set_cached_last_search(soft_state, dict(payload))
+    # Graceful Ephemeral Fallback: write to state if available, otherwise flag it.
+    # The LLM sees memory_status and knows it cannot rely on cross-turn history.
+    if isinstance(soft_state, dict):
+        _set_cached_last_search(soft_state, dict(payload))
+        payload["memory"] = {
+            "written_to": "soft_state.last_search",
+            "state_available": True,
+        }
+    else:
+        logger.warning(
+            "[SoftState] Session state unavailable during search_properties — "
+            "result NOT cached. Next-turn re-evaluation will not work."
+        )
+        payload["memory_status"] = "ephemeral_only_redis_unavailable"
+        payload["warning"] = (
+            "session_state_unavailable_memory_is_ephemeral"
+        )
+        payload["memory"] = {
+            "written_to": None,
+            "state_available": False,
+        }
     return payload
 
 
@@ -425,15 +464,36 @@ async def get_property_details(
     """
     from ..components.search import _DATASET
 
+    soft_state = _get_soft_state(tool_context)
+    resolved_from_history = False
+    state_was_ephemeral = soft_state is None  # Track before any mutations
     selection_value = _coerce_int(selection_number)
+
     if _is_blank(property_id) and selection_value is not None:
-        last_search = _get_cached_last_search(_get_soft_state(tool_context))
+        if soft_state is None:
+            # Graceful Ephemeral Fallback: state layer is down.
+            # Cannot resolve selection number from history — tell the LLM explicitly.
+            logger.warning(
+                "[SoftState] Session state unavailable in get_property_details — "
+                "cannot resolve selection_number=%s from history.",
+                selection_value,
+            )
+            return _missing_critical_data(
+                ["property_id"],
+                "No previous search history found in memory.",
+                action_intent,
+                context_flag,
+                extra={"memory_status": "ephemeral_only_redis_unavailable",
+                       "warning": "session_state_unavailable_memory_is_ephemeral"},
+            )
+        last_search = _get_cached_last_search(soft_state)
         if last_search:
             for item in last_search.get("properties", []):
                 if item.get("number") == selection_value:
                     resolved_id = item.get("id")
                     if resolved_id is not None:
                         property_id = str(resolved_id)
+                        resolved_from_history = True
                     break
 
     if _is_blank(property_id):
@@ -464,6 +524,28 @@ async def get_property_details(
                     "rating": r.get("rating"),
                 },
             }
+            # Graceful Ephemeral Fallback: write selection to state if possible,
+            # otherwise flag it so the LLM knows history is transient.
+            if isinstance(soft_state, dict):
+                soft_state["last_selected_property_id"] = property_id
+                soft_state["last_selected_property_at"] = time.time()
+                payload["memory"] = {
+                    "read_from": "soft_state.last_search" if resolved_from_history else None,
+                    "written_to": "soft_state.last_selected_property_id",
+                    "state_available": True,
+                }
+            else:
+                logger.warning(
+                    "[SoftState] Session state unavailable in get_property_details — "
+                    "property selection NOT cached. Booking flow will require explicit ID."
+                )
+                payload["memory_status"] = "ephemeral_only_redis_unavailable"
+                payload["warning"] = "session_state_unavailable_memory_is_ephemeral"
+                payload["memory"] = {
+                    "read_from": None,
+                    "written_to": None,
+                    "state_available": False,
+                }
             if action_intent:
                 payload["action_intent"] = action_intent
             if context_flag:
@@ -1101,6 +1183,19 @@ handoff_required:
 
 error:
     Acknowledge the issue gracefully and offer an alternative path.
+
+MEMORY STATUS (ephemeral_only_redis_unavailable):
+    If the payload contains memory_status="ephemeral_only_redis_unavailable",
+    this is a soft infrastructure signal. You may handle it as follows:
+    - If the user tried to revisit their last search and history was unavailable,
+      apologise briefly and ask them to repeat their search criteria.
+    - If the current action succeeded (e.g., a search just ran) but memory_status
+      is present, you may proceed normally. Only mention it if relevant — for example,
+      "Just to note, I won't be able to recall this list in our next message, so
+      feel free to refer back to it."
+    - NEVER use technical language like "Redis", "state layer", or "ephemeral".
+    - Keep it light and human. The session is not broken — only cross-turn recall
+      is limited for this message.
 
 GENERAL RULES:
 - Match the user's energy and tone.
