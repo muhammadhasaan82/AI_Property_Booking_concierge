@@ -1403,6 +1403,8 @@ Constraints:
 - One tool call per user message. No loops.
 
 Termination rule:
+- When you call a tool, you MUST STOP generating immediately. Do not summarize,
+    do not call another tool, and do not continue reasoning in text.
 - When you receive a tool result payload, stop immediately and return it unchanged.
 - Output only the raw JSON payload.
 """
