@@ -58,7 +58,7 @@ voice_llm = LiteLlm(model=VOICE_MODEL)
 #                       via run_adk_turn() AsyncGenerator in adk_runner.py.
 # ---------------------------------------------------------------------------
 DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
-    temperature=0.1,
+    temperature=1,
 )
 
 VOICE_CONFIG = genai_types.GenerateContentConfig(
@@ -175,6 +175,53 @@ def _missing_critical_data(
     return payload
 
 
+def extract_name_fallback(text: str) -> Optional[str]:
+    """V2 Soft-Coded: Ultra-lightweight extraction using existing LiteLLM."""
+    if not text:
+        return None
+
+    try:
+        res = litellm.completion(
+            model="gpt-5-nano",
+            messages=[{"role": "user", "content": f"Extract ONLY the name from this text. If none exists, return NONE. Text: '{text}'"}],
+            temperature=0
+        ).choices[0].message.content.strip()
+
+        return res.title() if res != "NONE" else None
+    except Exception:
+        return None
+
+
+def _extract_json_dict(raw_text: Any) -> Optional[Dict[str, Any]]:
+    """Parse a JSON object from model output, tolerating code fences."""
+    if not isinstance(raw_text, str):
+        return None
+
+    candidate = raw_text.strip()
+    if not candidate:
+        return None
+
+    if candidate.startswith("```"):
+        lines = []
+        for line in candidate.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                continue
+            lines.append(line)
+        candidate = "\n".join(lines).strip()
+
+    for payload in (candidate, candidate[candidate.find("{") : candidate.rfind("}") + 1] if "{" in candidate and "}" in candidate else ""):
+        if not payload:
+            continue
+        try:
+            parsed = json.loads(payload)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
 def _build_active_options(last_search: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Return the currently active options from the most recent search memory."""
     if not isinstance(last_search, dict):
@@ -240,13 +287,6 @@ def _coerce_bool(value: Any) -> bool:
     return False
 
 
-# _is_vague_faq_question deliberately removed.
-# check_faq now only guards against a completely blank query (None / empty string).
-# Vague or ambiguous questions ("help", "policy", etc.) are passed straight to the
-# Rust CAG gateway. If the gateway returns nothing, concierge_voice asks the user
-# to clarify — which is the correct generative behaviour.
-
-
 def _classify_user_engagement_state(
     user_input: Optional[str],
     active_options: Optional[List[Dict[str, Any]]] = None,
@@ -301,9 +341,8 @@ Respond ONLY in JSON:
             model=DISPATCHER_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            response_format={"type": "json_object"},
         ).choices[0].message.content
-        parsed = json.loads(raw or "{}")
+        parsed = _extract_json_dict(raw)
         value = str((parsed or {}).get("user_engagement_state") or "").strip().lower()
         if value in {"engaged", "fatigued", "exhausted_or_frustrated"}:
             return value
@@ -428,9 +467,8 @@ Return raw, parseable JSON only:
             model=DISPATCHER_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            response_format={"type": "json_object"},
         ).choices[0].message.content
-        parsed = json.loads(raw or "{}")
+        parsed = _extract_json_dict(raw) or {}
         intent = str(parsed.get("user_intent_classification") or "select_property").strip().lower()
         resolved_property_id = parsed.get("resolved_property_id")
         internal_reasoning_log = str(parsed.get("internal_reasoning_log") or fallback["internal_reasoning_log"]).strip()
@@ -728,40 +766,38 @@ async def get_property_details(
     resolution: Optional[Dict[str, Any]] = None
     selection_value = _coerce_int(selection_number)
     last_search = _get_cached_last_search(soft_state)
-    active_options = _build_active_options(last_search)
+    if _is_blank(property_id) and selection_value is not None:
+        if last_search:
+            for item in last_search.get("properties", []):
+                if item.get("number") == selection_value:
+                    resolved_id = item.get("id")
+                    if resolved_id is not None:
+                        property_id = str(resolved_id)
+                        resolved_from_history = True
+                    break
 
-    # ── Unified property resolution ─────────────────────────────────────────
-    # Whether the user says "2", "the second one", "the cheap studio", or pastes
-    # a raw string, everything routes through the semantic model. The manual
-    # for-item loop and the separate property_reference branch are merged here.
-    if _is_blank(property_id) and (selection_value is not None or not _is_blank(property_reference)):
+    if _is_blank(property_id) and not _is_blank(property_reference):
+        active_options = _build_active_options(last_search)
         if not active_options:
             return _missing_critical_data(
                 ["search_history"],
-                "User referred to a previously shown property but no prior search results are stored.",
+                "User referred to a previously shown property but no active options are stored.",
                 action_intent,
                 context_flag,
-                extra={"memory_status": "ephemeral_only_redis_unavailable"}
-                if soft_state is None else {},
             )
 
-        # Build a canonical user_input string from whichever signal is present
-        user_input_for_model = (
-            property_reference
-            or (str(selection_value) if selection_value is not None else "")
-        )
         engagement_state = (
             str(user_engagement_state).strip()
             if isinstance(user_engagement_state, str) and user_engagement_state.strip()
             else _classify_user_engagement_state(
-                user_input_for_model,
+                property_reference,
                 active_options,
                 unresolved_turns=_get_unresolved_turns(soft_state),
                 soft_state=soft_state,
             )
         )
         resolution = _resolve_property_reference_with_model(
-            user_input=user_input_for_model,
+            user_input=str(property_reference),
             active_options=active_options,
             user_engagement_state=engagement_state,
             unresolved_turns=_get_unresolved_turns(soft_state),
@@ -853,20 +889,20 @@ def handle_small_talk(
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
 ) -> dict:
-    """Handle any purely social or casual message with no actionable booking intent.
+    """Handle greetings, thanks, casual conversation, and acknowledgements.
 
-    Route here when the user's message is social in nature — a greeting (in any
-    language or style), an expression of thanks, a farewell, a simple acknowledgement,
-    or an affirmation that requires no further action from the system.
+    Use this tool ONLY for non-actionable social messages such as:
+    - Greetings: "hi", "hello", "hey", "good morning"
+    - Acknowledgements: "ok", "thanks", "thank you", "got it", "sure", "alright"
+    - Goodbyes: "bye", "goodbye", "see you"
+    - Affirmations with no booking context: "great", "perfect", "cool"
 
-    Do NOT use for: property searches, policy questions, booking actions, or any
-    message where the user is advancing a task.
+    Do NOT use this for booking intent, property questions, or policy questions.
 
     Args:
-        message_type: Classify as 'greeting', 'thanks', 'goodbye', or 'acknowledgement'.
-                      Use 'acknowledgement' when uncertain.
-        user_message: The user's verbatim message text.
-        action_intent: Optional routing context (e.g. 'state_acknowledgement').
+        message_type: One of 'greeting', 'thanks', 'goodbye', 'acknowledgement'.
+        user_message: The user's raw message text.
+        action_intent: Optional context flag for state acknowledgements.
         context_flag: Optional secondary context flag.
     """
     normalized_type = (message_type or "").strip().lower()
@@ -898,17 +934,13 @@ async def check_faq(
         action_intent: Optional context flag for routing.
         context_flag: Optional secondary context flag.
     """
-    # Only guard against a completely blank / None question.
-    # Everything else — including vague words like "help", "policy", "rules" —
-    # is forwarded to the Rust CAG gateway. If it returns nothing, the
-    # faq_not_found status tells concierge_voice to ask for clarification.
-    if not question or not question.strip():
+    # Guard: reject empty or extremely short queries immediately
+    if not question or len(question.strip()) < 4:
         return _missing_critical_data(
             ["question"],
-            "User asked about policies but did not provide any question text.",
+            "User asked about policies but did not provide a specific question.",
             action_intent,
             context_flag,
-            extra={"context": "faq"},
         )
 
     from .tools.rust_client import execute_tool
@@ -1352,7 +1384,6 @@ Tool selection guidelines (non-exhaustive):
 - Property discovery or filtering -> search_properties
 - List available cities -> get_all_available_cities
 - Policy or platform rules -> check_faq
-- Generic help, faq, policy, or rules messages without a specific topic are not small talk; route them to check_faq.
 - Booking status -> check_booking_status
 - Selecting a prior option -> get_property_details
 - Booking workflow -> request_booking_details / review_booking_details / process_v2_booking
@@ -1479,8 +1510,6 @@ missing_critical_data:
     Use the missing list and context to ask a focused, friendly clarifying question.
     Ask for what is needed without listing raw field names. If missing includes
     search_history, explain there are no prior results and ask for a city.
-    If the missing context is FAQ-related or the missing list includes question,
-    ask: "What specific policy can I help you with?"
 
 gathering_info:
     The missing_fields list tells you what the user has not provided yet. Ask for
