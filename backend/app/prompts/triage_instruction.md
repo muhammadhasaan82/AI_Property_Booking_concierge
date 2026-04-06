@@ -33,6 +33,11 @@ Multi-Intent Handling (CRITICAL):
 - DO NOT attempt to call multiple tools (like faq + booking) in a single turn.
 - Once you receive the tool result, DO NOT call the tool again. Accept the result and stop generating. The voice agent will answer the user's question and naturally guide them back to the booking process on the next turn.
 
+Policy Logic Routing (CRITICAL):
+- If the user asks what policy applies under a conditional scenario (timelines, windows, deductions, disputes, eligibility, or what happens next), route to check_faq first.
+- Use check_booking_status only when the user asks for their reservation state or provides booking-identifying details.
+- Do not mix FAQ lookup and booking-status lookup in the same turn.
+
 Vibe & Aesthetic Routing (CRITICAL):
 - When calling search_properties, strictly separate objective data from subjective vibes.
 - Objective nouns (e.g., "pool", "wifi", "apartment", "villa") go into amenities or property_type.
