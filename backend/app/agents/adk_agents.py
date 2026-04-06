@@ -287,6 +287,31 @@ def _coerce_bool(value: Any) -> bool:
     return False
 
 
+def _diff_booking_summary(
+    previous: Optional[Dict[str, Any]],
+    current: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not isinstance(previous, dict):
+        return {
+            "was_update": False,
+            "changed_fields": [],
+            "changed_values": {},
+        }
+
+    changed_fields: List[str] = []
+    changed_values: Dict[str, Any] = {}
+    for key, value in current.items():
+        if previous.get(key) != value:
+            changed_fields.append(str(key))
+            changed_values[str(key)] = value
+
+    return {
+        "was_update": True,
+        "changed_fields": changed_fields,
+        "changed_values": changed_values,
+    }
+
+
 def _classify_user_engagement_state(
     user_input: Optional[str],
     active_options: Optional[List[Dict[str, Any]]] = None,
@@ -1137,6 +1162,7 @@ async def review_booking_details(
     price_per_night: Optional[float] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
+    tool_context: Optional[ToolContext] = None,
 ) -> dict:
     """Present a full booking summary for the user to review BEFORE final confirmation.
 
@@ -1193,22 +1219,34 @@ async def review_booking_details(
 
     total_price = nights * price_value
 
+    summary = {
+        "property": property_title,
+        "property_id": property_id,
+        "guest_name": guest_name,
+        "guest_email": guest_email,
+        "guest_phone": guest_phone,
+        "check_in": check_in,
+        "check_out": check_out,
+        "nights": nights,
+        "guests": guests_value,
+        "price_per_night": price_value,
+        "total": round(total_price, 2),
+    }
+
+    update_context: Optional[Dict[str, Any]] = None
+    soft_state = _get_soft_state(tool_context)
+    if isinstance(soft_state, dict):
+        previous_summary = soft_state.get("pending_booking")
+        update_context = _diff_booking_summary(previous_summary, summary)
+        soft_state["pending_booking"] = summary
+        soft_state["pending_booking_updated_at"] = time.time()
+
     payload = {
         "status": "review_pending",
-        "summary": {
-            "property": property_title,
-            "property_id": property_id,
-            "guest_name": guest_name,
-            "guest_email": guest_email,
-            "guest_phone": guest_phone,
-            "check_in": check_in,
-            "check_out": check_out,
-            "nights": nights,
-            "guests": guests_value,
-            "price_per_night": price_value,
-            "total": round(total_price, 2),
-        },
+        "summary": summary,
     }
+    if update_context and update_context.get("was_update"):
+        payload["update_context"] = update_context
     if action_intent:
         payload["action_intent"] = action_intent
     if context_flag:
@@ -1228,6 +1266,7 @@ async def process_v2_booking(
     price_per_night: Optional[float] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
+    tool_context: Optional[ToolContext] = None,
 ) -> dict:
     """Finalise and commit the booking ONLY after the user has explicitly confirmed.
 
@@ -1322,6 +1361,10 @@ async def process_v2_booking(
             "total_amount": round(total_price, 2),
         },
     }
+    soft_state = _get_soft_state(tool_context)
+    if isinstance(soft_state, dict):
+        soft_state.pop("pending_booking", None)
+        soft_state.pop("pending_booking_updated_at", None)
     if action_intent:
         payload["action_intent"] = action_intent
     if context_flag:
@@ -1388,6 +1431,16 @@ Tool selection guidelines (non-exhaustive):
 - Selecting a prior option -> get_property_details
 - Booking workflow -> request_booking_details / review_booking_details / process_v2_booking
 - Escalation -> escalate_to_human
+
+Booking modification guidance:
+- Before choosing a booking tool, check soft_state for pending_booking.
+- If pending_booking exists and the user is changing a single field (dates,
+    guests, name, email, phone, or property), treat it as a modification, not
+    a new booking.
+- Infer which field changed from the user's wording, merge it into
+    pending_booking, and call review_booking_details with the full updated set.
+- Do NOT call request_booking_details in this case.
+- A single-field correction is not the same intent as a fresh booking.
 
 Property reference resolution:
 - When the user refers to a previously shown property using a number, ordinal,
@@ -1518,9 +1571,12 @@ gathering_info:
     those fields naturally and concisely.
 
 review_pending:
-    Present the summary in a clean, elegant format (markdown, bold labels).
+    If update_context is present and was_update is true, acknowledge the updated
+    field(s) and confirm the new value(s) first. Keep it brief and do not
+    re-present the full summary unless the user asks or is ready to confirm.
+    Otherwise, present the summary in a clean, elegant format (markdown, bold labels).
     Include property, guest name, email, phone, dates, nights, guests, price/night, total.
-    Close with a warm confirmation question.
+    Close with a warm confirmation question or ask if anything else needs updating.
 
 booking_confirmed:
     The booking is done. Display the receipt clearly and highlight booking_id.
