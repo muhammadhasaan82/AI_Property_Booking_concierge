@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 import logging
+import litellm
+
+litellm.drop_params = True
 
 logger = logging.getLogger(__name__)
 
