@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from google.adk.tools import ToolContext
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 async def request_booking_details(
     missing_info: Optional[str] = None,
-    missing_fields: Optional[list] = None,
+    missing_fields: Optional[List[str]] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
 ) -> dict:
