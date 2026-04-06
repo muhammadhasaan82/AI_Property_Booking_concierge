@@ -20,7 +20,7 @@ import uuid
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from google.adk.agents import LlmAgent
 from google.adk.agents.sequential_agent import SequentialAgent
 from google.adk.models.lite_llm import LiteLlm
@@ -43,6 +43,22 @@ os.environ["LITELLM_LOG"] = "ERROR"
 DISPATCHER_MODEL = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-5-nano")
 VOICE_MODEL = os.getenv("ADK_VOICE_MODEL", "groq/llama-3.3-70b-versatile")
 
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.getenv(name) or str(default)).strip()
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = (os.getenv(name) or str(default)).strip()
+    try:
+        return float(raw)
+    except Exception:
+        return default
+
 # ---------------------------------------------------------------------------
 # Dual-Model Backends (via LiteLLM — no Google Cloud dependency)
 # ---------------------------------------------------------------------------
@@ -64,6 +80,9 @@ DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
 VOICE_CONFIG = genai_types.GenerateContentConfig(
     temperature=0.6,
 )
+
+PROPERTY_RERANK_LIMIT = _env_int("PROPERTY_RERANK_LIMIT", 25)
+PROPERTY_RERANK_TIMEOUT_SECONDS = _env_float("PROPERTY_RERANK_TIMEOUT_SECONDS", 0.6)
 
 SOFT_SESSION_TTL_SECONDS = 60 * 60
 
@@ -285,6 +304,95 @@ def _coerce_bool(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return False
+
+
+def _split_amenities_by_known(
+    amenities: Optional[List[str]],
+    dataset: Optional[List[Dict[str, Any]]],
+) -> Tuple[List[str], List[str]]:
+    if not amenities:
+        return [], []
+    if not dataset:
+        return list(amenities), []
+
+    known: set[str] = set()
+    for row in dataset:
+        for item in row.get("amenities") or []:
+            if isinstance(item, str) and item.strip():
+                known.add(item.strip().lower())
+
+    hard_terms: List[str] = []
+    soft_terms: List[str] = []
+    for term in amenities:
+        cleaned = (term or "").strip()
+        if not cleaned:
+            continue
+        if cleaned.lower() in known:
+            hard_terms.append(cleaned)
+        else:
+            soft_terms.append(cleaned)
+    return hard_terms, soft_terms
+
+
+def _build_vibe_query(soft_terms: List[str], free_text: Optional[str]) -> str:
+    parts: List[str] = []
+    if free_text and free_text.strip():
+        parts.append(free_text.strip())
+    if soft_terms:
+        parts.append(", ".join(soft_terms))
+    return " ".join(parts).strip()
+
+
+async def _rerank_properties_by_vibe(
+    results: List[Dict[str, Any]],
+    vibe_query: str,
+) -> List[Dict[str, Any]]:
+    if not results or not vibe_query:
+        return results
+
+    try:
+        import asyncio
+        from ..components.retrieval import build_doc_text
+        from ..services.rag_pipeline import rerank
+
+        class _RerankDoc:
+            __slots__ = ("page_content", "metadata")
+
+            def __init__(self, page_content: str, metadata: Dict[str, Any]):
+                self.page_content = page_content
+                self.metadata = metadata
+
+        docs: List[_RerankDoc] = []
+        id_to_prop: Dict[str, Dict[str, Any]] = {}
+        for idx, prop in enumerate(results):
+            pid = str(prop.get("id") or idx)
+            id_to_prop[pid] = prop
+            docs.append(_RerankDoc(build_doc_text(prop), {"id": pid}))
+
+        limit = min(len(docs), max(PROPERTY_RERANK_LIMIT, 1))
+        docs_to_rank = docs[:limit]
+        reranked_docs = await asyncio.wait_for(
+            asyncio.to_thread(rerank, vibe_query, docs_to_rank, top_n=len(docs_to_rank)),
+            timeout=PROPERTY_RERANK_TIMEOUT_SECONDS,
+        )
+
+        ranked: List[Dict[str, Any]] = []
+        for doc in reranked_docs or []:
+            meta = getattr(doc, "metadata", {}) or {}
+            pid = meta.get("id")
+            if pid is None:
+                continue
+            prop = id_to_prop.get(str(pid))
+            if prop and prop not in ranked:
+                ranked.append(prop)
+
+        for prop in results:
+            if prop not in ranked:
+                ranked.append(prop)
+        return ranked
+    except Exception as exc:
+        logger.warning("Property re-ranking failed; using default order: %s", exc)
+        return results
 
 
 def _diff_booking_summary(
@@ -572,6 +680,7 @@ async def search_properties(
     beds: Optional[int] = None,
     property_type: Optional[str] = None,
     amenities: Optional[str] = None,
+    free_text: Optional[str] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
     tool_context: Optional[ToolContext] = None,
@@ -588,6 +697,7 @@ async def search_properties(
         beds: Minimum number of bedrooms (optional).
         property_type: Type of property like apartment, house, villa, etc (optional).
         amenities: Comma-separated list of required amenities (optional).
+        free_text: Optional vibe or descriptive constraints for semantic matching.
         action_intent: Optional context flag like "re_evaluate_history" or "new_search".
         context_flag: Optional secondary context flag.
         tool_context: ADK tool context for session state.
@@ -654,7 +764,11 @@ async def search_properties(
 
     budget_value = _coerce_float(budget)
     beds_value = _coerce_int(beds)
-    amenity_list = [a.strip() for a in (amenities or "").split(",") if a.strip()] or None
+    raw_amenities = [a.strip() for a in (amenities or "").split(",") if a.strip()]
+    hard_amenities, soft_terms = _split_amenities_by_known(raw_amenities, _DATASET if _DATASET else None)
+    amenity_list = hard_amenities or None
+    vibe_query = _build_vibe_query(soft_terms, free_text)
+    should_rerank = bool(vibe_query)
 
     # Try Rust gateway first, fall back to Python search
     results = None
@@ -718,6 +832,9 @@ async def search_properties(
         if context_flag:
             payload["context_flag"] = context_flag
         return payload
+
+    if should_rerank:
+        results = await _rerank_properties_by_vibe(results, vibe_query)
 
     formatted = []
     for i, r in enumerate(results, 1):
@@ -1431,6 +1548,12 @@ Tool selection guidelines (non-exhaustive):
 - Selecting a prior option -> get_property_details
 - Booking workflow -> request_booking_details / review_booking_details / process_v2_booking
 - Escalation -> escalate_to_human
+
+Vibe & Aesthetic Routing (CRITICAL):
+- When calling search_properties, strictly separate objective data from subjective vibes.
+- Objective nouns (e.g., "pool", "wifi", "apartment", "villa") go into amenities or property_type.
+- Subjective aesthetics, adjectives, or unstructured requests (e.g., "romantic", "quiet getaway", "ocean view", "modern vibe") MUST go into the free_text parameter.
+- Do not stuff subjective vibes into property_type or amenities.
 
 Booking modification guidance:
 - Before choosing a booking tool, check soft_state for pending_booking.
