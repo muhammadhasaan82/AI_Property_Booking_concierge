@@ -3,17 +3,17 @@
 ADK 2.0 — Native V2 Agentic Architecture
 
 Dual-Model Architecture:
-  Node 1 (triage_router)   → GPT-5 Nano via LiteLLM  (temperature=1)
-  Node 2 (concierge_voice) → Llama-3.3-70B via Groq   (temperature=0.6)
+  Node 1 (triage_router)   → Dispatcher model (temperature driven by config)
+  Node 2 (concierge_voice) → Voice model       (temperature driven by config)
 
 The SequentialAgent pipeline: triage_router → concierge_voice.
 
-File size policy:
-  This file contains ONLY agent wiring and configuration.
-  All tool functions live in app/agents/tools/
-  All prompts live in app/prompts/*.md
-  All status constants live in app/agents/status_codes.py
-  All shared helpers live in app/agents/tools/helpers.py
+FILE SIZE POLICY — this file contains ONLY agent wiring.
+┌─────────────────────────────────────────────────────────────────┐
+│  To change ANY behaviour — edit app/config/agent_config.yaml   │
+│  To change prompts       — edit app/prompts/*.md               │
+│  NO hardcoded values exist in this file.                        │
+└─────────────────────────────────────────────────────────────────┘
 """
 from __future__ import annotations
 
@@ -27,7 +27,9 @@ from google.adk.agents.sequential_agent import SequentialAgent
 from google.adk.models.lite_llm import LiteLlm
 from google.genai import types as genai_types
 
-# Disable LiteLLM telemetry at Python level
+from app.config.agent_config_loader import cfg
+
+# Disable LiteLLM telemetry
 litellm.telemetry = False
 os.environ["LITELLM_TELEMETRY"] = "False"
 os.environ["LITELLM_LOG"] = "ERROR"
@@ -35,32 +37,11 @@ os.environ["LITELLM_LOG"] = "ERROR"
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Environment configuration
+# Expose model names for sub-modules that need them (no circular import)
+# Both come from cfg which reads env vars with YAML as fallback.
 # ---------------------------------------------------------------------------
-
-def _env_int(name: str, default: int) -> int:
-    raw = (os.getenv(name) or str(default)).strip()
-    try:
-        return int(raw)
-    except Exception:
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = (os.getenv(name) or str(default)).strip()
-    try:
-        return float(raw)
-    except Exception:
-        return default
-
-
-DISPATCHER_MODEL: str = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-5-nano")
-VOICE_MODEL: str = os.getenv("ADK_VOICE_MODEL", "groq/llama-3.3-70b-versatile")
-
-# Propagate env-overridable config to helpers module
-from .tools.helpers import SOFT_SESSION_TTL_SECONDS as _DEFAULT_TTL  # noqa: E402
-import app.agents.tools.helpers as _helpers_mod  # noqa: E402
-_helpers_mod.SOFT_SESSION_TTL_SECONDS = _env_int("SOFT_SESSION_CACHE_TTL_SECONDS", _DEFAULT_TTL)
+DISPATCHER_MODEL: str = cfg.dispatcher_model
+VOICE_MODEL: str = cfg.voice_model
 
 # ---------------------------------------------------------------------------
 # Dual-Model Backends (via LiteLLM — no Google Cloud dependency)
@@ -69,27 +50,26 @@ dispatcher_llm = LiteLlm(model=DISPATCHER_MODEL)
 voice_llm = LiteLlm(model=VOICE_MODEL)
 
 # ---------------------------------------------------------------------------
-# Generation configs
-#
-# Two-Speed Streaming Rule:
-#   DISPATCHER_CONFIG — triage_router token stream is SILENTLY CONSUMED by runner.
-#   VOICE_CONFIG      — concierge_voice text deltas are STREAMED to the UI.
+# Generation configs — temperatures from agent_config.yaml
 # ---------------------------------------------------------------------------
-DISPATCHER_CONFIG = genai_types.GenerateContentConfig(temperature=1)
-VOICE_CONFIG = genai_types.GenerateContentConfig(temperature=0.6)
+DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
+    temperature=cfg.dispatcher_temperature,
+)
+VOICE_CONFIG = genai_types.GenerateContentConfig(
+    temperature=cfg.voice_temperature,
+)
 
 # ---------------------------------------------------------------------------
-# Prompt loading
-# Prompts live in app/prompts/*.md so they can be edited without touching Python.
+# Prompt loading — prompts live in app/prompts/*.md
+# Editable without touching Python.
 # ---------------------------------------------------------------------------
 _PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 
 TRIAGE_INSTRUCTION: str = (_PROMPTS_DIR / "triage_instruction.md").read_text(encoding="utf-8")
-VOICE_INSTRUCTION: str = (_PROMPTS_DIR / "voice_instruction.md").read_text(encoding="utf-8")
+VOICE_INSTRUCTION: str  = (_PROMPTS_DIR / "voice_instruction.md").read_text(encoding="utf-8")
 
 # ---------------------------------------------------------------------------
-# Tool imports
-# All tool functions are defined in their respective sub-modules.
+# Tool imports — all tool functions live in their respective sub-modules
 # ---------------------------------------------------------------------------
 from .tools.search import (  # noqa: E402
     get_all_available_cities,

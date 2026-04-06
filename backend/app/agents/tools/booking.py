@@ -21,6 +21,7 @@ from .helpers import (
     _missing_critical_data,
     _validate_booking_fields,
 )
+from app.config.agent_config_loader import cfg
 
 logger = logging.getLogger(__name__)
 
@@ -206,8 +207,8 @@ async def process_v2_booking(
             "guests": guests_value,
             "nights": nights,
             "total_amount": total_price,
-            "status": "confirmed",
-            "source": Source.V2_ADK,
+            "status": cfg.booking_confirmed_status,
+            "source": cfg.booking_source_tag,
         })
     except Exception as e:
         logger.warning("[V2 Booking] Could not persist booking to DB: %s", e)

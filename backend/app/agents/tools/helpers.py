@@ -22,27 +22,19 @@ from typing import Any, Dict, List, Optional, Tuple
 from google.adk.tools import ToolContext
 
 from ..status_codes import Status, BOOKING_REQUIRED_FIELDS
+from app.config.agent_config_loader import cfg
 
 # ---------------------------------------------------------------------------
-# Module-level constants
+# Module-level constants — all driven from agent_config.yaml via cfg
 # ---------------------------------------------------------------------------
-DATE_FORMAT = "%Y-%m-%d"
 
-SOFT_SESSION_TTL_SECONDS: int = 3600  # overridable via env in adk_agents.py
+# Scalar overridable via env (cfg already applies env > yaml precedence)
+DATE_FORMAT: str = cfg.date_format
+SOFT_SESSION_TTL_SECONDS: int = cfg.session_ttl
 
-HISTORY_ACTION_INTENTS: frozenset[str] = frozenset({
-    "re_evaluate_history",
-    "explore_previous_results",
-    "previous_results",
-    "show_previous_results",
-    "show_previous",
-    "revisit_results",
-})
-
-NEW_SEARCH_ACTION_INTENTS: frozenset[str] = frozenset({
-    "new_search",
-    "fresh_search",
-})
+# Intent routing sets — no magic strings in Python
+HISTORY_ACTION_INTENTS: frozenset = cfg.history_action_intents
+NEW_SEARCH_ACTION_INTENTS: frozenset = cfg.new_search_action_intents
 
 # ---------------------------------------------------------------------------
 # Type coercers
@@ -290,19 +282,12 @@ def _extract_json_dict(raw_text: Any) -> Optional[Dict[str, Any]]:
 
 def _classify_engagement_state(unresolved_turns: int) -> str:
     """
-    Deterministic engagement state classifier.
-
-    Replaces the original synchronous LLM call that fired on every search result,
-    costing ~300-600ms latency per turn. Heuristic is based on unresolved_turns:
-      0      → engaged
-      1–2    → fatigued
-      3+     → exhausted_or_frustrated
+    Config-driven engagement state classifier.
+    Thresholds are loaded from agent_config.yaml — no hardcoded numbers.
+    Change behaviour by editing: session.unresolved_turns_fatigued
+    and session.unresolved_turns_exhausted in agent_config.yaml.
     """
-    if unresolved_turns >= 3:
-        return "exhausted_or_frustrated"
-    if unresolved_turns >= 1:
-        return "fatigued"
-    return "engaged"
+    return cfg.classify_engagement(unresolved_turns)
 
 
 def _validate_booking_fields(
@@ -342,10 +327,11 @@ def _validate_booking_fields(
         for field_name, _ in BOOKING_REQUIRED_FIELDS
         if _is_blank(field_map.get(field_name))
     ]
-    if guests_value is None:
-        missing.append("guests")
-    if price_value is None:
-        missing.append("price_per_night")
+    # numeric fields validated via cfg — no hardcoded field names
+    numeric_values = {"guests": guests_value, "price_per_night": price_value}
+    for nf in cfg.booking_required_numeric_fields:
+        if numeric_values.get(nf) is None:
+            missing.append(nf)
 
     return missing, guests_value, price_value
 
@@ -355,9 +341,8 @@ def _compute_nights_and_total(
     check_out: str,
     price_per_night: float,
 ) -> Tuple[int, float]:
-    """Compute nights and total price from date strings. Returns (nights, total)."""
+    """Compute nights and total price. Date format driven by cfg.date_format."""
     from datetime import datetime
-
     try:
         d1 = datetime.strptime(check_in, DATE_FORMAT)
         d2 = datetime.strptime(check_out, DATE_FORMAT)

@@ -1,0 +1,162 @@
+# app/config/agent_config.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Single source of truth for ALL runtime-configurable values used by the
+# ADK V2 pipeline.
+#
+# PHILOSOPHY:
+#   The LLM reasoning layer is probabilistic and self-thinking by nature.
+#   This file drives the infrastructure AROUND the LLM — every threshold,
+#   field list, intent set, fallback message, and limit that was previously
+#   hardcoded in Python now lives here.
+#
+#   To change behaviour: edit this file. No Python changes required.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "2.0"
+
+# ── Models ──────────────────────────────────────────────────────────────────
+# All values below are overridable by environment variables.
+# Environment variable wins over this file.
+models:
+  dispatcher:
+    env_key: ADK_DISPATCHER_MODEL
+    default: "openai/gpt-5-nano"
+    temperature: 1
+
+  voice:
+    env_key: ADK_VOICE_MODEL
+    default: "groq/llama-3.3-70b-versatile"
+    temperature: 0.6
+
+# ── Session ─────────────────────────────────────────────────────────────────
+session:
+  cache_ttl_seconds: 3600          # env: SOFT_SESSION_CACHE_TTL_SECONDS
+  unresolved_turns_fatigued: 1     # env: ENGAGEMENT_FATIGUED_TURNS
+  unresolved_turns_exhausted: 3    # env: ENGAGEMENT_EXHAUSTED_TURNS
+
+# ── Property search ─────────────────────────────────────────────────────────
+search:
+  rerank_limit: 25                 # env: PROPERTY_RERANK_LIMIT
+  rerank_timeout_seconds: 0.6      # env: PROPERTY_RERANK_TIMEOUT_SECONDS
+
+# ── Dataset ─────────────────────────────────────────────────────────────────
+dataset:
+  relative_path: "data/dataset.csv"   # relative to backend/
+  city_column_candidates:
+    - city
+    - location
+
+# ── Intent routing action sets ───────────────────────────────────────────────
+# These are the action_intent values that the triage_router LLM emits.
+# The triage_instruction.md prompt describes these values to the LLM.
+# If you add a new intent to the prompt, add it here too.
+intent_routing:
+  history_action_intents:
+    - re_evaluate_history
+    - explore_previous_results
+    - previous_results
+    - show_previous_results
+    - show_previous
+    - revisit_results
+
+  new_search_action_intents:
+    - new_search
+    - fresh_search
+
+# ── Booking ─────────────────────────────────────────────────────────────────
+booking:
+  date_format: "%Y-%m-%d"
+
+  # Fields required for both review_booking_details and process_v2_booking.
+  # Order matters for validation output. Add or remove fields without touching Python.
+  required_fields:
+    - property_id
+    - property_title
+    - guest_name
+    - guest_email
+    - guest_phone
+    - check_in
+    - check_out
+  # Numeric fields validated separately (coerced from LLM output):
+  required_numeric_fields:
+    - guests
+    - price_per_night
+
+  booking_source_tag: "v2_adk"     # written to DB — change without Python edits
+  booking_confirmed_status: "confirmed"
+
+# ── Small talk message types ─────────────────────────────────────────────────
+# Valid values the triage_router may pass to handle_small_talk.
+small_talk:
+  valid_types:
+    - greeting
+    - thanks
+    - goodbye
+    - acknowledgement
+  default_type: acknowledgement
+
+# ── Engagement states ────────────────────────────────────────────────────────
+# Valid engagement state labels. Must match what the triage prompt describes.
+engagement:
+  valid_states:
+    - engaged
+    - fatigued
+    - exhausted_or_frustrated
+
+# ── Property resolution intent classes ───────────────────────────────────────
+# Valid intent classes the property resolver LLM may output.
+# Must match the strict_output_schema in prompts/resolution_prompt.md.
+resolution:
+  valid_intent_classes:
+    - select_property
+    - general_inquiry
+    - modify_search
+    - confirm_booking
+    - escalate
+  fallback_intent: select_property
+
+# ── Fallback messages ────────────────────────────────────────────────────────
+# User-facing copy for unresolved states. Edit here — no Python changes.
+messages:
+  resolution_unresolved_default: >-
+    I couldn't confidently match that to one of the current options yet,
+    so a quick detail like the price, rating, or option number would help me lock it in.
+
+  resolution_unresolved_frustrated: >-
+    I couldn't confidently match that to one of the current options.
+    Reply with the number you want, or say reset and I'll start fresh.
+
+  resolution_not_matched_log: >-
+    The reference could not be mapped to a single active option with sufficient confidence.
+
+  escalation_default_reason: "User requested assistance."
+
+# ── Status string identifiers ────────────────────────────────────────────────
+# Written into tool payloads. The concierge_voice reads 'status' to decide response.
+# Changing a value here changes it everywhere simultaneously.
+status:
+  missing_critical_data: missing_critical_data
+  error: error
+  cities_found: cities_found
+  properties_found: properties_found
+  no_results: no_results
+  property_details: property_details
+  property_selection_unresolved: property_selection_unresolved
+  not_found: not_found
+  casual_interaction: casual_interaction
+  answered: answered
+  faq_not_found: faq_not_found
+  gathering_info: gathering_info
+  review_pending: review_pending
+  booking_confirmed: booking_confirmed
+  found: found
+  booking_not_found: booking_not_found
+  handoff_required: handoff_required
+
+# ── Source provenance tags ────────────────────────────────────────────────────
+sources:
+  memory: memory
+  policy_db: policy_database
+  rag: rag_pipeline
+  basic_faq: basic_faq
+  v2_adk: v2_adk
