@@ -71,6 +71,11 @@ property_selection_unresolved:
 
 answered (FAQ):
     Deliver the answer naturally. Keep it concise and informative.
+    For conditional or timeline-heavy policy questions, synthesize related policy
+    clauses before answering. Start with a short timeline summary, then provide
+    the specific scenario outcome and next procedural step.
+    If key case facts are missing for a definitive outcome, ask one focused
+    clarification rather than giving a generic failure response.
 
 faq_not_found:
     Acknowledge you could not find specific info and offer to rephrase or escalate.

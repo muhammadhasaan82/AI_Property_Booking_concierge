@@ -81,6 +81,35 @@ def _is_local_model_reference(model_name: str) -> bool:
         return False
 
 
+def _merge_ranked_docs(*batches: List[Tuple[Document, float]]) -> List[Tuple[Document, float]]:
+    """Merge ranked retrieval batches while preserving rank priority and removing duplicates."""
+    merged: List[Tuple[Document, float]] = []
+    seen: set[str] = set()
+
+    for batch in batches:
+        for item in batch or []:
+            if not isinstance(item, tuple) or len(item) < 1:
+                continue
+            doc = item[0]
+            if not hasattr(doc, "page_content"):
+                continue
+            score = float(item[1]) if len(item) > 1 else 0.0
+
+            page = ""
+            metadata = getattr(doc, "metadata", {}) or {}
+            if isinstance(metadata, dict):
+                page = str(metadata.get("page", ""))
+
+            content_prefix = str(getattr(doc, "page_content", "") or "")[:180]
+            key = f"{page}|{content_prefix}"
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append((doc, score))
+
+    return merged
+
+
 class _SentenceTransformerEmbeddings:
     """Minimal LangChain-compatible embeddings adapter."""
 
@@ -349,29 +378,39 @@ class FAQService:
         rewritten = rewrite_query(question)
 
         # --- Hybrid retrieval (vector + BM25 via RRF) ---
+        # Bridge strategy: query with both rewritten and original forms, then merge.
         rag_cfg = get_retrieval_config().rag
+        retrieval_k = max(k, rag_cfg.vector_k, rag_cfg.bm25_k)
         hybrid_results: List[Tuple[Document, float]] = []
+        secondary_results: List[Tuple[Document, float]] = []
         if self._vector_store is not None:
-            hybrid_results = hybrid_retrieve(self._vector_store, rewritten, k=rag_cfg.vector_k)
+            hybrid_results = hybrid_retrieve(self._vector_store, rewritten, k=retrieval_k)
+            if rewritten.strip().lower() != question.strip().lower():
+                secondary_results = hybrid_retrieve(self._vector_store, question, k=retrieval_k)
 
         if not hybrid_results:
             if self._vector_store is not None:
                 try:
-                    hybrid_results = self._vector_store.similarity_search_with_score(rewritten, k=k)
+                    hybrid_results = self._vector_store.similarity_search_with_score(rewritten, k=retrieval_k)
                 except Exception as exc:
                     logger.warning("Vector similarity search unavailable, using lexical FAQ retrieval: %s", exc)
             if not hybrid_results:
-                hybrid_results = self._keyword_retrieve(rewritten, k=max(k, rag_cfg.bm25_k))
+                hybrid_results = self._keyword_retrieve(rewritten, k=retrieval_k)
+            if rewritten.strip().lower() != question.strip().lower() and not secondary_results:
+                secondary_results = self._keyword_retrieve(question, k=retrieval_k)
 
         # Keep top candidates by rank. Raw scores differ by retriever type
         # (RRF, cosine distance, etc.), so rank is more stable than absolute thresholds.
-        relevant_docs = list(hybrid_results[: max(k, 1)])
+        merged_results = _merge_ranked_docs(hybrid_results, secondary_results)
+        relevant_limit = max(k * 2, rag_cfg.vector_k, rag_cfg.bm25_k)
+        relevant_docs = list(merged_results[: max(relevant_limit, 1)])
         if not relevant_docs:
             return "I couldn't find specific information about that in our policies. Would you like to speak with a human agent?", []
 
         # --- Cross-encoder re-ranking ---
         docs_only = [doc for doc, _ in relevant_docs]
-        reranked = rerank(rewritten, docs_only, top_n=k)
+        rerank_top_n = min(len(docs_only), max(k, rag_cfg.vector_k))
+        reranked = rerank(rewritten, docs_only, top_n=rerank_top_n)
 
         # --- Build sources from reranked docs ---
         sources: List[Dict[str, Any]] = []
@@ -611,8 +650,6 @@ def generate_concise_answer(question: str, context: str) -> str:
         return extract_key_sentences(context, question)
     
     try:
-        import litellm
-
         # Determine question complexity using VADER + heuristics
         from . import nlp_engine
         vader = nlp_engine._get_vader()
@@ -653,11 +690,22 @@ CRITICAL FORMATTING RULES:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.3,
             max_tokens=1500,
         )
 
-        answer = response.choices[0].message.content.strip()
+        content = ""
+        if getattr(response, "choices", None):
+            message = getattr(response.choices[0], "message", None)
+            content = str(getattr(message, "content", "") or "").strip()
+        if not content and isinstance(response, dict):
+            content = str(
+                response.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+            ).strip()
+
+        if not content:
+            return extract_key_sentences(context, question)
+
+        answer = content
         return _clean_pdf_artifacts(answer)
 
     except Exception as e:
