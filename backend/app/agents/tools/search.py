@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from google.adk.tools import ToolContext
 
 from ..status_codes import Source, Status
+from app.config.agent_config_loader import cfg
 from .helpers import (
     _build_active_options,
     _classify_engagement_state,
@@ -34,13 +35,13 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 
-# Dataset path — single authoritative location
-DATASET_PATH = Path(__file__).resolve().parents[3] / "data" / "dataset.csv"
-CITY_COLUMN_CANDIDATES = ("city", "location")
-
-# Property rerank config
-PROPERTY_RERANK_LIMIT: int = 25
-PROPERTY_RERANK_TIMEOUT_SECONDS: float = 0.6
+# Dataset path and search config — all driven from agent_config.yaml
+# To change the path or rerank limits: edit agent_config.yaml, not this file.
+_BACKEND_ROOT = Path(__file__).resolve().parents[3]
+DATASET_PATH = _BACKEND_ROOT / cfg.dataset_relative_path
+CITY_COLUMN_CANDIDATES = cfg.city_column_candidates
+PROPERTY_RERANK_LIMIT: int = cfg.rerank_limit
+PROPERTY_RERANK_TIMEOUT_SECONDS: float = cfg.rerank_timeout
 
 
 # ---------------------------------------------------------------------------

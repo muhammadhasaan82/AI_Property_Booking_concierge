@@ -10,6 +10,7 @@ from typing import Optional
 
 from ..status_codes import SMALL_TALK_TYPES, Source, Status
 from .helpers import _finalize_payload, _is_blank, _missing_critical_data
+from app.config.agent_config_loader import cfg
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def handle_small_talk(
     """
     normalized_type = (message_type or "").strip().lower()
     if normalized_type not in SMALL_TALK_TYPES:
-        normalized_type = "acknowledgement"
+        normalized_type = cfg.small_talk_default_type
     return _finalize_payload(
         {
             "status": Status.CASUAL_INTERACTION,
@@ -219,7 +220,7 @@ async def escalate_to_human(
     reason_value = (
         reason.strip()
         if isinstance(reason, str) and reason.strip()
-        else "User requested assistance."
+        else cfg.msg_escalation_default
     )
     return _finalize_payload(
         {"status": Status.HANDOFF_REQUIRED, "reason": reason_value},

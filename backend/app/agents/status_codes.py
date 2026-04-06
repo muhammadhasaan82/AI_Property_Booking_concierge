@@ -1,89 +1,59 @@
 """
 app/agents/status_codes.py
 --------------------------
-Single source of truth for all status string constants used in tool payloads.
+All status strings, source tags, and valid-value sets are loaded from
+app/config/agent_config.yaml via the cfg singleton.
 
-The triage_router returns structured dicts with a "status" key.
-The concierge_voice reads that key to decide how to respond.
-Using typed constants here prevents silent routing breaks from typos.
+NO VALUE IN THIS FILE IS HARDCODED.
+To change any string, threshold, or set — edit agent_config.yaml only.
 """
+from app.config.agent_config_loader import cfg
 
+# ---------------------------------------------------------------------------
+# Status strings — read from cfg.status
+# ---------------------------------------------------------------------------
 
 class Status:
-    # General
-    MISSING_CRITICAL_DATA = "missing_critical_data"
-    ERROR = "error"
+    MISSING_CRITICAL_DATA      = cfg.status.missing_critical_data
+    ERROR                      = cfg.status.error
+    CITIES_FOUND               = cfg.status.cities_found
+    PROPERTIES_FOUND           = cfg.status.properties_found
+    NO_RESULTS                 = cfg.status.no_results
+    PROPERTY_DETAILS           = cfg.status.property_details
+    PROPERTY_SELECTION_UNRESOLVED = cfg.status.property_selection_unresolved
+    NOT_FOUND                  = cfg.status.not_found
+    CASUAL_INTERACTION         = cfg.status.casual_interaction
+    ANSWERED                   = cfg.status.answered
+    FAQ_NOT_FOUND              = cfg.status.faq_not_found
+    GATHERING_INFO             = cfg.status.gathering_info
+    REVIEW_PENDING             = cfg.status.review_pending
+    BOOKING_CONFIRMED          = cfg.status.booking_confirmed
+    FOUND                      = cfg.status.found
+    BOOKING_NOT_FOUND          = cfg.status.booking_not_found
+    HANDOFF_REQUIRED           = cfg.status.handoff_required
 
-    # City / Search
-    CITIES_FOUND = "cities_found"
-    PROPERTIES_FOUND = "properties_found"
-    NO_RESULTS = "no_results"
 
-    # Property details / selection
-    PROPERTY_DETAILS = "property_details"
-    PROPERTY_SELECTION_UNRESOLVED = "property_selection_unresolved"
-    NOT_FOUND = "not_found"
-
-    # Small talk
-    CASUAL_INTERACTION = "casual_interaction"
-
-    # FAQ
-    ANSWERED = "answered"
-    FAQ_NOT_FOUND = "faq_not_found"
-
-    # Booking flow
-    GATHERING_INFO = "gathering_info"
-    REVIEW_PENDING = "review_pending"
-    BOOKING_CONFIRMED = "booking_confirmed"
-
-    # Booking status lookup
-    FOUND = "found"
-    BOOKING_NOT_FOUND = "booking_not_found"
-
-    # Escalation
-    HANDOFF_REQUIRED = "handoff_required"
-
+# ---------------------------------------------------------------------------
+# Source provenance tags — read from cfg.source
+# ---------------------------------------------------------------------------
 
 class Source:
-    """Source identifiers for tool payload provenance tracking."""
-    MEMORY = "memory"
-    POLICY_DB = "policy_database"
-    RAG = "rag_pipeline"
-    BASIC_FAQ = "basic_faq"
-    V2_ADK = "v2_adk"
+    MEMORY     = cfg.source.memory
+    POLICY_DB  = cfg.source.policy_db
+    RAG        = cfg.source.rag
+    BASIC_FAQ  = cfg.source.basic_faq
+    V2_ADK     = cfg.source.v2_adk
 
 
-# Valid engagement state labels produced by _classify_user_engagement_state
-ENGAGEMENT_STATES: frozenset[str] = frozenset({
-    "engaged",
-    "fatigued",
-    "exhausted_or_frustrated",
-})
+# ---------------------------------------------------------------------------
+# Valid value sets — all driven from YAML
+# ---------------------------------------------------------------------------
 
-# Valid intent classes produced by _resolve_property_reference_with_model
-INTENT_CLASSES: frozenset[str] = frozenset({
-    "select_property",
-    "general_inquiry",
-    "modify_search",
-    "confirm_booking",
-    "escalate",
-})
+ENGAGEMENT_STATES: frozenset = cfg.engagement_valid_states
+INTENT_CLASSES: frozenset    = cfg.resolution_valid_intents
+SMALL_TALK_TYPES: frozenset  = cfg.small_talk_valid_types
 
-# Valid message types for handle_small_talk
-SMALL_TALK_TYPES: frozenset[str] = frozenset({
-    "greeting",
-    "thanks",
-    "goodbye",
-    "acknowledgement",
-})
-
-# Required booking fields (in validation order)
-BOOKING_REQUIRED_FIELDS: tuple[tuple[str, str], ...] = (
-    ("property_id", "property_id"),
-    ("property_title", "property_title"),
-    ("guest_name", "guest_name"),
-    ("guest_email", "guest_email"),
-    ("guest_phone", "guest_phone"),
-    ("check_in", "check_in"),
-    ("check_out", "check_out"),
+# Booking required fields — loaded from YAML, not hardcoded
+BOOKING_REQUIRED_FIELDS: tuple = tuple(
+    (field, field) for field in cfg.booking_required_fields
 )

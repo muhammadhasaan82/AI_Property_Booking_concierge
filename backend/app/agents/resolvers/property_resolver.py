@@ -22,6 +22,7 @@ from ..tools.helpers import (
     _normalize_extracted_parameters,
     _sanitize_soft_state_for_model,
 )
+from app.config.agent_config_loader import cfg
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,9 @@ logger = logging.getLogger(__name__)
 _PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "resolution_prompt.md"
 _RESOLUTION_PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 
-# Fallback copy for ambiguous / failed resolution
-_FALLBACK_AGENT_RESPONSE_DEFAULT = (
-    "I couldn't confidently match that to one of the current options yet, "
-    "so a quick detail like the price, rating, or option number would help me lock it in."
-)
-_FALLBACK_AGENT_RESPONSE_FRUSTRATED = (
-    "I couldn't confidently match that to one of the current options. "
-    "Reply with the number you want, or say reset and I'll start fresh."
-)
+# Fallback copy — loaded from agent_config.yaml, not hardcoded
+_FALLBACK_AGENT_RESPONSE_DEFAULT: str = cfg.msg_resolution_default
+_FALLBACK_AGENT_RESPONSE_FRUSTRATED: str = cfg.msg_resolution_frustrated
 
 
 def _build_resolution_prompt(
@@ -67,9 +62,9 @@ def _parse_resolution_response(
     """Parse and validate the model's resolution JSON response."""
     parsed = _extract_json_dict(raw) or {}
 
-    intent = str(parsed.get("user_intent_classification") or "select_property").strip().lower()
-    if intent not in INTENT_CLASSES:
-        intent = "select_property"
+    intent = str(parsed.get("user_intent_classification") or cfg.resolution_fallback_intent).strip().lower()
+    if intent not in cfg.resolution_valid_intents:
+        intent = cfg.resolution_fallback_intent
 
     resolved_property_id = parsed.get("resolved_property_id")
     if resolved_property_id in {"null", "", None}:
@@ -129,7 +124,7 @@ def resolve_property_reference(
 
     fallback: Dict[str, Any] = {
         "internal_reasoning_log": (
-            "The reference could not be mapped to a single active option with sufficient confidence."
+            cfg.msg_resolution_not_matched_log
         ),
         "user_intent_classification": "select_property",
         "resolved_property_id": None,
