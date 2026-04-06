@@ -653,8 +653,8 @@ CRITICAL FORMATTING RULES:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=1.0,
-            max_tokens=300,
+            temperature=0.3,
+            max_tokens=1500,
         )
 
         answer = response.choices[0].message.content.strip()
