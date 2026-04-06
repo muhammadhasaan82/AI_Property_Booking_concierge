@@ -17,7 +17,7 @@ env_path = Path(__file__).resolve().parents[1] / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 
-from app.services.faq_enhanced import process_policy_document, initialize_faq_system
+from app.components.faq_enhanced import process_policy_document, initialize_faq_system
 
 
 def main():
@@ -48,7 +48,7 @@ def main():
         
         # Test with a sample question
         print("\n[TEST] Testing with sample question...")
-        from app.services.faq_enhanced import semantic_faq_search
+        from app.components.faq_enhanced import semantic_faq_search
         
         test_question = "What is the refund policy?"
         answer, sources = semantic_faq_search(test_question, k=1)
