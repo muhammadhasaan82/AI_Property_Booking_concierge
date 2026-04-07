@@ -31,6 +31,11 @@ from google.genai.types import Content, Part
 from ..observability import telemetry
 from ..security import anomaly
 from ..security.guardrails import sanitize_input, sanitize_output
+from .config import (
+    ADK_MAX_COGNITIVE_CONTEXT_CHARS,
+    ADK_SESSION_MAX_CONTEXT_CHARS,
+    ADK_SESSION_MAX_EVENTS,
+)
 from .redis_store import (
     clear_session_snapshot,
     get_redis_client,
@@ -69,6 +74,41 @@ def _filter_persistent_state(state: Any) -> Dict[str, Any]:
         for key, value in state.items()
         if not str(key).startswith("temp:")
     }
+
+
+def _jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, dict):
+        return {str(key): _jsonable(val) for key, val in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(item) for item in value]
+
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return _jsonable(value.model_dump(mode="json", by_alias=False))
+        except Exception:
+            try:
+                return _jsonable(value.model_dump())
+            except Exception:
+                pass
+
+    if hasattr(value, "dict") and callable(value.dict):
+        try:
+            return _jsonable(value.dict())
+        except Exception:
+            pass
+
+    if hasattr(value, "__dict__"):
+        try:
+            public = {key: val for key, val in vars(value).items() if not key.startswith("_")}
+            return _jsonable(public)
+        except Exception:
+            pass
+
+    return str(value)
 
 
 def _deserialize_event(event_payload: Any) -> Optional[Any]:
@@ -134,6 +174,49 @@ def _normalize_cognitive_context(value: Any) -> str:
     return str(value).strip()
 
 
+def _truncate_text_chars(text: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3].rstrip() + "..."
+
+
+def _estimate_event_chars(event: Any) -> int:
+    try:
+        return len(json.dumps(_jsonable(event), ensure_ascii=False, sort_keys=True))
+    except Exception:
+        return len(str(event))
+
+
+def _trim_events_for_context(
+    events: List[Any],
+    *,
+    max_events: int = ADK_SESSION_MAX_EVENTS,
+    max_chars: int = ADK_SESSION_MAX_CONTEXT_CHARS,
+) -> List[Any]:
+    """Keep only the most recent events within the configured context budget."""
+    if not events:
+        return []
+
+    bounded_max_events = max(int(max_events or 0), 1)
+    bounded_max_chars = max(int(max_chars or 0), 1)
+
+    recent_events = list(events[-bounded_max_events:])
+    kept_reversed: List[Any] = []
+    running_chars = 0
+
+    for event in reversed(recent_events):
+        event_chars = max(_estimate_event_chars(event), 1)
+        if kept_reversed and running_chars + event_chars > bounded_max_chars:
+            break
+        kept_reversed.append(event)
+        running_chars += event_chars
+
+    trimmed = list(reversed(kept_reversed))
+    return trimmed or [recent_events[-1]]
+
+
 def _already_exists_error(message: str) -> Exception:
     try:
         from google.adk.errors.already_exists_error import AlreadyExistsError
@@ -194,6 +277,16 @@ class RedisSessionService(BaseSessionService):
 
         if config and config.num_recent_events:
             events = events[-config.num_recent_events :]
+
+        trimmed_events = _trim_events_for_context(events)
+        if len(trimmed_events) != len(events):
+            logger.info(
+                "[ADK] Trimmed session %s context from %s events to %s events before model invocation",
+                session_id,
+                len(events),
+                len(trimmed_events),
+            )
+            events = trimmed_events
 
         meta = snapshot.get("meta", {}) if isinstance(snapshot, dict) else {}
         last_update_time = meta.get("last_update_time")
@@ -373,6 +466,7 @@ class RedisSessionService(BaseSessionService):
                 )
 
             storage_session.events.append(event)
+            storage_session.events = _trim_events_for_context(storage_session.events)
             storage_session.last_update_time = session.last_update_time
 
             state_delta = getattr(getattr(event, "actions", None), "state_delta", None)
@@ -427,6 +521,10 @@ async def _build_invocation_state_delta(user_id: str, current_query: str) -> dic
             current_query=current_query,
         )
         user_cognitive_context = _normalize_cognitive_context(mem0_context)
+        user_cognitive_context = _truncate_text_chars(
+            user_cognitive_context,
+            ADK_MAX_COGNITIVE_CONTEXT_CHARS,
+        )
     except Exception as exc:
         logger.debug("[ADK] Could not fetch cognitive context: %s", exc)
 
@@ -588,7 +686,6 @@ async def run_adk_turn(
     except Exception as exc:
         logger.error("[ADK] Pipeline execution error: %s", exc, exc_info=True)
         pipeline_failed_reply = "I'm sorry, something went wrong. Please try again."
-        yield pipeline_failed_reply
 
     latency_ms = (time.monotonic() - t0) * 1000.0
     final_reply = "".join(streamed_parts)
@@ -623,18 +720,19 @@ async def run_adk_turn(
         except Exception:
             pass
 
-    if not final_reply and router_output and not pipeline_failed_reply:
+    if not final_reply and router_output:
         voice_reply = await _render_voice_from_router_output(
             router_output=router_output,
             user_cognitive_context=user_cognitive_context,
         )
         if voice_reply:
             final_reply = voice_reply
-            if not streamed_parts and not anomaly_triggered and not pipeline_failed_reply:
+            if not streamed_parts and not anomaly_triggered:
                 yield final_reply
 
     if not final_reply and pipeline_failed_reply:
         final_reply = pipeline_failed_reply
+        yield final_reply
 
     if not final_reply:
         final_reply = "I'm sorry, I couldn't process your request. Could you try again?"
