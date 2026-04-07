@@ -14,6 +14,7 @@ import chainlit as cl
 import chainlit.data as cl_data
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from dotenv import load_dotenv
+from sqlalchemy.engine import make_url
 from sqlalchemy import text
 
 # Fix sys.path to allow importing backend/app directly as app.*
@@ -194,12 +195,31 @@ WELCOME_MESSAGE = "Welcome to AI Booking! How can I help you find a stay today?"
 
 
 def _normalize_conninfo(conninfo: str) -> str:
+    def _with_pgbouncer_safe_psycopg_options(url_text: str) -> str:
+        try:
+            url = make_url(url_text)
+            query = dict(url.query)
+            # Supabase transaction pooling / PgBouncer is not compatible with
+            # psycopg's automatic prepared statements unless very specific
+            # server/client requirements are met. Disabling them avoids
+            # DuplicatePreparedStatement errors on recycled pooled connections.
+            query.setdefault("prepare_threshold", "None")
+            return str(url.set(query=query))
+        except Exception:
+            separator = "&" if "?" in url_text else "?"
+            return f"{url_text}{separator}prepare_threshold=None"
+
     if conninfo.startswith("postgres://"):
-        return "postgresql+psycopg://" + conninfo[len("postgres://") :]
+        conninfo = "postgresql+psycopg://" + conninfo[len("postgres://") :]
+        return _with_pgbouncer_safe_psycopg_options(conninfo)
     if conninfo.startswith("postgresql+asyncpg://"):
-        return "postgresql+psycopg://" + conninfo[len("postgresql+asyncpg://") :]
+        conninfo = "postgresql+psycopg://" + conninfo[len("postgresql+asyncpg://") :]
+        return _with_pgbouncer_safe_psycopg_options(conninfo)
     if conninfo.startswith("postgresql://"):
-        return "postgresql+psycopg://" + conninfo[len("postgresql://") :]
+        conninfo = "postgresql+psycopg://" + conninfo[len("postgresql://") :]
+        return _with_pgbouncer_safe_psycopg_options(conninfo)
+    if conninfo.startswith("postgresql+psycopg://"):
+        return _with_pgbouncer_safe_psycopg_options(conninfo)
     if conninfo.startswith("sqlite:///"):
         return "sqlite+aiosqlite:///" + conninfo[len("sqlite:///") :]
     return conninfo

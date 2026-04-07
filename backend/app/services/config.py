@@ -38,6 +38,9 @@ MOCK_MODE: bool = _parse_bool(os.getenv("MOCK_MODE", "false"))
 PAYMENT_BASE_URL: str = os.getenv("PAYMENT_BASE_URL", "https://example.com/pay")
 REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 REDIS_SESSION_TTL_SECONDS: int = int(os.getenv("REDIS_SESSION_TTL_SECONDS", "86400"))
+ADK_SESSION_MAX_EVENTS: int = int(os.getenv("ADK_SESSION_MAX_EVENTS", "12"))
+ADK_SESSION_MAX_CONTEXT_CHARS: int = int(os.getenv("ADK_SESSION_MAX_CONTEXT_CHARS", "12000"))
+ADK_MAX_COGNITIVE_CONTEXT_CHARS: int = int(os.getenv("ADK_MAX_COGNITIVE_CONTEXT_CHARS", "3000"))
 
 
 # Non-routing compatibility constant used by search component.
@@ -66,6 +69,9 @@ __all__ = [
     "PAYMENT_BASE_URL",
     "REDIS_URL",
     "REDIS_SESSION_TTL_SECONDS",
+    "ADK_SESSION_MAX_EVENTS",
+    "ADK_SESSION_MAX_CONTEXT_CHARS",
+    "ADK_MAX_COGNITIVE_CONTEXT_CHARS",
     "SEED_PROPERTY_TYPES",
 ]
 
