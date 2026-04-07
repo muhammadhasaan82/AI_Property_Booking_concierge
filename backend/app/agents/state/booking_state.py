@@ -62,6 +62,44 @@ def update_booking_state(
     return state
 
 
+def hydrate_booking_state_from_pending(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Backfill booking_state from pending_booking when available.
+
+    This protects multi-turn modification flows even if a prior turn stored only
+    pending_booking data.
+    """
+    if not isinstance(soft_state, dict):
+        return {}
+
+    state = get_booking_state(soft_state)
+    pending = soft_state.get("pending_booking")
+    if not isinstance(pending, dict):
+        return state
+
+    seed_updates = extract_booking_updates(
+        property_id=pending.get("property_id"),
+        property_title=pending.get("property_title") or pending.get("property"),
+        guest_name=pending.get("guest_name"),
+        guest_email=pending.get("guest_email"),
+        guest_phone=pending.get("guest_phone"),
+        check_in=pending.get("check_in"),
+        check_out=pending.get("check_out"),
+        guests=pending.get("guests"),
+        price_per_night=pending.get("price_per_night"),
+    )
+
+    changed = False
+    for key, value in seed_updates.items():
+        if key not in state:
+            state[key] = value
+            changed = True
+
+    if changed:
+        soft_state["booking_state_updated_at"] = time.time()
+
+    return state
+
+
 def compute_missing_booking_fields(state: Dict[str, Any]) -> List[str]:
     missing: List[str] = []
     for field in cfg.booking_required_fields:

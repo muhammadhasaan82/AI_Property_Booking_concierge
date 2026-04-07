@@ -26,6 +26,7 @@ from ..state.booking_state import (
     clear_booking_state,
     compute_missing_booking_fields,
     extract_booking_updates,
+    hydrate_booking_state_from_pending,
     set_awaiting_field,
     update_booking_state,
 )
@@ -83,6 +84,7 @@ async def request_booking_details(
         resolved_fields = [f.strip() for f in missing_info.split(",") if f.strip()]
     soft_state = _get_soft_state(tool_context)
     booking_state = {}
+    updates: Dict[str, Any] = {}
     if isinstance(soft_state, dict):
         updates = extract_booking_updates(
             property_id=property_id,
@@ -96,13 +98,39 @@ async def request_booking_details(
             price_per_night=price_per_night,
         )
         booking_state = update_booking_state(soft_state, updates)
+        booking_state = hydrate_booking_state_from_pending(soft_state)
 
     computed_missing = compute_missing_booking_fields(booking_state) if booking_state else []
-    if computed_missing:
-        if resolved_fields:
-            resolved_fields = [f for f in resolved_fields if f in computed_missing] or computed_missing
+    has_updates = bool(updates)
+
+    # Backend authority: once we have concrete field updates, ignore LLM "missing" guesses.
+    if booking_state:
+        if has_updates:
+            resolved_fields = computed_missing
+        elif resolved_fields:
+            allowed = set(cfg.booking_required_fields + cfg.booking_required_numeric_fields)
+            resolved_fields = [f for f in resolved_fields if f in allowed]
+            if not resolved_fields:
+                resolved_fields = computed_missing
         else:
             resolved_fields = computed_missing
+
+    # If user supplied an update and the state is now complete, jump directly to review.
+    if booking_state and has_updates and not resolved_fields:
+        return await review_booking_details(
+            property_id=booking_state.get("property_id"),
+            property_title=booking_state.get("property_title"),
+            guest_name=booking_state.get("guest_name"),
+            guest_email=booking_state.get("guest_email"),
+            guest_phone=booking_state.get("guest_phone"),
+            check_in=booking_state.get("check_in"),
+            check_out=booking_state.get("check_out"),
+            guests=booking_state.get("guests"),
+            price_per_night=booking_state.get("price_per_night"),
+            action_intent=action_intent,
+            context_flag=context_flag,
+            tool_context=tool_context,
+        )
 
     if not resolved_fields:
         return _missing_critical_data(
