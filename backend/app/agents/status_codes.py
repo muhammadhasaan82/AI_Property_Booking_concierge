@@ -27,6 +27,7 @@ class Status:
     FAQ_NOT_FOUND              = cfg.status.faq_not_found
     GATHERING_INFO             = cfg.status.gathering_info
     REVIEW_PENDING             = cfg.status.review_pending
+    AMENDMENT_ACKNOWLEDGED     = cfg.status.amendment_acknowledged
     BOOKING_CONFIRMED          = cfg.status.booking_confirmed
     FOUND                      = cfg.status.found
     BOOKING_NOT_FOUND          = cfg.status.booking_not_found
