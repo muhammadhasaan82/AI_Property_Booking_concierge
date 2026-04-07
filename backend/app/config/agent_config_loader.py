@@ -186,6 +186,23 @@ class _AgentConfig:
         src_raw = raw["sources"]
         self.source = _Namespace(src_raw)
 
+        # ── Anomaly Detection ──
+        an = raw.get("anomaly", {})
+        self.anomaly_tool_loop_threshold: int = _env_int(
+            "ANOMALY_TOOL_LOOP_THRESHOLD", an.get("tool_loop_threshold", 5)
+        )
+        self.anomaly_time_window_seconds: int = _env_int(
+            "ANOMALY_TIME_WINDOW_SECONDS", an.get("time_window_seconds", 30)
+        )
+        self.anomaly_session_ttl_minutes: int = _env_int(
+            "ANOMALY_SESSION_TTL_MINUTES", an.get("session_ttl_minutes", 30)
+        )
+        self.anomaly_fallback_message: str = an.get(
+            "fallback_message",
+            "I seem to be having a bit of trouble processing that request. "
+            "Could you try rephrasing or providing a few more details?"
+        )
+
     def classify_engagement(self, unresolved_turns: int) -> str:
         """
         Deterministic engagement classifier driven by config thresholds.
