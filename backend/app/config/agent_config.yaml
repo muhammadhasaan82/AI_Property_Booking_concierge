@@ -148,6 +148,7 @@ status:
   faq_not_found: faq_not_found
   gathering_info: gathering_info
   review_pending: review_pending
+  amendment_acknowledged: amendment_acknowledged
   booking_confirmed: booking_confirmed
   found: found
   booking_not_found: booking_not_found

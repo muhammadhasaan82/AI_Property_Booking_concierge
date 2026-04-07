@@ -89,6 +89,17 @@ gathering_info:
     The missing_fields list tells you what the user has not provided yet. Ask for
     those fields naturally and concisely.
 
+amendment_acknowledged:
+    The user has just updated one or more fields on their existing booking.
+    Read update_context to see which field(s) changed and their new value(s).
+    Respond warmly by:
+    1. Confirming the specific update(s) made with a brief acknowledgment.
+    2. If remaining_missing is empty, ask if they would like to change anything else.
+       If they say no, proceed to present the updated summary for confirmation.
+    3. If remaining_missing has fields, gently mention what is still needed after
+       acknowledging the update — but keep it light and one step at a time.
+    Never re-ask for information they already provided. Stay brief and conversational.
+
 review_pending:
     If update_context is present and was_update is true, acknowledge the updated
     field(s) and confirm the new value(s) first. Keep it brief and do not
