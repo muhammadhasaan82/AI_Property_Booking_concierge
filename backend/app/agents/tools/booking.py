@@ -63,25 +63,24 @@ async def request_booking_details(
     Args:
         missing_info: A comma-separated list of what is still needed.
         missing_fields: Optional explicit list of missing fields.
+        property_id: Optional property identifier to persist.
+        property_title: Optional property title to persist.
+        guest_name: Optional guest name to persist.
+        guest_email: Optional guest email to persist.
+        guest_phone: Optional guest phone to persist.
+        check_in: Optional check-in date to persist.
+        check_out: Optional check-out date to persist.
+        guests: Optional guest count to persist.
+        price_per_night: Optional nightly price to persist.
         action_intent: Optional context flag.
         context_flag: Optional secondary context flag.
+        tool_context: ADK tool context for soft-state persistence.
     """
     resolved_fields = []
     if missing_fields:
         resolved_fields = [str(f).strip() for f in missing_fields if str(f).strip()]
     elif missing_info:
-            property_id: Optional property identifier to persist.
-            property_title: Optional property title to persist.
-            guest_name: Optional guest name to persist.
-            guest_email: Optional guest email to persist.
-            guest_phone: Optional guest phone to persist.
-            check_in: Optional check-in date to persist.
-            check_out: Optional check-out date to persist.
-            guests: Optional guest count to persist.
-            price_per_night: Optional nightly price to persist.
         resolved_fields = [f.strip() for f in missing_info.split(",") if f.strip()]
-
-            tool_context: ADK tool context for soft-state persistence.
     soft_state = _get_soft_state(tool_context)
     booking_state = {}
     if isinstance(soft_state, dict):
