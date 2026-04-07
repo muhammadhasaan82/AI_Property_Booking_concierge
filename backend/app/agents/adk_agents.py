@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 
 import litellm
 from google.adk.agents import LlmAgent
@@ -28,6 +27,7 @@ from google.adk.models.lite_llm import LiteLlm
 from google.genai import types as genai_types
 
 from app.config.agent_config_loader import cfg
+from app.agents.prompts.loader import load_prompt
 
 # Disable LiteLLM telemetry
 litellm.telemetry = False
@@ -63,10 +63,8 @@ VOICE_CONFIG = genai_types.GenerateContentConfig(
 # Prompt loading — prompts live in app/prompts/*.md
 # Editable without touching Python.
 # ---------------------------------------------------------------------------
-_PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
-
-TRIAGE_INSTRUCTION: str = (_PROMPTS_DIR / "triage_instruction.md").read_text(encoding="utf-8")
-VOICE_INSTRUCTION: str  = (_PROMPTS_DIR / "voice_instruction.md").read_text(encoding="utf-8")
+TRIAGE_INSTRUCTION: str = load_prompt("triage_instruction.md")
+VOICE_INSTRUCTION: str = load_prompt("voice_instruction.md")
 
 # ---------------------------------------------------------------------------
 # Tool imports — all tool functions live in their respective sub-modules
