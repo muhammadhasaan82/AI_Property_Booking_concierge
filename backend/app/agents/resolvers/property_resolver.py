@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import litellm
@@ -23,12 +22,12 @@ from ..tools.helpers import (
     _sanitize_soft_state_for_model,
 )
 from app.config.agent_config_loader import cfg
+from app.agents.prompts.loader import load_prompt
 
 logger = logging.getLogger(__name__)
 
 # Load prompt template once at import time
-_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "resolution_prompt.md"
-_RESOLUTION_PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
+_RESOLUTION_PROMPT_TEMPLATE: str = load_prompt("resolution_prompt.md")
 
 # Fallback copy — loaded from agent_config.yaml, not hardcoded
 _FALLBACK_AGENT_RESPONSE_DEFAULT: str = cfg.msg_resolution_default

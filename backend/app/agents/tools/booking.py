@@ -21,6 +21,14 @@ from .helpers import (
     _missing_critical_data,
     _validate_booking_fields,
 )
+from ..state.booking_state import (
+    clear_awaiting_field,
+    clear_booking_state,
+    compute_missing_booking_fields,
+    extract_booking_updates,
+    set_awaiting_field,
+    update_booking_state,
+)
 from app.config.agent_config_loader import cfg
 
 logger = logging.getLogger(__name__)
@@ -33,8 +41,18 @@ logger = logging.getLogger(__name__)
 async def request_booking_details(
     missing_info: Optional[str] = None,
     missing_fields: Optional[List[str]] = None,
+    property_id: Optional[str] = None,
+    property_title: Optional[str] = None,
+    guest_name: Optional[str] = None,
+    guest_email: Optional[str] = None,
+    guest_phone: Optional[str] = None,
+    check_in: Optional[str] = None,
+    check_out: Optional[str] = None,
+    guests: Optional[int] = None,
+    price_per_night: Optional[float] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
+    tool_context: Optional[ToolContext] = None,
 ) -> dict:
     """Use this tool when you need to gather missing booking information from the user.
 
@@ -52,7 +70,40 @@ async def request_booking_details(
     if missing_fields:
         resolved_fields = [str(f).strip() for f in missing_fields if str(f).strip()]
     elif missing_info:
+            property_id: Optional property identifier to persist.
+            property_title: Optional property title to persist.
+            guest_name: Optional guest name to persist.
+            guest_email: Optional guest email to persist.
+            guest_phone: Optional guest phone to persist.
+            check_in: Optional check-in date to persist.
+            check_out: Optional check-out date to persist.
+            guests: Optional guest count to persist.
+            price_per_night: Optional nightly price to persist.
         resolved_fields = [f.strip() for f in missing_info.split(",") if f.strip()]
+
+            tool_context: ADK tool context for soft-state persistence.
+    soft_state = _get_soft_state(tool_context)
+    booking_state = {}
+    if isinstance(soft_state, dict):
+        updates = extract_booking_updates(
+            property_id=property_id,
+            property_title=property_title,
+            guest_name=guest_name,
+            guest_email=guest_email,
+            guest_phone=guest_phone,
+            check_in=check_in,
+            check_out=check_out,
+            guests=guests,
+            price_per_night=price_per_night,
+        )
+        booking_state = update_booking_state(soft_state, updates)
+
+    computed_missing = compute_missing_booking_fields(booking_state) if booking_state else []
+    if computed_missing:
+        if resolved_fields:
+            resolved_fields = [f for f in resolved_fields if f in computed_missing] or computed_missing
+        else:
+            resolved_fields = computed_missing
 
     if not resolved_fields:
         return _missing_critical_data(
@@ -60,6 +111,9 @@ async def request_booking_details(
             "Booking details are needed but no missing-field list was provided.",
             action_intent, context_flag,
         )
+
+    if isinstance(soft_state, dict):
+        set_awaiting_field(soft_state, resolved_fields)
 
     return _finalize_payload(
         {"status": Status.GATHERING_INFO, "missing_fields": resolved_fields},
@@ -136,6 +190,21 @@ async def review_booking_details(
         update_context = _diff_booking_summary(previous_summary, summary)
         soft_state["pending_booking"] = summary
         soft_state["pending_booking_updated_at"] = time.time()
+        update_booking_state(
+            soft_state,
+            extract_booking_updates(
+                property_id=property_id,
+                property_title=property_title,
+                guest_name=guest_name,
+                guest_email=guest_email,
+                guest_phone=guest_phone,
+                check_in=check_in,
+                check_out=check_out,
+                guests=guests_value,
+                price_per_night=price_value,
+            ),
+        )
+        clear_awaiting_field(soft_state)
 
     payload: Dict[str, Any] = {"status": Status.REVIEW_PENDING, "summary": summary}
     if update_context and update_context.get("was_update"):
@@ -234,5 +303,6 @@ async def process_v2_booking(
     if isinstance(soft_state, dict):
         soft_state.pop("pending_booking", None)
         soft_state.pop("pending_booking_updated_at", None)
+        clear_booking_state(soft_state)
 
     return _finalize_payload(payload, action_intent, context_flag)

@@ -54,6 +54,11 @@ Booking modification guidance:
 - Do NOT call request_booking_details in this case.
 - A single-field correction is not the same intent as a fresh booking.
 
+Booking state persistence:
+- When calling request_booking_details, include any booking fields the user already
+    provided in this or prior turns (even if incomplete) so the system can
+    store them and ask only for what is missing.
+
 Property reference resolution:
 - When the user refers to a previously shown property using a number, ordinal,
     partial pasted text, quoted price, rating, "cheapest", "last one", or any
