@@ -121,9 +121,11 @@ def test_local_fallback_and_anomaly_smoke():
             await anomaly.record_tool_call("fallback-anomaly", "search_properties", {"city": "Lahore"})
             await anomaly.record_tool_call("fallback-anomaly", "search_properties", {"city": "Lahore"})
             await anomaly.record_tool_call("fallback-anomaly", "search_properties", {"city": "Lahore"})
+            await anomaly.record_tool_call("fallback-anomaly", "search_properties", {"city": "Lahore"})
+            await anomaly.record_tool_call("fallback-anomaly", "search_properties", {"city": "Lahore"})
             stats = await anomaly.get_session_stats("fallback-anomaly")
-            assert stats["total_tool_calls"] == 3
-            assert stats["tool_counts"]["search_properties"] == 3
+            assert stats["total_tool_calls"] == 5
+            assert stats["tool_counts"]["search_properties"] == 5
             assert await anomaly.check_tool_loop("fallback-anomaly", "search_properties", {"city": "Lahore"}) is True
 
         asyncio.run(scenario())
@@ -167,10 +169,12 @@ def test_anomaly_redis_integration():
             assert stats["tool_counts"]["search_properties"] == 2
             assert stats["tool_counts"]["check_faq"] == 1
 
-            # Not yet at threshold (need 3 identical calls)
+            # Not yet at threshold (need 5 identical calls within time window)
             assert await anomaly.check_tool_loop(session_id, "search_properties", {"city": "Dubai"}) is False
 
-            # Add one more identical call to hit threshold
+            # Add more identical calls to hit threshold (5)
+            await anomaly.record_tool_call(session_id, "search_properties", {"city": "Dubai"})
+            await anomaly.record_tool_call(session_id, "search_properties", {"city": "Dubai"})
             await anomaly.record_tool_call(session_id, "search_properties", {"city": "Dubai"})
             assert await anomaly.check_tool_loop(session_id, "search_properties", {"city": "Dubai"}) is True
 

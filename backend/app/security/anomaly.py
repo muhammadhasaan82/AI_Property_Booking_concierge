@@ -4,8 +4,8 @@ Real-Time Anomaly Detection — Phase 3 OODA Loop Protection.
 
 Detects tool-loop hijacking in the ADK SequentialAgent pipeline.
 If the GPT-5 Nano router calls the same tool with identical parameters
-≥N times in one session, it flags a [ROUTING_ANOMALY] and forces a
-graceful fallback response.
+≥N times within a short time window, it flags a [ROUTING_ANOMALY] and
+forces a graceful fallback response.
 
 All operations are in-memory (dict + hash) — O(1) per check, <1μs.
 """
@@ -20,19 +20,32 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..services.redis_store import get_redis_client
+from app.config.agent_config_loader import cfg
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration — loaded from YAML with env override support
 # ---------------------------------------------------------------------------
-TOOL_LOOP_THRESHOLD = int(os.getenv("ANOMALY_TOOL_LOOP_THRESHOLD", "3"))
-SESSION_TTL_MINUTES = int(os.getenv("ANOMALY_SESSION_TTL_MINUTES", "30"))
+TOOL_LOOP_THRESHOLD = int(os.getenv(
+    "ANOMALY_TOOL_LOOP_THRESHOLD",
+    str(getattr(cfg, "anomaly_tool_loop_threshold", 5))
+))
+TIME_WINDOW_SECONDS = int(os.getenv(
+    "ANOMALY_TIME_WINDOW_SECONDS",
+    str(getattr(cfg, "anomaly_time_window_seconds", 30))
+))
+SESSION_TTL_MINUTES = int(os.getenv(
+    "ANOMALY_SESSION_TTL_MINUTES",
+    str(getattr(cfg, "anomaly_session_ttl_minutes", 30))
+))
 _SESSION_TTL_SECONDS = SESSION_TTL_MINUTES * 60
 
-GRACEFUL_FALLBACK_REPLY = (
-    "I seem to be having trouble with that request. Let me try a different "
-    "approach — could you rephrase what you're looking for?"
+# Graceful fallback message — soft-coded from YAML
+GRACEFUL_FALLBACK_REPLY = getattr(
+    cfg, "anomaly_fallback_message",
+    "I seem to be having a bit of trouble processing that request. "
+    "Could you try rephrasing or providing a few more details?"
 )
 
 # ---------------------------------------------------------------------------
@@ -173,23 +186,29 @@ async def check_tool_loop(
     """Check if invoking this tool would constitute a routing anomaly.
 
     Returns True if the same (tool_name, param_hash) has been seen
-    ≥ TOOL_LOOP_THRESHOLD times in this session. Logs [ROUTING_ANOMALY].
+    ≥ TOOL_LOOP_THRESHOLD times within TIME_WINDOW_SECONDS.
+    This prevents false positives from legitimate re-searches over longer periods.
     """
     ph = _param_hash(tool_params)
+    now = time.monotonic()
+    window_cutoff = now - TIME_WINDOW_SECONDS
 
     history = await _load_history(session_id)
+
+    # Only count calls within the time window (not entire session lifetime)
     identical_count = sum(
-        1 for (tn, p, _ts) in history
-        if tn == tool_name and p == ph
+        1 for (tn, p, ts) in history
+        if tn == tool_name and p == ph and ts >= window_cutoff
     )
 
     if identical_count >= TOOL_LOOP_THRESHOLD:
         logger.warning(
-            "[ROUTING_ANOMALY] session=%s tool=%s params_hash=%s count=%d (threshold=%d)",
+            "[ROUTING_ANOMALY] session=%s tool=%s params_hash=%s count=%d within %ds (threshold=%d)",
             session_id,
             tool_name,
             ph,
             identical_count,
+            TIME_WINDOW_SECONDS,
             TOOL_LOOP_THRESHOLD,
         )
         return True
