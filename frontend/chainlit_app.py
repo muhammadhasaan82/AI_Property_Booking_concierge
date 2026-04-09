@@ -21,13 +21,17 @@ from sqlalchemy import text
 # Force load the root .env file and override any cached system variables
 # --- ABSOLUTE PATH FIX ---
 # Ensure Python can always find the 'backend' folder regardless of cwd
+# --- ABSOLUTE PATH FIX ---
 _backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
 if _backend_root not in sys.path:
     sys.path.insert(0, _backend_root)
 
-# Force load the root .env file and override any cached system variables
-env_path = os.path.join(_backend_root, '.env')
-load_dotenv(dotenv_path=env_path, override=True)
+# THE NUCLEAR OVERRIDE:
+# Inject the connection string directly into the environment memory,
+# bypassing all .env files and caching. Use the internal Docker IP and native port.
+os.environ["SUPABASE_DB_URL"] = "postgresql://postgres:iNzl5DdQK3F9AOsf@172.21.0.4:5432/postgres"
+os.environ["SUPABASE_DB_USER"] = "postgres"
+os.environ["SUPABASE_DB_PASSWORD"] = "iNzl5DdQK3F9AOsf"
 
 from app.services.adk_runner import run_adk_turn
 
