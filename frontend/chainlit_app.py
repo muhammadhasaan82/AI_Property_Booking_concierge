@@ -19,7 +19,14 @@ from sqlalchemy import text
 
 # Fix sys.path to allow importing backend/app directly as app.*
 # Force load the root .env file and override any cached system variables
-env_path = Path(__file__).resolve().parents[1] / ".env"
+# --- ABSOLUTE PATH FIX ---
+# Ensure Python can always find the 'backend' folder regardless of cwd
+_backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
+# Force load the root .env file and override any cached system variables
+env_path = os.path.join(_backend_root, '.env')
 load_dotenv(dotenv_path=env_path, override=True)
 
 from app.services.adk_runner import run_adk_turn
