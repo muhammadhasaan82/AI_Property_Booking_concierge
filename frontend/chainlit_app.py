@@ -311,19 +311,15 @@ async def on_chat_start():
     # cl.user_session.set("theme", "light")
     # ------------------------------
 
-    # --- Safely ensure tables exist ---
+    # Use SQLAlchemy to auto-create all tables based on Chainlit's internal models
     data_layer = cl_data.get_data_layer()
     if data_layer and hasattr(data_layer, "engine"):
-        conninfo = _resolve_history_conninfo()
         try:
-            async with data_layer.engine.begin() as connection:
-                if conninfo.startswith("sqlite"):
-                    await connection.execute(text("PRAGMA foreign_keys = ON"))
-                for statement in _schema_statements_for(conninfo):
-                    await connection.execute(text(statement))
+            # This line forces Chainlit to build its exact schema in Postgres
+            await data_layer.engine.run_sync(cl.data.sql_alchemy.Base.metadata.create_all)
+            print("Schema automatically created by Chainlit.")
         except Exception as e:
             print(f"Schema Error: {e}")
-    # ---------------------------------------
 
     await cl.Message(content=WELCOME_MESSAGE).send()
 
