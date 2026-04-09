@@ -18,8 +18,9 @@ from sqlalchemy.engine import make_url
 from sqlalchemy import text
 
 # Fix sys.path to allow importing backend/app directly as app.*
-_backend_root = Path(__file__).resolve().parents[1] / "backend"
-sys.path.insert(0, str(_backend_root))
+# Force load the root .env file and override any cached system variables
+env_path = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
 from app.services.adk_runner import run_adk_turn
 
