@@ -263,10 +263,9 @@ def _schema_statements_for(conninfo: str):
 
 @cl.data_layer
 def get_data_layer():
-    conninfo = _resolve_history_conninfo()
-    # Chainlit's official layer automatically creates the schema tables for you!
+    # PERMANENT HARDCODE: Bypass all .env variables and caches
+    conninfo = "postgresql+psycopg://postgres:iNzl5DdQK3F9AOsf@172.21.0.4:5432/postgres"
     return SQLAlchemyDataLayer(conninfo=conninfo)
-
 
 def _get_data_layer():
     try:
