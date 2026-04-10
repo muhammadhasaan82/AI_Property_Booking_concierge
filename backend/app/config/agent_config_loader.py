@@ -215,6 +215,9 @@ class _AgentConfig:
             "I seem to be having a bit of trouble processing that request. "
             "Could you try rephrasing or providing a few more details?"
         )
+        self.anomaly_exempt_tools: FrozenSet[str] = frozenset(
+            an.get("exempt_tools", [])
+        )
 
     def classify_engagement(self, unresolved_turns: int) -> str:
         """

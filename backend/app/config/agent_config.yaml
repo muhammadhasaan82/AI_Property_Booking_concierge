@@ -24,6 +24,11 @@ anomaly:
   time_window_seconds: 30                         # env: ANOMALY_TIME_WINDOW_SECONDS
   # Session TTL for anomaly tracking history
   session_ttl_minutes: 30                         # env: ANOMALY_SESSION_TTL_MINUTES
+  # Tools that are safe to repeat without triggering loop protection
+  exempt_tools:
+    - handle_small_talk
+    - get_all_available_cities
+    - escalate_to_human
   # Graceful fallback message when anomaly is triggered
   fallback_message: >-
     I seem to be having a bit of trouble processing that request.

@@ -40,6 +40,7 @@ SESSION_TTL_MINUTES = int(os.getenv(
     str(getattr(cfg, "anomaly_session_ttl_minutes", 30))
 ))
 _SESSION_TTL_SECONDS = SESSION_TTL_MINUTES * 60
+EXEMPT_TOOLS = set(getattr(cfg, "anomaly_exempt_tools", []) or [])
 
 # Graceful fallback message — soft-coded from YAML
 GRACEFUL_FALLBACK_REPLY = getattr(
@@ -189,6 +190,9 @@ async def check_tool_loop(
     ≥ TOOL_LOOP_THRESHOLD times within TIME_WINDOW_SECONDS.
     This prevents false positives from legitimate re-searches over longer periods.
     """
+    if tool_name in EXEMPT_TOOLS:
+        return False
+
     ph = _param_hash(tool_params)
     now = time.monotonic()
     window_cutoff = now - TIME_WINDOW_SECONDS
