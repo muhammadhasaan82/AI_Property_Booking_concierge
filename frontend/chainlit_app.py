@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -298,6 +299,7 @@ async def on_chat_resume(thread):
         past_thread_id = thread.get("id")
         if past_thread_id:
             cl.user_session.set("past_thread_id", past_thread_id)
+            cl.user_session.set("session_id", past_thread_id)
 
 
 @cl.on_chat_start
@@ -324,6 +326,25 @@ async def on_chat_start():
     await cl.Message(content=WELCOME_MESSAGE).send()
 
 
+def _resolve_session_id(message: cl.Message) -> str:
+    thread_id = getattr(message, "thread_id", None)
+    if thread_id:
+        cl.user_session.set("session_id", thread_id)
+        return thread_id
+
+    stored = (
+        cl.user_session.get("session_id")
+        or cl.user_session.get("past_thread_id")
+        or cl.user_session.get("id")
+    )
+    if stored:
+        return stored
+
+    generated = str(uuid4())
+    cl.user_session.set("session_id", generated)
+    return generated
+
+
 @cl.on_message
 async def on_message(message: cl.Message):
     await _rename_thread(message, (message.content or "").strip())
@@ -331,7 +352,7 @@ async def on_message(message: cl.Message):
     # ── V2 ADK Pipeline (streaming) — sole path ─────────────
     user_obj = cl.user_session.get("user")
     user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
-    session_id = cl.user_session.get("id", "default_session")
+    session_id = _resolve_session_id(message)
     msg = cl.Message(content="")
     await msg.send()
 
