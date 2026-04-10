@@ -73,6 +73,7 @@ from .tools.search import (  # noqa: E402
     get_all_available_cities,
     search_properties,
     get_property_details,
+    select_property,
 )
 from .tools.booking import (  # noqa: E402
     request_booking_details,
@@ -98,6 +99,7 @@ triage_router = LlmAgent(
     tools=[
         handle_small_talk,
         search_properties,
+        select_property,
         get_property_details,
         check_faq,
         check_booking_status,

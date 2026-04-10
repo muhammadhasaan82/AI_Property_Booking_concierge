@@ -1,7 +1,7 @@
 """
 app/agents/tools/search.py
 ---------------------------
-Tools: search_properties, get_property_details, get_all_available_cities
+Tools: search_properties, get_property_details, select_property, get_all_available_cities
 """
 from __future__ import annotations
 
@@ -42,6 +42,8 @@ DATASET_PATH = _BACKEND_ROOT / cfg.dataset_relative_path
 CITY_COLUMN_CANDIDATES = cfg.city_column_candidates
 PROPERTY_RERANK_LIMIT: int = cfg.rerank_limit
 PROPERTY_RERANK_TIMEOUT_SECONDS: float = cfg.rerank_timeout
+PROPERTY_RESULT_LIMIT_DEFAULT: int = cfg.search_result_limit
+PROPERTY_RESULT_LIMIT_MAX: int = cfg.search_result_limit_max
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +83,109 @@ def _build_vibe_query(soft_terms: List[str], free_text: Optional[str]) -> str:
     if soft_terms:
         parts.append(", ".join(soft_terms))
     return " ".join(parts).strip()
+
+
+def _normalize_city_key(raw: Optional[str]) -> str:
+    return " ".join((raw or "").strip().lower().split())
+
+
+def _city_words(raw: Optional[str]) -> set[str]:
+    return {token for token in _normalize_city_key(raw).split(" ") if token}
+
+
+def _resolve_city_from_catalog(city: Optional[str], dataset: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    if not city:
+        return None
+    requested = city.strip()
+    if not requested:
+        return None
+
+    known_cities: set[str] = set()
+    for row in dataset or []:
+        current_city = row.get("city") or row.get("location")
+        if isinstance(current_city, str) and current_city.strip():
+            known_cities.add(current_city.strip())
+
+    if not known_cities:
+        return requested
+
+    normalized_to_city: Dict[str, str] = {
+        _normalize_city_key(c): c for c in sorted(known_cities)
+    }
+    exact = normalized_to_city.get(_normalize_city_key(requested))
+    if exact:
+        return exact
+
+    requested_words = _city_words(requested)
+    subset_candidates: List[str] = []
+    for candidate in known_cities:
+        candidate_words = _city_words(candidate)
+        if candidate_words and candidate_words.issubset(requested_words):
+            subset_candidates.append(candidate)
+
+    if subset_candidates:
+        subset_candidates.sort(key=lambda c: (len(_city_words(c)), len(c)), reverse=True)
+        top = subset_candidates[0]
+        top_score = (len(_city_words(top)), len(top))
+        tied = [c for c in subset_candidates if (len(_city_words(c)), len(c)) == top_score]
+        if len(tied) == 1:
+            return top
+
+    return requested
+
+
+def _resolve_result_limit(requested_limit: Optional[int]) -> int:
+    floor = 1
+    ceiling = max(PROPERTY_RESULT_LIMIT_MAX, floor)
+    default_limit = max(PROPERTY_RESULT_LIMIT_DEFAULT, floor)
+    if requested_limit is None:
+        return min(default_limit, ceiling)
+    return min(max(requested_limit, floor), ceiling)
+
+
+def _resolve_property_id_from_selection(
+    selection_value: Optional[int],
+    soft_state: Optional[Dict[str, Any]],
+    last_search: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    if selection_value is None:
+        return None
+
+    if isinstance(soft_state, dict):
+        option_map = soft_state.get("active_property_options_map")
+        if isinstance(option_map, dict):
+            option = option_map.get(str(selection_value))
+            if isinstance(option, dict) and option.get("property_id") is not None:
+                return str(option.get("property_id"))
+
+    if isinstance(last_search, dict):
+        for item in last_search.get("properties", []):
+            if isinstance(item, dict) and item.get("number") == selection_value:
+                resolved_id = item.get("id")
+                if resolved_id is not None:
+                    return str(resolved_id)
+
+    return None
+
+
+def _get_active_option_window(
+    soft_state: Optional[Dict[str, Any]],
+    last_search: Optional[Dict[str, Any]],
+) -> tuple[int, int]:
+    shown_count = 0
+    total_found = 0
+
+    if isinstance(soft_state, dict):
+        shown_count = _coerce_int(soft_state.get("active_property_options_shown_count")) or 0
+        total_found = _coerce_int(soft_state.get("active_property_options_total_found")) or 0
+
+    if isinstance(last_search, dict):
+        if shown_count <= 0:
+            shown_count = _coerce_int(last_search.get("shown_count")) or len(last_search.get("properties", []))
+        if total_found <= 0:
+            total_found = _coerce_int(last_search.get("total_found")) or len(last_search.get("properties", []))
+
+    return max(shown_count, 0), max(total_found, 0)
 
 
 async def _rerank_properties_by_vibe(
@@ -173,6 +278,7 @@ async def search_properties(
     property_type: Optional[str] = None,
     amenities: Optional[str] = None,
     free_text: Optional[str] = None,
+    max_results: Optional[int] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
     tool_context: Optional[ToolContext] = None,
@@ -190,6 +296,7 @@ async def search_properties(
         property_type: Type of property like apartment, house, villa, etc (optional).
         amenities: Comma-separated list of required amenities (optional).
         free_text: Optional vibe or descriptive constraints for semantic matching.
+        max_results: Optional result window size (bounded by config).
         action_intent: Optional context flag like "re_evaluate_history" or "new_search".
         context_flag: Optional secondary context flag.
         tool_context: ADK tool context for session state.
@@ -243,6 +350,13 @@ async def search_properties(
 
     budget_value = _coerce_float(budget)
     beds_value = _coerce_int(beds)
+    resolved_city = _resolve_city_from_catalog(city, _DATASET or None)
+    if resolved_city:
+        city = resolved_city
+
+    requested_limit = _coerce_int(max_results)
+    search_limit = _resolve_result_limit(requested_limit)
+
     raw_amenities = [a.strip() for a in (amenities or "").split(",") if a.strip()]
     hard_amenities, soft_terms = _split_amenities_by_known(raw_amenities, _DATASET or None)
     amenity_list = hard_amenities or None
@@ -257,6 +371,7 @@ async def search_properties(
             beds=beds_value,
             amenities=amenity_list or [],
             property_type=property_type or "",
+            max_results=search_limit,
             properties=_DATASET or None,
         )
         if rust_result and not rust_result.get("fallback"):
@@ -304,6 +419,9 @@ async def search_properties(
     if should_rerank:
         results = await _rerank_properties_by_vibe(results, vibe_query)
 
+    total_found = len(results)
+    shown_results = results[:search_limit]
+
     formatted = [
         {
             "number": i,
@@ -318,12 +436,20 @@ async def search_properties(
             "amenities": r.get("amenities"),
             "description": r.get("description"),
         }
-        for i, r in enumerate(results, 1)
+        for i, r in enumerate(shown_results, 1)
     ]
+
+    shown_count = len(formatted)
+    has_more = total_found > shown_count
+    remaining_count = max(total_found - shown_count, 0)
 
     payload = {
         "status": Status.PROPERTIES_FOUND,
-        "total_found": len(results),
+        "total_found": total_found,
+        "shown_count": shown_count,
+        "has_more": has_more,
+        "remaining_count": remaining_count,
+        "max_results": search_limit,
         "properties": formatted,
         "query_context": {
             "city": city,
@@ -332,6 +458,23 @@ async def search_properties(
             "property_type": property_type,
         },
     }
+
+    if isinstance(soft_state, dict):
+        soft_state["active_property_options_map"] = {
+            str(item["number"]): {
+                "property_id": item.get("id"),
+                "title": item.get("title"),
+                "city": item.get("city"),
+                "price_per_night": item.get("price_per_night"),
+                "rating": item.get("rating"),
+            }
+            for item in formatted
+            if item.get("number") is not None
+        }
+        soft_state["active_property_options_shown_count"] = shown_count
+        soft_state["active_property_options_total_found"] = total_found
+        soft_state["active_property_options_generated_at"] = time.time()
+
     _set_unresolved_turns(soft_state, 0)
     _set_cached_last_search(soft_state, dict(payload))
     payload["memory"] = {
@@ -341,6 +484,33 @@ async def search_properties(
     payload["user_engagement_state"] = _classify_engagement_state(_get_unresolved_turns(soft_state))
     payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
     return _finalize_payload(payload, normalized_action or action_intent, context_flag)
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_property_details
+# ---------------------------------------------------------------------------
+
+async def select_property(
+    option_number: Optional[int] = None,
+    property_reference: Optional[str] = None,
+    user_engagement_state: Optional[str] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+    tool_context: Optional[ToolContext] = None,
+) -> dict:
+    """Resolve a user-selected shortlist option and return full property details.
+
+    Use this tool when a user says "option 2", "the second one", or similar.
+    The actual ID mapping is resolved from session state.
+    """
+    return await get_property_details(
+        selection_number=option_number,
+        property_reference=property_reference,
+        user_engagement_state=user_engagement_state,
+        action_intent=action_intent,
+        context_flag=context_flag,
+        tool_context=tool_context,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -377,13 +547,41 @@ async def get_property_details(
 
     # Resolve by selection number
     if _is_blank(property_id) and selection_value is not None and last_search:
-        for item in last_search.get("properties", []):
-            if item.get("number") == selection_value:
-                resolved_id = item.get("id")
-                if resolved_id is not None:
-                    property_id = str(resolved_id)
-                    resolved_from_history = True
-                break
+        resolved_id = _resolve_property_id_from_selection(selection_value, soft_state, last_search)
+        if resolved_id is not None:
+            property_id = resolved_id
+            resolved_from_history = True
+        else:
+            shown_count, total_found = _get_active_option_window(soft_state, last_search)
+            if shown_count > 0 and selection_value > shown_count:
+                unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
+                engagement_state = (
+                    str(user_engagement_state).strip()
+                    if isinstance(user_engagement_state, str) and user_engagement_state.strip()
+                    else _classify_engagement_state(unresolved_turns)
+                )
+                active_options = _build_active_options(last_search)
+                payload = {
+                    "status": Status.PROPERTY_SELECTION_UNRESOLVED,
+                    "resolution": {
+                        "internal_reasoning_log": cfg.msg_resolution_not_matched_log,
+                        "user_intent_classification": "select_property",
+                        "resolved_property_id": None,
+                        "user_engagement_state": engagement_state,
+                        "unresolved_turns": unresolved_turns,
+                        "extracted_parameters": (last_search or {}).get("query_context", {}),
+                        "agent_response": cfg.msg_selection_out_of_range,
+                        "requires_human_handoff": False,
+                    },
+                    "active_options": active_options,
+                    "query_context": (last_search or {}).get("query_context", {}),
+                    "shown_count": shown_count,
+                    "total_found": total_found,
+                    "user_engagement_state": engagement_state,
+                    "unresolved_turns": unresolved_turns,
+                    "requires_human_handoff": False,
+                }
+                return _finalize_payload(payload, action_intent, context_flag)
 
     # Resolve by fuzzy property_reference
     if _is_blank(property_id) and not _is_blank(property_reference):

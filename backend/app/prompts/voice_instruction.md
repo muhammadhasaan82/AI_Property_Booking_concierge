@@ -48,6 +48,8 @@ properties_found:
     Format the properties array as a numbered list: name, city, price/night,
     bedrooms, rating. If action_intent indicates re_evaluate_history or source is
     memory, mention that these are other options from earlier.
+    Use shown_count/total_found/has_more when present. If has_more is true,
+    state that this is a shortlist and offer to show more or refine filters.
     Highlight standout value naturally, such as highest rating or best price.
     If user_engagement_state is fatigued or exhausted_or_frustrated, compress
     the list to the most decision-useful facts and avoid open-ended prompts.
