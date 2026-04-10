@@ -130,6 +130,12 @@ class _AgentConfig:
         self.rerank_timeout: float = _env_float(
             "PROPERTY_RERANK_TIMEOUT_SECONDS", sr["rerank_timeout_seconds"]
         )
+        self.search_result_limit: int = _env_int(
+            "PROPERTY_SEARCH_RESULT_LIMIT", sr.get("result_limit", 5)
+        )
+        self.search_result_limit_max: int = _env_int(
+            "PROPERTY_SEARCH_RESULT_LIMIT_MAX", sr.get("result_limit_max", 10)
+        )
 
         # ── Dataset ──
         ds = raw["dataset"]
@@ -176,6 +182,10 @@ class _AgentConfig:
         self.msg_resolution_default: str = msg["resolution_unresolved_default"]
         self.msg_resolution_frustrated: str = msg["resolution_unresolved_frustrated"]
         self.msg_resolution_not_matched_log: str = msg["resolution_not_matched_log"]
+        self.msg_selection_out_of_range: str = msg.get(
+            "selection_out_of_range",
+            "That option number is outside the current shortlist."
+        )
         self.msg_escalation_default: str = msg["escalation_default_reason"]
 
         # ── Status strings ──

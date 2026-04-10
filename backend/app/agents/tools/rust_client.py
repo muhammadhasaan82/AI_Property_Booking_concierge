@@ -75,6 +75,7 @@ async def search_properties(
     beds: Optional[int] = None,
     amenities: Optional[list] = None,
     property_type: Optional[str] = None,
+    max_results: Optional[int] = None,
     properties: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Call the Rust property search tool directly."""
@@ -84,6 +85,7 @@ async def search_properties(
     if beds is not None: data["beds"] = beds
     if amenities: data["amenities"] = amenities
     if property_type: data["property_type"] = property_type
+    if max_results is not None: data["max_results"] = max_results
     if properties: data["properties"] = properties
     return await execute_tool(data)
 

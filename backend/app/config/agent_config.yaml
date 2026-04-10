@@ -53,6 +53,8 @@ session:
 search:
   rerank_limit: 25                 # env: PROPERTY_RERANK_LIMIT
   rerank_timeout_seconds: 0.6      # env: PROPERTY_RERANK_TIMEOUT_SECONDS
+  result_limit: 5                  # env: PROPERTY_SEARCH_RESULT_LIMIT
+  result_limit_max: 10             # env: PROPERTY_SEARCH_RESULT_LIMIT_MAX
 
 # ── Dataset ─────────────────────────────────────────────────────────────────
 dataset:
@@ -143,6 +145,10 @@ messages:
 
   resolution_not_matched_log: >-
     The reference could not be mapped to a single active option with sufficient confidence.
+
+  selection_out_of_range: >-
+    That option number is outside the current shortlist. Choose one of the listed options,
+    or ask me to show more results.
 
   escalation_default_reason: "User requested assistance."
 
