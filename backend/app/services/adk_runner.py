@@ -469,6 +469,9 @@ class RedisSessionService(BaseSessionService):
             storage_session.events = _trim_events_for_context(storage_session.events)
             storage_session.last_update_time = session.last_update_time
 
+            if isinstance(session.state, dict):
+                storage_session.state.update(_filter_persistent_state(session.state))
+
             state_delta = getattr(getattr(event, "actions", None), "state_delta", None)
             if isinstance(state_delta, dict):
                 storage_session.state.update(_filter_persistent_state(state_delta))
