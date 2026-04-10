@@ -136,6 +136,9 @@ class _AgentConfig:
         self.search_result_limit_max: int = _env_int(
             "PROPERTY_SEARCH_RESULT_LIMIT_MAX", sr.get("result_limit_max", 10)
         )
+        self.search_summary_mode_threshold: int = _env_int(
+            "PROPERTY_SEARCH_SUMMARY_THRESHOLD", sr.get("summary_mode_threshold", 12)
+        )
 
         # ── Dataset ──
         ds = raw["dataset"]

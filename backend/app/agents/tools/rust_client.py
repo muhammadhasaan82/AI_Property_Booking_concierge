@@ -76,6 +76,7 @@ async def search_properties(
     amenities: Optional[list] = None,
     property_type: Optional[str] = None,
     max_results: Optional[int] = None,
+    summary_mode_threshold: Optional[int] = None,
     properties: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Call the Rust property search tool directly."""
@@ -86,6 +87,7 @@ async def search_properties(
     if amenities: data["amenities"] = amenities
     if property_type: data["property_type"] = property_type
     if max_results is not None: data["max_results"] = max_results
+    if summary_mode_threshold is not None: data["summary_mode_threshold"] = summary_mode_threshold
     if properties: data["properties"] = properties
     return await execute_tool(data)
 

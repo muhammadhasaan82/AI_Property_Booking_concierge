@@ -44,6 +44,7 @@ PROPERTY_RERANK_LIMIT: int = cfg.rerank_limit
 PROPERTY_RERANK_TIMEOUT_SECONDS: float = cfg.rerank_timeout
 PROPERTY_RESULT_LIMIT_DEFAULT: int = cfg.search_result_limit
 PROPERTY_RESULT_LIMIT_MAX: int = cfg.search_result_limit_max
+PROPERTY_SUMMARY_THRESHOLD: int = cfg.search_summary_mode_threshold
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +357,7 @@ async def search_properties(
 
     requested_limit = _coerce_int(max_results)
     search_limit = _resolve_result_limit(requested_limit)
+    summary_threshold = max(PROPERTY_SUMMARY_THRESHOLD, 1)
 
     raw_amenities = [a.strip() for a in (amenities or "").split(",") if a.strip()]
     hard_amenities, soft_terms = _split_amenities_by_known(raw_amenities, _DATASET or None)
@@ -372,6 +374,7 @@ async def search_properties(
             amenities=amenity_list or [],
             property_type=property_type or "",
             max_results=search_limit,
+            summary_mode_threshold=summary_threshold,
             properties=_DATASET or None,
         )
         if rust_result and not rust_result.get("fallback"):
@@ -421,9 +424,11 @@ async def search_properties(
 
     total_found = len(results)
     shown_results = results[:search_limit]
+    summary_mode = total_found > summary_threshold
 
-    formatted = [
-        {
+    formatted: List[Dict[str, Any]] = []
+    for i, r in enumerate(shown_results, 1):
+        item = {
             "number": i,
             "id": r.get("id"),
             "title": r.get("title", "Property"),
@@ -433,11 +438,11 @@ async def search_properties(
             "bathrooms": r.get("bathrooms"),
             "property_type": r.get("property_type", ""),
             "rating": r.get("rating"),
-            "amenities": r.get("amenities"),
-            "description": r.get("description"),
         }
-        for i, r in enumerate(shown_results, 1)
-    ]
+        if not summary_mode:
+            item["amenities"] = r.get("amenities")
+            item["description"] = r.get("description")
+        formatted.append(item)
 
     shown_count = len(formatted)
     has_more = total_found > shown_count
@@ -450,6 +455,8 @@ async def search_properties(
         "has_more": has_more,
         "remaining_count": remaining_count,
         "max_results": search_limit,
+        "summary_mode": summary_mode,
+        "summary_mode_threshold": summary_threshold,
         "properties": formatted,
         "query_context": {
             "city": city,
