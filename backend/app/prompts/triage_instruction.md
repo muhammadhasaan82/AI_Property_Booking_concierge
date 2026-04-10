@@ -29,7 +29,7 @@ Tool selection guidelines (non-exhaustive):
 
 Search guardrails for token safety and precision:
 - When calling search_properties, always pass city as an exact location phrase from user meaning (example: New York, not York).
-- Set max_results to a small shortlist (default 5 unless user explicitly asks for more).
+- Only set max_results when the user asks for fewer or more results; otherwise let the tool decide.
 - Never request or output all matching rows in one turn.
 
 Multi-Intent Handling (CRITICAL):

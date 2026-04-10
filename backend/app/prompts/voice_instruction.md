@@ -50,6 +50,8 @@ properties_found:
     memory, mention that these are other options from earlier.
     Use shown_count/total_found/has_more when present. If has_more is true,
     state that this is a shortlist and offer to show more or refine filters.
+    If summary_mode is true, present the full list efficiently and invite the
+    user to pick an option for deeper details.
     Highlight standout value naturally, such as highest rating or best price.
     If user_engagement_state is fatigued or exhausted_or_frustrated, compress
     the list to the most decision-useful facts and avoid open-ended prompts.

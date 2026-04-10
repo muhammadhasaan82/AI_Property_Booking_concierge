@@ -69,6 +69,12 @@ impl Tool for PropertySearchTool {
             .map(|v| v as usize)
             .unwrap_or(5)
             .max(1);
+        let summary_mode_threshold = input
+            .get("summary_mode_threshold")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(12)
+            .max(1);
 
         let wanted_amenities: Vec<String> = input
             .get("amenities")
@@ -167,10 +173,21 @@ impl Tool for PropertySearchTool {
             results.truncate(max_results);
         }
 
+        if total_matches > summary_mode_threshold {
+            for entry in results.iter_mut() {
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.remove("description");
+                    obj.remove("amenities");
+                }
+            }
+        }
+
         json!({
             "count": total_matches,
             "shown_count": results.len(),
             "max_results": max_results,
+            "summary_mode": total_matches > summary_mode_threshold,
+            "summary_mode_threshold": summary_mode_threshold,
             "filters_applied": {
                 "location": location,
                 "budget": budget,
