@@ -317,8 +317,9 @@ async def on_chat_start():
     data_layer = cl_data.get_data_layer()
     if data_layer and hasattr(data_layer, "engine"):
         try:
-            # This line forces Chainlit to build its exact schema in Postgres
-            await data_layer.engine.run_sync(cl.data.sql_alchemy.Base.metadata.create_all)
+            # This forces Chainlit to build its exact schema in Postgres
+            async with data_layer.engine.begin() as conn:
+                await conn.run_sync(cl.data.sql_alchemy.Base.metadata.create_all)
             print("Schema automatically created by Chainlit.")
         except Exception as e:
             print(f"Schema Error: {e}")

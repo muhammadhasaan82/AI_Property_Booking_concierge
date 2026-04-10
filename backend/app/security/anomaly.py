@@ -14,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,18 +26,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration — loaded from YAML with env override support
 # ---------------------------------------------------------------------------
-TOOL_LOOP_THRESHOLD = int(os.getenv(
-    "ANOMALY_TOOL_LOOP_THRESHOLD",
-    str(getattr(cfg, "anomaly_tool_loop_threshold", 5))
-))
-TIME_WINDOW_SECONDS = int(os.getenv(
-    "ANOMALY_TIME_WINDOW_SECONDS",
-    str(getattr(cfg, "anomaly_time_window_seconds", 30))
-))
-SESSION_TTL_MINUTES = int(os.getenv(
-    "ANOMALY_SESSION_TTL_MINUTES",
-    str(getattr(cfg, "anomaly_session_ttl_minutes", 30))
-))
+TOOL_LOOP_THRESHOLD = int(getattr(cfg, "anomaly_tool_loop_threshold", 5))
+TIME_WINDOW_SECONDS = int(getattr(cfg, "anomaly_time_window_seconds", 30))
+SESSION_TTL_MINUTES = int(getattr(cfg, "anomaly_session_ttl_minutes", 30))
 _SESSION_TTL_SECONDS = SESSION_TTL_MINUTES * 60
 EXEMPT_TOOLS = set(getattr(cfg, "anomaly_exempt_tools", []) or [])
 
