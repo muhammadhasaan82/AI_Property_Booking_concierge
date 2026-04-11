@@ -72,11 +72,10 @@ def _maybe_auto_supabase() -> None:
 
 _maybe_auto_supabase()
 
-from app.services.graph import run_chat_graph
 from app.services.booking import create_booking, update_booking_status
 from app.services.faq import faq_lookup
 from app.components.search import property_search
-from app.services.adk_runner import run_adk_turn, ADK_ENABLED
+from app.services.adk_runner import run_adk_turn
 
 
 def _run_async(coro):
@@ -138,35 +137,31 @@ async def cmd_chat(args: argparse.Namespace) -> int:
         session_id = "cli_test_session_001"
         user_id = args.user_id if hasattr(args, 'user_id') and args.user_id else "cli_user"
 
-        # Run the message through the ADK
-        reply = await run_adk_turn(
+        # Run the message through the ADK (streaming)
+        print("\nConcierge: ", end="", flush=True)
+        async for chunk in run_adk_turn(
             user_id=user_id,
             session_id=session_id,
-            message=user
-        )
-
-        print(f"\nConcierge: {reply}\n")
+            message=user,
+        ):
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+        print("\n")
 
 async def cmd_say(args: argparse.Namespace) -> int:
-    def stream_cb(chunk: str):
-        print(chunk, end="", flush=True)
+    """Send one message through the V2 ADK pipeline."""
+    session_id = "cli_say_session"
+    user_id = args.user_id if hasattr(args, 'user_id') and args.user_id else "cli_user"
 
-    result = await run_chat_graph(
+    print("\nConcierge: ", end="", flush=True)
+    async for chunk in run_adk_turn(
+        user_id=user_id,
+        session_id=session_id,
         message=args.message,
-        filters={
-            "budget": args.budget,
-            "beds": args.beds,
-            "location": args.city,
-            "amenities": args.amenities or [],
-            "locale": args.locale,
-            "stream": not args.no_stream,      # default True
-            "stream_callback": stream_cb if not args.no_stream else None,
-        },
-        booking_args=_parse_kv_list(args.booking_args),
-        status_args=_parse_kv_list(args.status_args),
-        payment_args=_parse_kv_list(args.payment_args),
-    )
-    print(f"\nBOT ({result.get('intent','?')}): {result.get('reply','(no reply)')}")
+    ):
+        sys.stdout.write(chunk)
+        sys.stdout.flush()
+    print("\n")
     return 0
 
 def cmd_search(args: argparse.Namespace) -> int:

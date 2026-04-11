@@ -1,26 +1,44 @@
-from typing import Any, Dict, Optional
+"""FastAPI chat routes backed by the shared ADK runner service."""
+from __future__ import annotations
+
+from typing import Optional
+from uuid import uuid4
+
 from fastapi import APIRouter
 from pydantic import BaseModel
-from app.services.graph import run_chat_graph
+
+from app.services.adk_runner import run_adk_turn
 
 router = APIRouter()
 
-class ChatIn(BaseModel):
-    user_id: Optional[str] = None
-    message: str
-    # Optional hints/context you pass in from the client
-    filters: Optional[Dict[str, Any]] = None
-    booking_args: Optional[Dict[str, Any]] = None
-    status_args: Optional[Dict[str, Any]] = None
-    payment_args: Optional[Dict[str, Any]] = None
 
-@router.post("/chat/message")
-async def chat_message(body: ChatIn):
-    result = await run_chat_graph(
-        message=body.message,
-        filters=body.filters,
-        booking_args=body.booking_args,
-        status_args=body.status_args,
-        payment_args=body.payment_args,
+class ChatMessageRequest(BaseModel):
+    message: str
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+
+class ChatMessageResponse(BaseModel):
+    reply: str
+    user_id: str
+    session_id: str
+
+
+@router.post("/chat/message", response_model=ChatMessageResponse)
+async def chat_message(request: ChatMessageRequest) -> ChatMessageResponse:
+    user_id = request.user_id or "api_user"
+    session_id = request.session_id or str(uuid4())
+
+    chunks: list[str] = []
+    async for chunk in run_adk_turn(
+        user_id=user_id,
+        session_id=session_id,
+        message=request.message,
+    ):
+        chunks.append(chunk)
+
+    return ChatMessageResponse(
+        reply="".join(chunks),
+        user_id=user_id,
+        session_id=session_id,
     )
-    return result

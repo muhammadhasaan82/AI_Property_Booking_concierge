@@ -1,8 +1,9 @@
 # route/mobile.py - Mobile API endpoints
 from typing import Any, Dict, Optional, List
+from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from app.services.graph import run_chat_graph
+from app.services.adk_runner import run_adk_turn
 from app.components.search import property_search
 from app.services.booking import create_booking, update_booking_status, get_booking_status
 from app.services.faq import faq_lookup
@@ -225,18 +226,21 @@ async def mobile_chat(request: MobileChatRequest):
     Mobile chat endpoint with simplified response
     """
     try:
-        result = await run_chat_graph(
+        user_id = request.user_id or "mobile_user"
+        session_id = request.session_id or str(uuid4())
+
+        chunks = []
+        async for chunk in run_adk_turn(
+            user_id=user_id,
+            session_id=session_id,
             message=request.message,
-            filters=None,
-            booking_args=None,
-            status_args=None,
-            payment_args=None
-        )
-        
+        ):
+            chunks.append(chunk)
+
         return MobileChatResponse(
             success=True,
-            response=result.get("reply", "I'm here to help!"),
-            session_id=request.session_id,
+            response="".join(chunks),
+            session_id=session_id,
             suggestions=["Book a property", "Check booking status", "Ask about policies"]
         )
     except Exception as e:
@@ -244,6 +248,7 @@ async def mobile_chat(request: MobileChatRequest):
             success=False,
             response=f"Sorry, I encountered an error: {str(e)}"
         )
+
 
 # ==================== MOBILE FAQ ====================
 

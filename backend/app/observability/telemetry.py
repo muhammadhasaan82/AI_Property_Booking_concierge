@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS dpo_trajectories (
     booking_id TEXT,
     turn_count INTEGER DEFAULT 1,
     latency_ms REAL,
+    cognitive_context TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -62,22 +63,48 @@ CREATE INDEX IF NOT EXISTS idx_dpo_created ON dpo_trajectories(created_at);
 """
 
 
-def _ensure_sqlite_schema() -> None:
-    """Create the SQLite DB and schema if they don't exist."""
+def init_db() -> None:
+    """Create/upgrade the SQLite DB schema used for telemetry."""
     global _DB_INITIALIZED
     if _DB_INITIALIZED:
         return
+
     with _DB_LOCK:
         if _DB_INITIALIZED:
             return
+
+        conn = None
         try:
-            conn = sqlite3.connect(DPO_SQLITE_PATH)
+            db_path = Path(DPO_SQLITE_PATH)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+
+            conn = sqlite3.connect(str(db_path))
             conn.executescript(_SCHEMA_SQL)
-            conn.close()
+
+            # Migration path for existing DBs created before cognitive_context existed.
+            cursor = conn.cursor()
+            try:
+                cursor.execute("ALTER TABLE dpo_trajectories ADD COLUMN cognitive_context TEXT")
+            except sqlite3.OperationalError as alter_error:
+                if "duplicate column name" not in str(alter_error).lower():
+                    logger.warning(
+                        "[Telemetry] SQLite migration failed for cognitive_context: %s",
+                        alter_error,
+                    )
+
+            conn.commit()
             _DB_INITIALIZED = True
             logger.info("[Telemetry] SQLite schema ready at %s", DPO_SQLITE_PATH)
         except Exception as e:
             logger.warning("[Telemetry] SQLite schema init failed: %s", e)
+        finally:
+            if conn is not None:
+                conn.close()
+
+
+def _ensure_sqlite_schema() -> None:
+    """Backward-compatible wrapper for schema initialization."""
+    init_db()
 
 
 def _write_sqlite(
@@ -90,6 +117,7 @@ def _write_sqlite(
     booking_id: Optional[str],
     turn_count: int,
     latency_ms: Optional[float],
+    cognitive_context: Optional[str] = None,
 ) -> bool:
     """Synchronous SQLite insert (runs in thread pool)."""
     try:
@@ -99,8 +127,9 @@ def _write_sqlite(
             """
             INSERT INTO dpo_trajectories
                 (session_id, user_id, trajectory_tag, user_message,
-                 tool_calls, final_reply, booking_id, turn_count, latency_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 tool_calls, final_reply, booking_id, turn_count, latency_ms,
+                 cognitive_context)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -112,6 +141,7 @@ def _write_sqlite(
                 booking_id,
                 turn_count,
                 latency_ms,
+                cognitive_context,
             ),
         )
         conn.commit()
@@ -132,6 +162,7 @@ async def _mirror_supabase(
     booking_id: Optional[str],
     turn_count: int,
     latency_ms: Optional[float],
+    cognitive_context: Optional[str] = None,
 ) -> bool:
     """Best-effort mirror to Supabase via db_client."""
     try:
@@ -140,8 +171,9 @@ async def _mirror_supabase(
             """
             INSERT INTO public.dpo_trajectories
                 (session_id, user_id, trajectory_tag, user_message,
-                 tool_calls, final_reply, booking_id, turn_count, latency_ms)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 tool_calls, final_reply, booking_id, turn_count, latency_ms,
+                 cognitive_context)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 session_id,
@@ -153,6 +185,7 @@ async def _mirror_supabase(
                 booking_id,
                 turn_count,
                 latency_ms,
+                cognitive_context,
             ),
         )
         return True
@@ -203,7 +236,7 @@ def classify_trajectory(
         return "DROP_OFF_PATH"
 
     if len(tool_calls) >= 5 and not any(
-        tc.get("tool") == "trigger_checkout_flow" for tc in tool_calls
+        tc.get("tool") == "process_v2_booking" for tc in tool_calls
     ):
         return "DROP_OFF_PATH"
 
@@ -230,6 +263,7 @@ async def log_trajectory(
     booking_id: Optional[str] = None,
     turn_count: int = 1,
     latency_ms: Optional[float] = None,
+    cognitive_context: Optional[str] = None,
 ) -> None:
     """Log a full trajectory turn. Fire-and-forget — never blocks the caller.
 
@@ -242,6 +276,7 @@ async def log_trajectory(
         booking_id: Extracted booking ID if any.
         turn_count: Turn number in the session.
         latency_ms: Pipeline execution time in milliseconds.
+        cognitive_context: Mem0 user preference context active during this turn.
     """
     if not DPO_TELEMETRY_ENABLED:
         return
@@ -265,6 +300,7 @@ async def log_trajectory(
         booking_id,
         turn_count,
         latency_ms,
+        cognitive_context,
     )
 
     asyncio.create_task(
@@ -278,10 +314,12 @@ async def log_trajectory(
             booking_id,
             turn_count,
             latency_ms,
+            cognitive_context,
         )
     )
 
     logger.debug(
-        "[Telemetry] Logged [%s] session=%s tools=%d booking=%s",
+        "[Telemetry] Logged [%s] session=%s tools=%d booking=%s mem0=%s",
         tag, session_id, len(tool_calls), booking_id or "none",
+        "yes" if cognitive_context else "no",
     )
