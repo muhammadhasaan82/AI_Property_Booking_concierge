@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -14,15 +15,26 @@ import chainlit as cl
 import chainlit.data as cl_data
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from dotenv import load_dotenv
+from sqlalchemy.engine import make_url
 from sqlalchemy import text
 
-# Fix sys.path to allow importing from the project root (app/ lives here)
-_backend_root = Path(__file__).resolve().parents[1]
-sys.path.append(str(_backend_root))
+# Fix sys.path to allow importing backend/app directly as app.*
+# Force load the root .env file and override any cached system variables
+# --- ABSOLUTE PATH FIX ---
+# Ensure Python can always find the 'backend' folder regardless of cwd
+# --- ABSOLUTE PATH FIX ---
+_backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
 
-from app.services.graph import run_chat_graph
-from app.services.state_keys import SK
-from app.services.adk_runner import run_adk_turn, ADK_ENABLED
+# THE NUCLEAR OVERRIDE:
+# Inject the connection string directly into the environment memory,
+# bypassing all .env files and caching. Use the internal Docker IP and native port.
+os.environ["SUPABASE_DB_URL"] = "postgresql://supabase_admin:iNzl5DdQK3F9AOsf@172.21.0.4:5432/postgres"
+os.environ["SUPABASE_DB_USER"] = "supabase_admin"
+os.environ["SUPABASE_DB_PASSWORD"] = "iNzl5DdQK3F9AOsf"
+
+from app.services.adk_runner import run_adk_turn
 
 # ---------------------------------------------------------------------------
 # Authentication - Password Login
@@ -192,26 +204,35 @@ SQLITE_SCHEMA_STATEMENTS = [
     """,
 ]
 
-WELCOME_MESSAGE = """# AI Booking Concierge
-
-Welcome! I'm your personal booking assistant.
-
-I can help you:
-- **Find properties** in your preferred city
-- **Book stays** with your chosen dates and amenities
-- **Manage reservations** - check status, modify, or cancel
-
-What would you like to do today?
-"""
+WELCOME_MESSAGE = "Welcome to AI Booking! How can I help you find a stay today?"
 
 
 def _normalize_conninfo(conninfo: str) -> str:
+    def _with_pgbouncer_safe_psycopg_options(url_text: str) -> str:
+        try:
+            url = make_url(url_text)
+            query = dict(url.query)
+            # Supabase transaction pooling / PgBouncer is not compatible with
+            # psycopg's automatic prepared statements unless very specific
+            # server/client requirements are met. Disabling them avoids
+            # DuplicatePreparedStatement errors on recycled pooled connections.
+            query.setdefault("prepare_threshold", "None")
+            return str(url.set(query=query))
+        except Exception:
+            separator = "&" if "?" in url_text else "?"
+            return f"{url_text}{separator}prepare_threshold=None"
+
     if conninfo.startswith("postgres://"):
-        return "postgresql+psycopg://" + conninfo[len("postgres://") :]
+        conninfo = "postgresql+psycopg://" + conninfo[len("postgres://") :]
+        return _with_pgbouncer_safe_psycopg_options(conninfo)
     if conninfo.startswith("postgresql+asyncpg://"):
-        return "postgresql+psycopg://" + conninfo[len("postgresql+asyncpg://") :]
+        conninfo = "postgresql+psycopg://" + conninfo[len("postgresql+asyncpg://") :]
+        return _with_pgbouncer_safe_psycopg_options(conninfo)
     if conninfo.startswith("postgresql://"):
-        return "postgresql+psycopg://" + conninfo[len("postgresql://") :]
+        conninfo = "postgresql+psycopg://" + conninfo[len("postgresql://") :]
+        return _with_pgbouncer_safe_psycopg_options(conninfo)
+    if conninfo.startswith("postgresql+psycopg://"):
+        return _with_pgbouncer_safe_psycopg_options(conninfo)
     if conninfo.startswith("sqlite:///"):
         return "sqlite+aiosqlite:///" + conninfo[len("sqlite:///") :]
     return conninfo
@@ -243,23 +264,15 @@ def _schema_statements_for(conninfo: str):
 
 @cl.data_layer
 def get_data_layer():
-    conninfo = _resolve_history_conninfo()
-    # Chainlit's official layer automatically creates the schema tables for you!
+    # PERMANENT HARDCODE: Bypass all .env variables and caches
+    conninfo = "postgresql+psycopg://postgres:iNzl5DdQK3F9AOsf@172.21.0.4:5432/postgres"
     return SQLAlchemyDataLayer(conninfo=conninfo)
-
 
 def _get_data_layer():
     try:
         return cl_data.get_data_layer()
     except Exception:
         return None
-
-
-def _make_stream_callback(msg: cl.Message):
-    def _callback(token: str) -> None:
-        asyncio.create_task(msg.stream_token(token))
-
-    return _callback
 
 
 async def _rename_thread(message: cl.Message, question: str) -> None:
@@ -286,99 +299,70 @@ async def on_chat_resume(thread):
         past_thread_id = thread.get("id")
         if past_thread_id:
             cl.user_session.set("past_thread_id", past_thread_id)
-
-    # await cl.Message(content="Chat session restored from memory.").send()
+            cl.user_session.set("session_id", past_thread_id)
 
 
 @cl.on_chat_start
 async def on_chat_start():
-    # --- NEW: Safely ensure tables exist ---
+    # --- FORCE UI CONFIGURATION ---
+    # This overrides the config.toml file
+    cl.user_session.set("app_name", "AI Booking")
+    cl.user_session.set("app_description", "AI Property Booking Concierge")
+
+    # Optional: If you want to force the theme via Python
+    # cl.user_session.set("theme", "light")
+    # ------------------------------
+
+    # Use SQLAlchemy to auto-create all tables based on Chainlit's internal models
     data_layer = cl_data.get_data_layer()
     if data_layer and hasattr(data_layer, "engine"):
-        conninfo = _resolve_history_conninfo()
         try:
-            async with data_layer.engine.begin() as connection:
-                if conninfo.startswith("sqlite"):
-                    await connection.execute(text("PRAGMA foreign_keys = ON"))
-                for statement in _schema_statements_for(conninfo):
-                    await connection.execute(text(statement))
+            # This forces Chainlit to build its exact schema in Postgres
+            async with data_layer.engine.begin() as conn:
+                await conn.run_sync(cl.data.sql_alchemy.Base.metadata.create_all)
+            print("Schema automatically created by Chainlit.")
         except Exception as e:
             print(f"Schema Error: {e}")
-    # ---------------------------------------
 
-    cl.user_session.set("filters", {})
-    cl.user_session.set("booking_args", {})
-    cl.user_session.set("status_args", {})
-    cl.user_session.set("payment_args", {})
-    
     await cl.Message(content=WELCOME_MESSAGE).send()
+
+
+def _resolve_session_id(message: cl.Message) -> str:
+    thread_id = getattr(message, "thread_id", None)
+    if thread_id:
+        cl.user_session.set("session_id", thread_id)
+        return thread_id
+
+    stored = (
+        cl.user_session.get("session_id")
+        or cl.user_session.get("past_thread_id")
+        or cl.user_session.get("id")
+    )
+    if stored:
+        return stored
+
+    generated = str(uuid4())
+    cl.user_session.set("session_id", generated)
+    return generated
 
 
 @cl.on_message
 async def on_message(message: cl.Message):
     await _rename_thread(message, (message.content or "").strip())
 
+    # ── V2 ADK Pipeline (streaming) — sole path ─────────────
+    user_obj = cl.user_session.get("user")
+    user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
+    session_id = _resolve_session_id(message)
     msg = cl.Message(content="")
     await msg.send()
 
-    # ── V2 ADK Pipeline ─────────────────────────────────────────
-    if ADK_ENABLED:
-        user_obj = cl.user_session.get("user")
-        user_id = getattr(user_obj, "identifier", "anonymous") if user_obj else "anonymous"
-        session_id = cl.user_session.get("id", "default_session")
-
-        reply = await run_adk_turn(
-            user_id=user_id,
-            session_id=session_id,
-            message=message.content,
-        )
-
-        msg.content = reply
-        await msg.update()
-        return
-
-    # ── V1 LangGraph Fallback ───────────────────────────────────
-    filters = dict(cl.user_session.get("filters", {}) or {})
-    booking_args = dict(cl.user_session.get("booking_args", {}) or {})
-    status_args = dict(cl.user_session.get("status_args", {}) or {})
-    payment_args = dict(cl.user_session.get("payment_args", {}) or {})
-
-    filters["stream"] = True
-    filters["stream_callback"] = _make_stream_callback(msg)
-
-    result = await run_chat_graph(
+    async for chunk in run_adk_turn(
+        user_id=user_id,
+        session_id=session_id,
         message=message.content,
-        filters=filters,
-        booking_args=booking_args,
-        status_args=status_args,
-        payment_args=payment_args,
-    )
-    result = result or {}
+    ):
+        await msg.stream_token(chunk)
 
-    cl.user_session.set("filters", result.get("filters", {}))
-    cl.user_session.set("booking_args", result.get("booking_args", {}))
-    cl.user_session.set("status_args", result.get("status_args", {}))
-    cl.user_session.set("payment_args", result.get("payment_args", {}))
-
-    reply = result.get("reply", "Sorry, I didn't understand that.")
-    active_filters = result.get("filters", {})
-    is_active_flow = (
-        active_filters.get(SK.awaiting_property_type_choice)
-        or active_filters.get(SK.awaiting_selection_confirm)
-        or active_filters.get(SK.awaiting_city_selection)
-        or active_filters.get(SK.awaiting_field)
-        or active_filters.get(SK.awaiting_unavailable_city_choice)
-    )
-
-    if is_active_flow and reply:
-        formatted_lines = []
-        for line in reply.split("\n"):
-            if "?" in line or "please" in line.lower() or "reply" in line.lower():
-                formatted_lines.append(f"**{line}**")
-            else:
-                formatted_lines.append(line)
-        reply = "\n".join(formatted_lines)
-
-    msg.content = reply
+    # Finalise (flushes any buffered content and marks the message complete)
     await msg.update()
-

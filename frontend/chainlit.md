@@ -1,13 +1,9 @@
-# AI Booking Concierge
-*v1.0*
+# AI Property Booking Concierge
 
-Welcome! I'm your personal booking assistant.
+Your personal AI assistant for finding and booking rental properties.
 
-## What I can help you with!
+- 🏠 **Find properties** — Search by city, budget, bedrooms, and amenities
+- 📋 **Answer policy questions** — Check-in times, cancellation, pets, refunds
+- ✅ **Manage bookings** — Review, confirm, or check the status of a reservation
 
-- **Find properties** in your preferred city
-- **Book stays** with your chosen dates and amenities
-- **Manage reservations** - check status, modify, or cancel
-- **Answer policy questions** - ask about refunds, pets, or check-in times
-
-Ready to help you find your perfect stay! Just let me know your destination, travel dates, and any specific preferences you have.
+Just tell me where you'd like to stay.

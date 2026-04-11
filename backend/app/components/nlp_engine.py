@@ -414,8 +414,10 @@ def is_property_search(text: str) -> bool:
         if conf >= threshold:
             return True
 
-    # Keyword + NER fallback
-    from .nlp_extractor import KNOWN_CITIES, CITY_ALIASES, PROPERTY_TYPES
+    # Keyword + NER fallback (V2: vocabulary provided by dynamic_config/dataset_loader)
+    KNOWN_CITIES: set = set()
+    CITY_ALIASES: dict = {}
+    PROPERTY_TYPES: list = []
 
     money_pat = None
     if vocab.money_intent_pattern:
@@ -810,8 +812,8 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
         count = len(active_filters.get("last_results") or [])
         system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You just showed the user a numbered list of {count} properties. If their message is a number (e.g. '1', '{count}'), an ordinal, or a selection phrase like 'option 7', they are making a selection. You MUST classify this intent strictly as 'confirmation'. Do NOT classify as property_search."
 
-    if active_filters.get(SK.awaiting_field):
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get(SK.awaiting_field)}'. Treat their input as a 'confirmation' of this data."
+    if active_filters.get("awaiting_field"):
+        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get('awaiting_field')}'. Treat their input as a 'confirmation' of this data."
 
     try:
         valid_types = get_vocabulary().seed_property_types
@@ -883,8 +885,8 @@ def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) 
         count = len(active_filters.get("last_results") or [])
         system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You just showed the user a numbered list of {count} properties. If their message is a number (e.g. '1', '{count}'), an ordinal, or a selection phrase like 'option 7', they are making a selection. You MUST classify this intent strictly as 'confirmation'. Do NOT classify as property_search."
 
-    if active_filters.get(SK.awaiting_field):
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get(SK.awaiting_field)}'. Treat their input as a 'confirmation' of this data."
+    if active_filters.get("awaiting_field"):
+        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get('awaiting_field')}'. Treat their input as a 'confirmation' of this data."
 
     try:
         valid_types = get_vocabulary().seed_property_types

@@ -1,5 +1,5 @@
 [Unit]
-Description=AI Booking Concierge - Chainlit Application
+Description=AI Booking - Application
 After=network.target
 
 [Service]

@@ -54,10 +54,10 @@ edit_message = true
 
 [UI]
 # Name of the assistant.
-name = "Assistant"
+name = "AI Booking"
 
 # Description of the assistant. This is used for HTML tags.
-# description = ""
+description = "AI Property Booking Concierge"
 
 # Large size content are by default collapsed for a cleaner ui
 default_collapse_content = true

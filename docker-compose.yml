@@ -3,8 +3,8 @@ version: "3.9"
 services:
   fastapi:
     build:
-      context: .
-      dockerfile: app/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     env_file:
@@ -14,23 +14,25 @@ services:
       - ./local_chat_history.db:/app/local_chat_history.db
     depends_on:
       - rust_gateway
+      - redis
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   chainlit:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "8501:8501"
     env_file:
       - .env
     depends_on:
       - fastapi
+      - redis
     command: chainlit run frontend/chainlit_app.py --host 0.0.0.0 --port 8501
 
   rust_gateway:
     build:
-      context: ./rust_gateway
+      context: ./backend/rust_gateway
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
@@ -39,5 +41,14 @@ services:
     environment:
       - RUST_LOG=info
 
+  redis:
+    image: redis:alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
 volumes:
   data:
+  redis_data:

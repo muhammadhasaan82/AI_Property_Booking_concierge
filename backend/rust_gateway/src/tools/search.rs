@@ -9,9 +9,9 @@ impl PropertySearchTool {
         if wanted.is_empty() {
             return true;
         }
-        let a = row_city.to_lowercase();
-        let b = wanted.to_lowercase();
-        a == b || a.contains(&b) || b.contains(&a)
+        let a = row_city.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        let b = wanted.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        a == b
     }
 
     fn matches_amenities(row_amenities: &[String], wanted: &[String]) -> bool {
@@ -63,6 +63,18 @@ impl Tool for PropertySearchTool {
         let beds = input.get("beds").and_then(|v| v.as_i64());
         let property_type = input.get("property_type").and_then(|v| v.as_str()).unwrap_or("");
         let query_text = input.get("query_text").and_then(|v| v.as_str()).unwrap_or("");
+        let max_results = input
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(5)
+            .max(1);
+        let summary_mode_threshold = input
+            .get("summary_mode_threshold")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(12)
+            .max(1);
 
         let wanted_amenities: Vec<String> = input
             .get("amenities")
@@ -154,18 +166,28 @@ impl Tool for PropertySearchTool {
                 rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            // Dynamic result limiting to protect token limits
-            let total_count = results.len();
-            if total_count > 100 {
-                // Too many results - cap at 100
-                results.truncate(100);
+        }
+
+        let total_matches = results.len();
+        if results.len() > max_results {
+            results.truncate(max_results);
+        }
+
+        if total_matches > summary_mode_threshold {
+            for entry in results.iter_mut() {
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.remove("description");
+                    obj.remove("amenities");
+                }
             }
-            // If 11-30 results, show all - no limit needed for small result sets
-            // If 10 or less, show all - no limit needed
         }
 
         json!({
-            "count": results.len(),
+            "count": total_matches,
+            "shown_count": results.len(),
+            "max_results": max_results,
+            "summary_mode": total_matches > summary_mode_threshold,
+            "summary_mode_threshold": summary_mode_threshold,
             "filters_applied": {
                 "location": location,
                 "budget": budget,
@@ -205,6 +227,21 @@ mod tests {
             "properties": [
                 {"id": "p1", "city": "Miami", "price_per_night": 100.0},
                 {"id": "p2", "city": "New York", "price_per_night": 100.0}
+            ]
+        });
+        let result = tool.execute(&input);
+        assert_eq!(result["count"], 1);
+        assert_eq!(result["results"][0]["id"], "p1");
+    }
+
+    #[test]
+    fn test_city_match_is_not_substring() {
+        let tool = PropertySearchTool;
+        let input = json!({
+            "location": "York",
+            "properties": [
+                {"id": "p1", "city": "York", "price_per_night": 120.0},
+                {"id": "p2", "city": "New York", "price_per_night": 140.0}
             ]
         });
         let result = tool.execute(&input);
