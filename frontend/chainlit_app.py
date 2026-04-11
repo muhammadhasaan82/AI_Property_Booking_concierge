@@ -30,9 +30,9 @@ if _backend_root not in sys.path:
 # THE NUCLEAR OVERRIDE:
 # Inject the connection string directly into the environment memory,
 # bypassing all .env files and caching. Use the internal Docker IP and native port.
-os.environ["SUPABASE_DB_URL"] = "postgresql://supabase_admin:iNzl5DdQK3F9AOsf@172.21.0.4:5432/postgres"
+os.environ["SUPABASE_DB_URL"] = "https://your-project-ref.supabase.co"
 os.environ["SUPABASE_DB_USER"] = "supabase_admin"
-os.environ["SUPABASE_DB_PASSWORD"] = "iNzl5DdQK3F9AOsf"
+os.environ["SUPABASE_DB_PASSWORD"] = "your_database_password_here"
 
 from app.services.adk_runner import run_adk_turn
 
@@ -41,7 +41,7 @@ from app.services.adk_runner import run_adk_turn
 # ---------------------------------------------------------------------------
 @cl.password_auth_callback
 def auth_callback(username: str, password: str):
-    if username == "admin" and password == "123":
+    if username == "login_username" and password == "login_password":
         return cl.User(identifier=username, metadata={"role": "admin"})
     return None
 
