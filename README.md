@@ -77,17 +77,21 @@ Search tools run a token-safe summary mode in both languages. In [search.py](bac
 
 Observability is handled separately from the user path. [telemetry.py](backend/app/observability/telemetry.py) logs DPO telemetry trajectories to a local SQLite database, capturing tool calls, latency, sanitized input/output, and cognitive context. This keeps the runtime inspectable without mixing telemetry concerns into the ADK pipeline itself.
 
+The state model is the key V2 design choice. Routing is probabilistic, but state resolution is not. The router can loosely infer that "the cheaper one from before" refers to a prior shortlist, but the actual mapping is handled by `active_property_options_map` in Redis-backed `soft_state`. That separation lets the model stay flexible on language while the backend stays exact on identity.
+
 ```mermaid
 flowchart LR
     IN["User input"] --> IS["Input sanitization"]
     IS --> MC["Mem0 context fetch"]
-    MC --> TR["Triage Router"]
+    MC --> TR["triage_router"]
     TR --> TE["Tool execution"]
     TE --> AD["Anomaly detection"]
-    AD --> SS["State sync (Redis)"]
-    SS --> CV["Concierge Voice"]
+    AD --> SS["State sync to Redis"]
+    SS --> CV["concierge_voice"]
     CV --> OS["Output sanitization"]
     OS --> OUT["User"]
+
+    SS --> TP["DPO telemetry logging"]
 ```
 
 ## Interesting Techniques
