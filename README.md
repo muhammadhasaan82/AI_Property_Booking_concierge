@@ -2,36 +2,44 @@
 
 ## Description
 
-AI Property Booking Concierge V2 is a hybrid Python and Rust booking system built around a pure Google ADK 2.0 `SequentialAgent` pipeline. The Python side is intentionally thin: it wires agents, session services, tool boundaries, and persistence. Runtime behavior is soft-coded in [agent_config.yaml](backend/app/config/agent_config.yaml), while prompt behavior is externalized into [triage_instruction.md](backend/app/prompts/triage_instruction.md) and [voice_instruction.md](backend/app/prompts/voice_instruction.md).
+AI Property Booking Concierge V2 is a hybrid Python and Rust booking system for property search, FAQ lookup, booking capture, and reservation follow-up. The V2 rewrite replaces the earlier orchestration path with a pure Google ADK 2.0 `SequentialAgent` pipeline defined in [adk_agents.py](backend/app/agents/adk_agents.py).
 
-The main agent graph lives in [adk_agents.py](backend/app/agents/adk_agents.py). It splits the conversation loop into two separate model responsibilities. `triage_router` runs `openai/gpt-5-nano` through LiteLLM and acts as a probabilistic router that emits one structured tool call. It does not write user-facing prose. `concierge_voice` runs `groq/llama-3.3-70b-versatile` through LiteLLM and turns structured tool payloads into the final response.
+At a high level, the system separates decision-making from response writing. One model decides which backend action should run next. A second model turns structured results into the final reply. The backend keeps conversation state across turns, stores durable user context, and offloads selected search work to a Rust service.
 
-V2 also moves state handling into three explicit layers instead of relying on one conversational context blob. Long-term cognitive context comes from local Mem0 backed by ChromaDB in [memory_engine.py](backend/app/services/memory_engine.py). Short-term operational state is stored in Redis through the custom `RedisSessionService` inside [adk_runner.py](backend/app/services/adk_runner.py) and the snapshot helpers in [redis_store.py](backend/app/services/redis_store.py). Persistent UI threads are managed in [chainlit_app.py](frontend/chainlit_app.py), where Chainlit's SQLAlchemy data layer is backed by Supabase Postgres via `postgresql+psycopg`, and `thread_id` is reused as the ADK `session_id` so session identity survives reloads and reconnects.
+The codebase follows a "super soft coded" approach. Python is used for wiring, not policy. Thresholds, intent sets, fallback messages, and other runtime controls live in [agent_config.yaml](backend/app/config/agent_config.yaml). Prompt behavior is kept in [triage_instruction.md](backend/app/prompts/triage_instruction.md) and [voice_instruction.md](backend/app/prompts/voice_instruction.md), so agent behavior can change without rewriting the orchestration layer.
 
 ## Architecture
 
-The V2 rewrite replaces the older orchestration path with a single ADK runner in [adk_runner.py](backend/app/services/adk_runner.py). Each turn starts with input sanitization, cognitive context fetch, and ADK session hydration. The runner then invokes the two-node `SequentialAgent` defined in [adk_agents.py](backend/app/agents/adk_agents.py), records tool activity, applies anomaly checks, streams response chunks back to Chainlit, and logs the trajectory for later analysis.
+```mermaid
+flowchart TD
+    U["User"] --> CL["Chainlit UI"]
+    CL --> PY["Python Backend (ADK)"]
+    PY --> RS["Rust Backend (Axum)"]
 
-The architecture is intentionally asymmetric:
+    DB["State Stores<br/>Supabase / Redis"] --> PY
+    LLM["LLMs<br/>OpenAI / Groq"] --> PY
+```
 
-- `triage_router` is a routing model, not a chat model. Its contract is defined in [triage_instruction.md](backend/app/prompts/triage_instruction.md): choose exactly one tool, emit structured output, and stop.
-- `concierge_voice` is a rendering model. Its contract is defined in [voice_instruction.md](backend/app/prompts/voice_instruction.md): read the router payload, use any injected cognitive memory, and write the final response without exposing raw tool internals.
-- All non-probabilistic controls such as thresholds, fallback messages, intent classes, exemption lists, and summary-mode limits live in [agent_config.yaml](backend/app/config/agent_config.yaml), not in the agent wiring.
+For semi-technical readers, the system is simple in shape: the user talks to a Chainlit interface, the Python backend runs the ADK agent pipeline, and the Rust backend handles fast tool execution and search-related work. Supporting systems store state and provide model access.
 
-The memory model is equally explicit:
+Under the hood, V2 is a two-node ADK pipeline. In [adk_agents.py](backend/app/agents/adk_agents.py), `triage_router` uses `openai/gpt-5-nano` through LiteLLM as a probabilistic state router. Its job is narrow: select one tool call and return structured data. It does not generate conversational text. `concierge_voice` uses `groq/llama-3.3-70b-versatile` through LiteLLM to read tool output and produce the final user-facing response.
 
-- Long-term cognitive memory: [memory_engine.py](backend/app/services/memory_engine.py) initializes local Mem0 with `BAAI/bge-large-en-v1.5` embeddings and a Chroma-backed vector store. On each turn, the runner fetches relevant user facts and injects them into `user_cognitive_context`.
-- Short-term session state: [adk_runner.py](backend/app/services/adk_runner.py) implements `RedisSessionService`, while [redis_store.py](backend/app/services/redis_store.py) persists ADK session snapshots. This is where `soft_state` and `active_property_options_map` live, so probabilistic references like "option 15" can be resolved to a deterministic property UUID.
-- Persistent UI thread state: [chainlit_app.py](frontend/chainlit_app.py) uses Chainlit's SQLAlchemy data layer with Supabase Postgres and keeps `thread_id == session_id`. That bridge gives the frontend a durable identity that lines up with Redis-backed ADK state instead of creating a new conversation context on every refresh.
+This separation keeps routing logic and response style independent. The router is optimized for choosing the next action. The voice model is optimized for presenting the result clearly. Because the prompts are externalized into [triage_instruction.md](backend/app/prompts/triage_instruction.md) and [voice_instruction.md](backend/app/prompts/voice_instruction.md), the orchestration code remains small and mostly declarative.
 
-The search and retrieval path is split across Python and Rust. Python tools in [backend/app/agents/tools/](backend/app/agents/tools/) shape ADK tool contracts and maintain conversational state. Retrieval and semantic search live in [backend/app/components/](backend/app/components/). When appropriate, Python passes compact TOON payloads through [toon.py](backend/app/services/toon.py) to the Rust gateway, where [main.rs](backend/rust_gateway/src/main.rs), [gateway.rs](backend/rust_gateway/src/gateway.rs), [toon.rs](backend/rust_gateway/src/toon.rs), and Rust tools such as [search.rs](backend/rust_gateway/src/tools/search.rs) run behind Axum.
+V2 also formalizes memory and state into three layers.
+
+- Long-term cognitive memory: [memory_engine.py](backend/app/services/memory_engine.py) uses local Mem0 with ChromaDB-backed storage to retrieve historical user context such as preferences, travel patterns, or prior constraints. That context is injected into the model turn as cognitive state.
+- Short-term session state: [adk_runner.py](backend/app/services/adk_runner.py) and [redis_store.py](backend/app/services/redis_store.py) manage Redis-backed ADK session snapshots and `soft_state`. This is where `active_property_options_map` lives, allowing fuzzy user choices such as "option 15" to resolve deterministically to a property UUID.
+- Persistent UI thread state: [chainlit_app.py](frontend/chainlit_app.py) pins the Chainlit `thread_id` to the ADK `session_id` and persists thread data through a SQLAlchemy data layer backed by Supabase/PostgreSQL. This keeps the same conversation identity stable across browser refreshes and backend hot-reloads.
+
+The Rust side acts as an autonomous tool gateway. Python tools in [backend/app/agents/tools/](backend/app/agents/tools/) prepare structured requests, while the Rust service in [backend/rust_gateway/src/](backend/rust_gateway/src/) handles tool routing and search execution behind Axum. The boundary between Python and Rust uses TOON, implemented in [toon.py](backend/app/services/toon.py) and [toon.rs](backend/rust_gateway/src/toon.rs), to keep payloads compact and model-friendly.
 
 ```mermaid
 flowchart LR
     U["User"] --> CL["Chainlit UI"]
-    CL --> TP["Supabase / PostgreSQL thread persistence"]
+    CL --> SP["Supabase / PostgreSQL thread persistence"]
     CL --> AR["ADK Runner"]
-    TP --> AR
+    SP --> AR
 
     AR --> SAN["Input sanitization"]
     SAN --> MEM["Mem0 + ChromaDB cognitive context fetch"]
@@ -44,70 +52,62 @@ flowchart LR
     end
 
     SEQ --> TR
-    TR --> PT["Python tool layer"]
     AR --> RS["Redis session snapshots + soft_state"]
     RS --> TR
-    PT --> TOON["TOON encode / decode"]
+
+    TR --> PT["Python tool layer"]
+    PT --> TOON["TOON encoding"]
     TOON --> RG["Rust autonomous gateway (Axum)"]
-    RG --> RT["Rust tools and CAG search path"]
-    PT --> DB["Bookings / FAQ / dataset / retrieval services"]
+    RG --> RT["Rust tools"]
+    PT --> SV["Python services and retrieval"]
     RT --> PT
-    DB --> PT
+    SV --> PT
     PT --> RS
-    CV --> OUT["Streamed response to UI"]
+    CV --> OUT["Final streamed response"]
     OUT --> U
 ```
 
 ## Workflow
 
-Each turn follows the same narrow path, and the boundaries are deliberate.
+A turn starts in [chainlit_app.py](frontend/chainlit_app.py), where the incoming message is attached to the active `thread_id`, and that same identifier is reused as the ADK `session_id`. The request moves into [adk_runner.py](backend/app/services/adk_runner.py), which sanitizes input, hydrates the Redis-backed session, and fetches Mem0 context before the ADK pipeline runs.
 
-1. [chainlit_app.py](frontend/chainlit_app.py) receives the user message, resolves `session_id` from the Chainlit `thread_id`, and streams output chunks back to the UI.
-2. [adk_runner.py](backend/app/services/adk_runner.py) sanitizes the input, loads the Redis-backed ADK session snapshot, and fetches long-term user context from [memory_engine.py](backend/app/services/memory_engine.py).
-3. `triage_router` chooses one tool call. It does not produce end-user text.
-4. The selected tool executes in Python, and may call into the Rust gateway for fast filtering or CAG-backed retrieval.
-5. [anomaly.py](backend/app/security/anomaly.py) hashes the tool parameters and checks whether the same tool is being called repeatedly inside the configured time window. Repeated calls from exempt tools remain allowed through [agent_config.yaml](backend/app/config/agent_config.yaml).
-6. The updated `soft_state` and ADK event history are written back through the Redis session service.
-7. `concierge_voice` reads the structured result plus cognitive context and generates the final response.
-8. Output is sanitized and the full trajectory is logged in [telemetry.py](backend/app/observability/telemetry.py), including tool calls, latency, cognitive context, and sanitized reply text.
+The router then selects one tool call. Tool execution happens in Python, with selected search and gateway operations delegated to Rust. After each tool call, [anomaly.py](backend/app/security/anomaly.py) checks whether the router is repeating the same tool with the same parameter hash inside the configured time window. If the pattern crosses the threshold, the system raises a routing anomaly and falls back safely. Exemptions such as small-talk handling are configured in [agent_config.yaml](backend/app/config/agent_config.yaml), not hardcoded in the anomaly checker.
 
-Search has an additional token-safety branch. In [search.py](backend/app/agents/tools/search.py), once the result count crosses `summary_mode_threshold`, the tool omits heavy fields such as descriptions and amenities before handing the payload to the model. The Rust implementation in [search.rs](backend/rust_gateway/src/tools/search.rs) applies the same rule. That Python/Rust parity keeps large searches from pushing the Groq voice model into rate-limit failures while still preserving deterministic selection state in Redis.
+Search tools run a token-safe summary mode in both languages. In [search.py](backend/app/agents/tools/search.py) and [search.rs](backend/rust_gateway/src/tools/search.rs), large result sets drop heavy fields such as descriptions and amenities once the count exceeds `summary_mode_threshold`. That keeps large searches inside Groq's stricter token-per-minute budget while preserving enough structure for shortlist presentation and deterministic follow-up selection.
 
-The state model is the key V2 design choice. Routing is probabilistic, but state resolution is not. The router can loosely infer that "the cheaper one from before" refers to a prior shortlist, but the actual mapping is handled by `active_property_options_map` in Redis-backed `soft_state`. That separation lets the model stay flexible on language while the backend stays exact on identity.
+Observability is handled separately from the user path. [telemetry.py](backend/app/observability/telemetry.py) logs DPO telemetry trajectories to a local SQLite database, capturing tool calls, latency, sanitized input/output, and cognitive context. This keeps the runtime inspectable without mixing telemetry concerns into the ADK pipeline itself.
 
 ```mermaid
 flowchart LR
     IN["User input"] --> IS["Input sanitization"]
     IS --> MC["Mem0 context fetch"]
-    MC --> TR["triage_router"]
+    MC --> TR["Triage Router"]
     TR --> TE["Tool execution"]
     TE --> AD["Anomaly detection"]
-    AD --> SS["State sync to Redis"]
-    SS --> CV["concierge_voice"]
+    AD --> SS["State sync (Redis)"]
+    SS --> CV["Concierge Voice"]
     CV --> OS["Output sanitization"]
     OS --> OUT["User"]
-
-    SS --> TP["DPO telemetry logging"]
 ```
 
 ## Interesting Techniques
 
-- Deterministic state memory vs probabilistic routing: `triage_router` can interpret fuzzy selections, but the actual option-to-property mapping is stored in `active_property_options_map` inside Redis-backed `soft_state` in [search.py](backend/app/agents/tools/search.py) and [adk_runner.py](backend/app/services/adk_runner.py). The model decides intent; the backend decides identity.
-- Token-safe dynamic payload pruning: both [search.py](backend/app/agents/tools/search.py) and [search.rs](backend/rust_gateway/src/tools/search.rs) switch into summary mode when the result count crosses `summary_mode_threshold`, removing descriptions and amenities so larger searches stay inside the voice model's token budget.
-- Context-aware anomaly loop detection: [anomaly.py](backend/app/security/anomaly.py) hashes tool parameters, counts repeated identical calls inside a sliding window, and raises `[ROUTING_ANOMALY]` when the router starts repeating itself. Exempt tools are configured in [agent_config.yaml](backend/app/config/agent_config.yaml), so harmless repetition is not treated as an attack or failure.
-- Pinned session state across real-time transport: the frontend streams replies over the kind of long-lived channel typically associated with the [WebSockets API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API) or [Server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), but canonical state lives in Redis and Supabase. That keeps the live transport separate from the durable conversation identity.
-- Super soft-coded runtime control: thresholds, fallback copy, routing labels, booking field requirements, anomaly exemptions, and summary-mode limits live in [agent_config.yaml](backend/app/config/agent_config.yaml). Prompts are versioned separately in [backend/app/prompts/](backend/app/prompts/). Python stays focused on orchestration.
+- Deterministic state memory vs probabilistic routing: the router can interpret flexible user language, but the backend resolves selections through `active_property_options_map` in Redis-backed `soft_state`, so the final property mapping stays exact.
+- Token-safe dynamic payload pruning: Python and Rust both apply the same summary-mode rule, removing large text fields when result sets become too large for the voice model's token budget.
+- Context-aware anomaly detection: [anomaly.py](backend/app/security/anomaly.py) hashes tool parameters and detects repeated identical tool calls within a sliding window, while exempting allowed cases such as small talk through config.
+- Pinned session state across streaming transport: the UI behaves like a long-lived [WebSockets API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API) or [Server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) session, but canonical state remains in Redis and Supabase so conversation identity survives reconnects and reloads.
+- Super soft-coded orchestration: behavior moves through config and prompt files instead of application constants, which reduces policy drift between the agent layer and the tool layer.
 
 ## Non-Obvious Technologies
 
-- `google.adk`: the core runtime for `LlmAgent`, `SequentialAgent`, the runner, and the session service contract used by [adk_agents.py](backend/app/agents/adk_agents.py) and [adk_runner.py](backend/app/services/adk_runner.py).
-- `Mem0`: local long-term memory extraction and retrieval in [memory_engine.py](backend/app/services/memory_engine.py), used to build per-user cognitive context.
-- `ChromaDB`: the vector store used under local Mem0 in [memory_engine.py](backend/app/services/memory_engine.py), and also present in the retrieval stack in [retrieval.py](backend/app/components/retrieval.py).
-- `Supabase` with SQLAlchemy and `psycopg`: the persistent thread backend used by [chainlit_app.py](frontend/chainlit_app.py) and the async Postgres client in [db_client.py](backend/app/services/db_client.py).
-- `LiteLLM`: the provider abstraction layer that lets the same ADK pipeline call `openai/gpt-5-nano` and `groq/llama-3.3-70b-versatile` through one interface in [adk_agents.py](backend/app/agents/adk_agents.py).
-- `Chainlit`: the chat UI and thread/session bridge defined in [chainlit_app.py](frontend/chainlit_app.py).
-- `Axum`: the Rust HTTP boundary in [main.rs](backend/rust_gateway/src/main.rs) that exposes the autonomous gateway and direct tool endpoints.
-- `TOON`: the compact serialization format implemented in [toon.py](backend/app/services/toon.py) and [toon.rs](backend/rust_gateway/src/toon.rs), used to move structured payloads across the Python/Rust boundary with lower token overhead than verbose JSON.
+- `google.adk`: provides the `SequentialAgent`, runner, and session abstractions used in [adk_agents.py](backend/app/agents/adk_agents.py) and [adk_runner.py](backend/app/services/adk_runner.py).
+- `LiteLLM`: normalizes access to both OpenAI and Groq models inside the same ADK pipeline.
+- `Mem0`: stores and retrieves durable user-level memory in [memory_engine.py](backend/app/services/memory_engine.py).
+- `ChromaDB`: backs the local vector storage used for cognitive memory and retrieval-related workflows.
+- `Supabase`: provides PostgreSQL-backed persistent thread storage used by [chainlit_app.py](frontend/chainlit_app.py).
+- `Chainlit`: provides the chat UI and the thread model that anchors the session bridge.
+- `Axum`: serves the Rust gateway in [main.rs](backend/rust_gateway/src/main.rs).
+- `TOON`: a compact serialization format used at the Python/Rust boundary in [toon.py](backend/app/services/toon.py) and [toon.rs](backend/rust_gateway/src/toon.rs).
 
 ## Project Structure
 
@@ -143,20 +143,20 @@ backend/
     `-- chainlit_app.py
 ```
 
-[backend/app/agents/](backend/app/agents/) contains the ADK node wiring and the Python tool contracts exposed to the router.
+[backend/app/agents/](backend/app/agents/) contains the ADK pipeline wiring and the Python tool contracts exposed to the router.
 
-[backend/app/components/](backend/app/components/) holds retrieval, semantic search, and data access helpers used by FAQ and property discovery flows.
+[backend/app/components/](backend/app/components/) holds retrieval, search, and semantic matching helpers used by property and FAQ flows.
 
-[backend/app/config/](backend/app/config/) is the soft-coded control plane for thresholds, intent sets, fallback messages, and model defaults.
+[backend/app/config/](backend/app/config/) is the control plane for thresholds, intent sets, fallback messages, and model defaults.
 
-[backend/app/observability/](backend/app/observability/) stores DPO telemetry, tracing hooks, and chat logging.
+[backend/app/observability/](backend/app/observability/) contains telemetry and tracing code for DPO logging and runtime inspection.
 
-[backend/app/security/](backend/app/security/) contains anomaly detection and guardrails for input, output, and tool-loop protection.
+[backend/app/prompts/](backend/app/prompts/) stores the externalized Markdown prompts for the router and voice nodes.
 
-[backend/app/services/](backend/app/services/) runs the ADK execution bridge, Redis session snapshot layer, cognitive memory engine, TOON serialization, and database access.
+[backend/app/security/](backend/app/security/) contains anomaly detection and sanitization guardrails.
 
-[backend/app/prompts/](backend/app/prompts/) keeps the router and voice prompts versioned as Markdown instead of embedding them in Python.
+[backend/app/services/](backend/app/services/) handles the ADK runner, Redis session snapshots, memory retrieval, TOON serialization, and backend services.
 
-[backend/rust_gateway/src/](backend/rust_gateway/src/) is the Axum-based gateway and Rust tool runtime, including search and TOON support.
+[backend/rust_gateway/src/](backend/rust_gateway/src/) contains the Axum server, tool gateway, TOON support, and Rust search tools.
 
-[frontend/](frontend/) contains the Chainlit application that binds UI thread persistence to backend ADK session identity.
+[frontend/](frontend/) contains the Chainlit application and the frontend-to-session persistence bridge.
