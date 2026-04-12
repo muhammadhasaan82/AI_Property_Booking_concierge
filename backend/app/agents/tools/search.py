@@ -524,6 +524,7 @@ async def select_property(
 # Tool: get_property_details
 # ---------------------------------------------------------------------------
 
+
 async def get_property_details(
     property_id: Optional[str] = None,
     selection_number: Optional[int] = None,
@@ -533,17 +534,12 @@ async def get_property_details(
     context_flag: Optional[str] = None,
     tool_context: Optional[ToolContext] = None,
 ) -> dict:
-    """Get full details of a specific property by its ID.
-
-    Use this tool when the user selects a property from prior search results.
-    If the ID is missing but a selection number exists, this tool will attempt
-    to resolve it from the most recent search memory.
-    If the user refers to a property fuzzily, pass property_reference with the
-    raw user wording and this tool will resolve it dynamically from active options.
-    """
+    """Get full details of a specific property by its ID, index, or natural language reference."""
     import os
+    import time
     from ...components.search import _DATASET
     from ..resolvers.property_resolver import resolve_property_reference
+
     DISPATCHER_MODEL = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-5-nano")
 
     soft_state = _get_soft_state(tool_context)
@@ -551,131 +547,127 @@ async def get_property_details(
     resolution = None
     selection_value = _coerce_int(selection_number)
     last_search = _get_cached_last_search(soft_state)
+    selected_item = None
 
-    # Resolve by selection number
-    if _is_blank(property_id) and selection_value is not None and last_search:
-        resolved_id = _resolve_property_id_from_selection(selection_value, soft_state, last_search)
-        if resolved_id is not None:
-            property_id = resolved_id
-            resolved_from_history = True
-        else:
+    # 1. DETERMINISTIC RESOLUTION: Match exact option number from memory
+    if selection_value is not None and last_search:
+        for item in last_search.get("properties", []):
+            if item.get("number") == selection_value:
+                selected_item = item
+                resolved_from_history = True
+                break
+
+        # Handle edge case where number is out of bounds
+        if not selected_item:
             shown_count, total_found = _get_active_option_window(soft_state, last_search)
             if shown_count > 0 and selection_value > shown_count:
                 unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
-                engagement_state = (
-                    str(user_engagement_state).strip()
-                    if isinstance(user_engagement_state, str) and user_engagement_state.strip()
-                    else _classify_engagement_state(unresolved_turns)
-                )
-                active_options = _build_active_options(last_search)
+                engagement_state = str(user_engagement_state).strip() if user_engagement_state else _classify_engagement_state(unresolved_turns)
                 payload = {
                     "status": Status.PROPERTY_SELECTION_UNRESOLVED,
                     "resolution": {
                         "internal_reasoning_log": cfg.msg_resolution_not_matched_log,
-                        "user_intent_classification": "select_property",
-                        "resolved_property_id": None,
-                        "user_engagement_state": engagement_state,
-                        "unresolved_turns": unresolved_turns,
-                        "extracted_parameters": (last_search or {}).get("query_context", {}),
-                        "agent_response": cfg.msg_selection_out_of_range,
-                        "requires_human_handoff": False,
+                        "agent_response": getattr(cfg, "msg_selection_out_of_range", "Option out of range."),
                     },
-                    "active_options": active_options,
                     "query_context": (last_search or {}).get("query_context", {}),
                     "shown_count": shown_count,
-                    "total_found": total_found,
                     "user_engagement_state": engagement_state,
                     "unresolved_turns": unresolved_turns,
-                    "requires_human_handoff": False,
                 }
                 return _finalize_payload(payload, action_intent, context_flag)
 
-    # Resolve by fuzzy property_reference
-    if _is_blank(property_id) and not _is_blank(property_reference):
+    # 2. PROBABILISTIC RESOLUTION: Match fuzzy descriptions/text using the LLM Router
+    if not selected_item and not _is_blank(property_reference) and last_search:
         active_options = _build_active_options(last_search)
-        if not active_options:
-            return _missing_critical_data(
-                ["search_history"],
-                "User referred to a previously shown property but no active options are stored.",
-                action_intent, context_flag,
+        if active_options:
+            engagement_state = str(user_engagement_state).strip() if user_engagement_state else _classify_engagement_state(_get_unresolved_turns(soft_state))
+            resolution = resolve_property_reference(
+                user_input=str(property_reference),
+                active_options=active_options,
+                user_engagement_state=engagement_state,
+                dispatcher_model=DISPATCHER_MODEL,
+                unresolved_turns=_get_unresolved_turns(soft_state),
+                soft_state=soft_state,
+                backend_tool_payload=last_search,
             )
-        engagement_state = (
-            str(user_engagement_state).strip()
-            if isinstance(user_engagement_state, str) and user_engagement_state.strip()
-            else _classify_engagement_state(_get_unresolved_turns(soft_state))
-        )
-        resolution = resolve_property_reference(
-            user_input=str(property_reference),
-            active_options=active_options,
-            user_engagement_state=engagement_state,
-            dispatcher_model=DISPATCHER_MODEL,
-            unresolved_turns=_get_unresolved_turns(soft_state),
-            soft_state=soft_state,
-            backend_tool_payload=last_search,
-        )
-        resolved_property_id = resolution.get("resolved_property_id")
-        if resolved_property_id is not None:
-            property_id = str(resolved_property_id)
-            resolved_from_history = True
-            _set_unresolved_turns(soft_state, 0)
-        else:
-            unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
-            payload = {
-                "status": Status.PROPERTY_SELECTION_UNRESOLVED,
-                "resolution": resolution,
-                "active_options": active_options,
-                "query_context": (last_search or {}).get("query_context", {}),
-                "user_engagement_state": resolution.get("user_engagement_state", engagement_state),
-                "unresolved_turns": unresolved_turns,
-                "requires_human_handoff": bool(resolution.get("requires_human_handoff")),
-            }
-            return _finalize_payload(payload, action_intent, context_flag)
+            res_id = resolution.get("resolved_property_id")
+            if res_id is not None:
+                for item in last_search.get("properties", []):
+                    if str(item.get("id")) == str(res_id) or str(item.get("number")) == str(res_id):
+                        selected_item = item
+                        resolved_from_history = True
+                        _set_unresolved_turns(soft_state, 0)
+                        break
+            if not selected_item:
+                unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
+                payload = {
+                    "status": Status.PROPERTY_SELECTION_UNRESOLVED,
+                    "resolution": resolution,
+                    "active_options": active_options,
+                    "user_engagement_state": resolution.get("user_engagement_state", engagement_state),
+                    "unresolved_turns": unresolved_turns,
+                }
+                return _finalize_payload(payload, action_intent, context_flag)
 
-    # No identifier at all
+    # 3. Establish the base ID for dataset lookup
+    if selected_item:
+        property_id = str(selected_item.get("id") or selected_item.get("title"))
+
     if _is_blank(property_id):
         missing = ["property_id"]
-        if selection_value is None:
-            missing.append("selection_number")
-        if _is_blank(property_reference):
-            missing.append("property_reference")
+        if selection_value is None: missing.append("selection_number")
+        if _is_blank(property_reference): missing.append("property_reference")
         return _missing_critical_data(
-            missing,
-            "User wants property details but no identifier was provided.",
+            missing, "User wants property details but no identifier was provided.",
             action_intent, context_flag,
         )
 
-    # Look up in dataset
+    # 4. FULL DETAILS LOOKUP: Find full description & amenities from _DATASET
     property_id = str(property_id)
+    matched_prop = None
     for r in _DATASET:
-        if str(r.get("id")) == property_id:
-            payload = {
-                "status": Status.PROPERTY_DETAILS,
-                "property": {
-                    "id": property_id,
-                    "title": r.get("title"),
-                    "city": r.get("city"),
-                    "price_per_night": r.get("price_per_night"),
-                    "bedrooms": r.get("bedrooms"),
-                    "bathrooms": r.get("bathrooms"),
-                    "amenities": r.get("amenities"),
-                    "description": r.get("description"),
-                    "rating": r.get("rating"),
-                },
-            }
-            if isinstance(soft_state, dict):
-                soft_state["last_selected_property_id"] = property_id
-                soft_state["last_selected_property_at"] = time.time()
-                _set_unresolved_turns(soft_state, 0)
-            payload["memory"] = {
-                "read_from": "soft_state.last_search" if resolved_from_history else None,
-                "written_to": "soft_state.last_selected_property_id",
-                "state_available": isinstance(soft_state, dict),
-            }
-            if resolution:
-                payload["selection_resolution"] = resolution
-                payload["user_engagement_state"] = resolution.get("user_engagement_state")
-                payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
-            return _finalize_payload(payload, action_intent, context_flag)
+        r_id = str(r.get("id")) if r.get("id") is not None else str(r.get("title"))
+        if r_id == property_id:
+            matched_prop = r
+            break
+        # DYNAMIC FALLBACK: If dataset lacks an explicit ID column, match by title + city
+        if selected_item and r.get("title") == selected_item.get("title") and r.get("city") == selected_item.get("city"):
+            matched_prop = r
+            break
+
+    # 5. ABSOLUTE FALLBACK: Use whatever properties we have in memory
+    if not matched_prop and selected_item:
+        matched_prop = selected_item
+
+    if matched_prop:
+        payload = {
+            "status": Status.PROPERTY_DETAILS,
+            "property": {
+                "id": str(matched_prop.get("id") or matched_prop.get("title", "")),
+                "title": matched_prop.get("title"),
+                "city": matched_prop.get("city"),
+                "price_per_night": matched_prop.get("price_per_night"),
+                "bedrooms": matched_prop.get("bedrooms"),
+                "bathrooms": matched_prop.get("bathrooms"),
+                "amenities": matched_prop.get("amenities"),
+                "description": matched_prop.get("description"),
+                "rating": matched_prop.get("rating"),
+            },
+        }
+        if isinstance(soft_state, dict):
+            soft_state["last_selected_property_id"] = payload["property"]["id"]
+            soft_state["last_selected_property_at"] = time.time()
+            _set_unresolved_turns(soft_state, 0)
+        payload["memory"] = {
+            "read_from": "soft_state.last_search" if resolved_from_history else None,
+            "written_to": "soft_state.last_selected_property_id",
+            "state_available": isinstance(soft_state, dict),
+        }
+        if resolution:
+            payload["selection_resolution"] = resolution
+            payload["user_engagement_state"] = resolution.get("user_engagement_state")
+            payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
+        return _finalize_payload(payload, action_intent, context_flag)
 
     return _finalize_payload(
         {"status": Status.NOT_FOUND, "property_id": property_id},
