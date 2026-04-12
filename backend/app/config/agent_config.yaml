@@ -56,11 +56,11 @@ session:
 
 # ── Property search ─────────────────────────────────────────────────────────
 search:
-  rerank_limit: 25                 # env: PROPERTY_RERANK_LIMIT
-  rerank_timeout_seconds: 0.6      # env: PROPERTY_RERANK_TIMEOUT_SECONDS
-  result_limit: 50                 # env: PROPERTY_SEARCH_RESULT_LIMIT
+  rerank_limit: 10                 # env: PROPERTY_RERANK_LIMIT
+  rerank_timeout_seconds: 0.3      # env: PROPERTY_RERANK_TIMEOUT_SECONDS
+  result_limit: 20                 # env: PROPERTY_SEARCH_RESULT_LIMIT
   result_limit_max: 50             # env: PROPERTY_SEARCH_RESULT_LIMIT_MAX
-  summary_mode_threshold: 12       # env: PROPERTY_SEARCH_SUMMARY_THRESHOLD
+  summary_mode_threshold: 8        # env: PROPERTY_SEARCH_SUMMARY_THRESHOLD
 
 # ── Dataset ─────────────────────────────────────────────────────────────────
 dataset:
