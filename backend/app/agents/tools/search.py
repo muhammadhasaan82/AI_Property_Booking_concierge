@@ -535,12 +535,11 @@ async def get_property_details(
     tool_context: Optional[ToolContext] = None,
 ) -> dict:
     """Get full details of a specific property by its ID, index, or natural language reference."""
-    import os
     import time
     from ...components.search import _DATASET
     from ..resolvers.property_resolver import resolve_property_reference
 
-    DISPATCHER_MODEL = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-5-nano")
+    DISPATCHER_MODEL = cfg.dispatcher_model
 
     soft_state = _get_soft_state(tool_context)
     resolved_from_history = False
