@@ -1,14 +1,9 @@
-# services/nlp_engine.py
-# -*- coding: utf-8 -*-
 """
-Unified NLP engine — replaces all hardcoded regex/arrays/dicts with
-dynamic analysis powered by VADER, spaCy, and sentence-transformers.
+Unified NLP engine.
 
-Heavy NLP calls are wrapped with asyncio.to_thread to avoid blocking
-the FastAPI event loop.
-
-Lazy-loads models on first use. Gracefully degrades if spaCy or
-sentence-transformers are unavailable.
+Intent and lexical behavior are loaded from dynamic YAML configuration.
+Model loading is lazy and degrades gracefully when optional NLP dependencies
+are unavailable.
 """
 
 from __future__ import annotations
@@ -21,17 +16,21 @@ import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+from app.services.dynamic_config import get_intent_catalog as _get_catalog
+from app.services.dynamic_config import get_retrieval_config as _get_retrieval_config
+from app.services.dynamic_config import get_thresholds as _get_thresholds
+from app.services.dynamic_config import get_vocabulary as _get_vocabulary
 
-# ─────────────────────────────────────────────────────────────────────
-# Lazy singletons
-# ─────────────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
 
 _vader_analyzer = None
 _spacy_nlp = None
 _st_model = None
 _intent_embeddings: Optional[Dict[str, Any]] = None
+
 RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
+UUID_PATTERN = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
+ISO_DATE_PATTERN = re.compile(r"\b(\d{4}-\d{1,2}-\d{1,2})\b")
 
 
 @contextmanager
@@ -60,23 +59,13 @@ def _is_local_model_reference(model_name: str) -> bool:
     except OSError:
         return False
 
-# ─────────────────────────────────────────────────────────────────────
-# Config-driven prototypes (loaded from config/intent_catalog.yaml)
-# ─────────────────────────────────────────────────────────────────────
-from app.services.dynamic_config import (
-    get_intent_catalog as _get_catalog,
-    get_vocabulary as _get_vocabulary,
-)
-
 
 def _get_intent_prototypes() -> Dict[str, List[str]]:
-    """Load intent prototypes from config."""
-    cat = _get_catalog()
-    return {k: v.prototypes for k, v in cat.intents.items()}
+    catalog = _get_catalog()
+    return {name: cfg.prototypes for name, cfg in catalog.intents.items() if cfg.prototypes}
 
 
 def _get_field_prototypes() -> Dict[str, List[str]]:
-    """Load field detection prototypes from config."""
     return _get_catalog().field_prototypes
 
 
@@ -105,1081 +94,808 @@ def _get_affirm_no_prototypes() -> Tuple[str, ...]:
 
 
 def _get_vocab():
-    """Load lexical fallback vocabulary from config/vocabulary.yaml."""
     return _get_vocabulary().nlp_fallback
 
 
+def _get_nlp_thresholds():
+    return _get_thresholds().nlp
+
+
+def _get_intent_threshold(intent: str) -> float:
+    catalog = _get_catalog()
+    if intent in catalog.intents:
+        threshold = float(catalog.intents[intent].threshold or 0.0)
+        if threshold > 0:
+            return threshold
+    catalog_default = float(catalog.default_threshold or 0.0)
+    if catalog_default > 0:
+        return catalog_default
+    return float(_get_nlp_thresholds().intent_threshold_default)
+
+
 def _get_vader():
-    """Lazy-init VADER sentiment analyzer."""
     global _vader_analyzer
     if _vader_analyzer is None:
         try:
             from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
             _vader_analyzer = SentimentIntensityAnalyzer()
             logger.info("[nlp_engine] VADER initialized")
         except ImportError:
-            logger.warning("[nlp_engine] vaderSentiment not installed, using fallback")
+            logger.warning("[nlp_engine] vaderSentiment unavailable; using fallback")
             _vader_analyzer = _FallbackVader()
     return _vader_analyzer
 
 
 def _get_spacy():
-    """Lazy-init spaCy pipeline."""
     global _spacy_nlp
     if _spacy_nlp is None:
         try:
             import spacy
+
             _spacy_nlp = spacy.load("en_core_web_sm")
             logger.info("[nlp_engine] spaCy en_core_web_sm loaded")
         except (ImportError, OSError):
-            logger.warning("[nlp_engine] spaCy model not available, NER disabled")
-            _spacy_nlp = False  # sentinel so we don't retry
+            logger.warning("[nlp_engine] spaCy unavailable; disabling NER")
+            _spacy_nlp = False
     return _spacy_nlp if _spacy_nlp is not False else None
 
 
 def _get_st_model():
-    """Lazy-init sentence-transformers model for zero-shot classification."""
     global _st_model
     if _st_model is None:
         try:
-            model_name = "BAAI/bge-small-en-v1.5"
+            model_name = os.getenv("EMBED_MODEL", _get_retrieval_config().embeddings.model_name)
             if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(model_name):
                 _st_model = False
                 return None
-
             from sentence_transformers import SentenceTransformer
+
             with _local_model_load(RAG_LOCAL_MODELS_ONLY):
                 _st_model = SentenceTransformer(model_name)
-            logger.info("[nlp_engine] sentence-transformers %s loaded", model_name)
-        except Exception as exc:  # noqa: BLE001 - degrade gracefully in restricted envs
-            logger.warning(
-                "[nlp_engine] sentence-transformers unavailable (%s), falling back to keyword matching",
-                exc,
-            )
+            logger.info("[nlp_engine] sentence-transformers loaded: %s", model_name)
+        except Exception as exc:
+            logger.warning("[nlp_engine] sentence-transformers unavailable (%s)", exc)
             _st_model = False
     return _st_model if _st_model is not False else None
 
 
 def _get_intent_embeddings() -> Optional[Dict[str, Any]]:
-    """Pre-compute prototype embeddings (cached after first call)."""
     global _intent_embeddings
     if _intent_embeddings is not None:
         return _intent_embeddings
     model = _get_st_model()
     if model is None:
         return None
+
+    prototypes = _get_intent_prototypes()
+    if not prototypes:
+        return None
+
     try:
         import numpy as np
 
-        _intent_embeddings = {}
-        for intent, phrases in _get_intent_prototypes().items():
-            vecs = model.encode(phrases, convert_to_numpy=True)
-            _intent_embeddings[intent] = np.mean(vecs, axis=0)
-        logger.info("[nlp_engine] Intent embeddings pre-computed for %d intents",
-                    len(_intent_embeddings))
+        embeddings: Dict[str, Any] = {}
+        for intent, phrases in prototypes.items():
+            if not phrases:
+                continue
+            vectors = model.encode(phrases, convert_to_numpy=True)
+            embeddings[intent] = np.mean(vectors, axis=0)
+        _intent_embeddings = embeddings or None
         return _intent_embeddings
-    except Exception as exc:  # noqa: BLE001 - degrade gracefully in restricted envs
-        logger.warning(
-            "[nlp_engine] could not precompute intent embeddings (%s); using keyword fallback",
-            exc,
-        )
+    except Exception as exc:
+        logger.warning("[nlp_engine] could not build intent embeddings (%s)", exc)
         _intent_embeddings = None
         return None
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Fallback VADER (when vaderSentiment is not installed)
-# ─────────────────────────────────────────────────────────────────────
-
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=64)
 def _encode_prototypes_cached(prototypes: Tuple[str, ...]):
-    """Encode prototype sentences once per process for semantic matching."""
     model = _get_st_model()
     if model is None:
         return None
+    if not prototypes:
+        return None
     try:
         return model.encode(list(prototypes), convert_to_numpy=True)
-    except Exception:  # noqa: BLE001 - degrade gracefully in restricted envs
+    except Exception:
         return None
 
 
 def _max_semantic_similarity(text: str, prototypes: Tuple[str, ...]) -> float:
-    """Return max cosine similarity of text to a prototype set."""
     if not text or not prototypes:
         return 0.0
     model = _get_st_model()
     if model is None:
         return 0.0
-    proto_vecs = _encode_prototypes_cached(prototypes)
-    if proto_vecs is None:
+    prototype_vectors = _encode_prototypes_cached(prototypes)
+    if prototype_vectors is None:
         return 0.0
+
     try:
         import numpy as np
 
-        text_vec = model.encode([text], convert_to_numpy=True)[0]
-        denom = (np.linalg.norm(proto_vecs, axis=1) * np.linalg.norm(text_vec) + 1e-8)
-        sims = np.dot(proto_vecs, text_vec) / denom
+        text_vector = model.encode([text], convert_to_numpy=True)[0]
+        denom = (np.linalg.norm(prototype_vectors, axis=1) * np.linalg.norm(text_vector)) + 1e-8
+        sims = np.dot(prototype_vectors, text_vector) / denom
         return float(np.max(sims))
-    except Exception:  # noqa: BLE001 - degrade gracefully in restricted envs
+    except Exception:
         return 0.0
 
 
+@lru_cache(maxsize=16)
+def _name_full_pattern(max_chars: int):
+    return re.compile(rf"^([A-Za-z][A-Za-z .'-]{{1,{max_chars}}})$", re.I)
+
+
 class _FallbackVader:
-    """Minimal polarity scorer used when vaderSentiment is not installed."""
+    @property
+    def _pos(self):
+        return set(_get_catalog().vader_fallback.get("positive", []))
 
     @property
-    def _POS(self):
-        cat = _get_catalog()
-        return set(cat.vader_fallback.get("positive", []))
-    @property
-    def _NEG(self):
-        cat = _get_catalog()
-        return set(cat.vader_fallback.get("negative", []))
+    def _neg(self):
+        return set(_get_catalog().vader_fallback.get("negative", []))
 
     def polarity_scores(self, text: str) -> Dict[str, float]:
         tokens = re.findall(r"[a-z']+", text.lower())
-        pos = sum(1 for t in tokens if t in self._POS)
-        neg = sum(1 for t in tokens if t in self._NEG)
+        pos = sum(1 for token in tokens if token in self._pos)
+        neg = sum(1 for token in tokens if token in self._neg)
         total = max(pos + neg, 1)
+        token_count = max(len(tokens), 1)
         compound = (pos - neg) / total
-        return {"pos": pos / total, "neg": neg / total,
-                "neu": 1.0 - (pos + neg) / max(len(tokens), 1),
-                "compound": compound}
+        return {
+            "pos": pos / total,
+            "neg": neg / total,
+            "neu": 1.0 - (pos + neg) / token_count,
+            "compound": compound,
+        }
 
-
-# ─────────────────────────────────────────────────────────────────────
-# Core NLP Functions (sync — wrap with asyncio.to_thread for async)
-# ─────────────────────────────────────────────────────────────────────
 
 def classify_affirmation(text: str) -> str:
-    """Classify text as 'yes', 'no', or 'neutral' using VADER + lexicon.
-
-    Returns
-    -------
-    'yes' | 'no' | 'neutral'
-    """
     if not text or not text.strip():
         return "neutral"
 
-    tl = text.strip().lower()
+    thresholds = _get_nlp_thresholds()
+    normalized = text.strip().lower()
 
-    # Semantic-first classification for extended confirmations.
-    yes_sim = _max_semantic_similarity(tl, _get_affirm_yes_prototypes())
-    no_sim = _max_semantic_similarity(tl, _get_affirm_no_prototypes())
-    if yes_sim >= 0.65 and yes_sim >= (no_sim + 0.04):
+    yes_similarity = _max_semantic_similarity(normalized, _get_affirm_yes_prototypes())
+    no_similarity = _max_semantic_similarity(normalized, _get_affirm_no_prototypes())
+
+    if (
+        yes_similarity >= thresholds.affirmation_semantic_threshold
+        and yes_similarity >= (no_similarity + thresholds.affirmation_margin)
+    ):
         return "yes"
-    if no_sim >= 0.65 and no_sim >= (yes_sim + 0.04):
+    if (
+        no_similarity >= thresholds.affirmation_semantic_threshold
+        and no_similarity >= (yes_similarity + thresholds.affirmation_margin)
+    ):
         return "no"
 
-    # Minimal lexical fallback for explicit confirmations.
-    vocab = _get_vocab()
-    if tl in set(vocab.affirm_yes_tokens):
+    vocabulary = _get_vocab()
+    if normalized in set(vocabulary.affirm_yes_tokens):
         return "yes"
-    if tl in set(vocab.affirm_no_tokens):
+    if normalized in set(vocabulary.affirm_no_tokens):
         return "no"
 
-    # VADER compound score
-    vader = _get_vader()
-    scores = vader.polarity_scores(tl)
-    compound = scores["compound"]
-
-    # Polarity fallback for short-to-medium confirmation utterances.
-    token_len = len(tl.split())
-    if compound >= 0.28 and token_len <= 10:
+    compound = _get_vader().polarity_scores(normalized).get("compound", 0.0)
+    token_len = len(normalized.split())
+    if compound >= thresholds.affirmation_compound_positive and token_len <= thresholds.affirmation_max_tokens:
         return "yes"
-    if compound <= -0.28 and token_len <= 10:
+    if compound <= thresholds.affirmation_compound_negative and token_len <= thresholds.affirmation_max_tokens:
         return "no"
 
     return "neutral"
 
 
 def is_greeting(text: str) -> bool:
-    """Detect conversational greetings dynamically."""
     if not text or not text.strip():
         return False
 
-    tl = text.strip().lower()
+    normalized = text.strip().lower()
     if is_acknowledgment(text):
         return False
-    
-    tokens = tl.split()
 
-    # Short utterance check (greetings are usually 1-4 words)
-    if len(tokens) > 6:
+    tokens = normalized.split()
+    if len(tokens) > _get_nlp_thresholds().affirmation_max_tokens:
         return False
 
-    vocab = _get_vocab()
-    if tokens[0] in set(vocab.greeting_seeds):
+    vocabulary = _get_vocab()
+    if tokens and tokens[0] in set(vocabulary.greeting_seeds):
         return True
-    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in vocab.greeting_phrases):
+    if any(re.search(r"\b" + re.escape(phrase) + r"\b", normalized) for phrase in vocabulary.greeting_phrases):
         return True
 
-    # Semantic classification fallback
-    all_intents = list(_get_catalog().intents.keys())
-    intent = classify_intent_sync(tl, all_intents)
-    if intent != "greeting":
+    intents = list(_get_catalog().intents.keys())
+    if not intents:
         return False
-    threshold = _get_catalog().intents["greeting"].threshold if "greeting" in _get_catalog().intents else 0.60
-    return _semantic_confidence(tl, "greeting") >= threshold
+    if classify_intent_sync(normalized, intents) != "greeting":
+        return False
+
+    return _semantic_confidence(normalized, "greeting") >= _get_intent_threshold("greeting")
 
 
 def is_acknowledgment(text: str) -> bool:
-    """Detect conversational acknowledgment (ok, sounds good, got it, etc.)."""
     if not text or not text.strip():
         return False
-    tl = text.strip().lower()
-    vocab = _get_vocab()
-    if tl in set(vocab.acknowledgment_tokens):
+
+    normalized = text.strip().lower()
+    vocabulary = _get_vocab()
+    if normalized in set(vocabulary.acknowledgment_tokens):
         return True
-    return any(p in tl for p in vocab.acknowledgment_phrases)
+    return any(phrase in normalized for phrase in vocabulary.acknowledgment_phrases)
 
 
 def is_handoff_request(text: str) -> bool:
-    """Detect request to speak with a human agent."""
     if not text:
         return False
-    tl = text.strip().lower()
-    vocab = _get_vocab()
-    if any(s in tl for s in vocab.handoff_seeds):
+
+    normalized = text.strip().lower()
+    vocabulary = _get_vocab()
+    if any(seed in normalized for seed in vocabulary.handoff_seeds):
         return True
-    return any(p in tl for p in vocab.handoff_phrases)
+    return any(phrase in normalized for phrase in vocabulary.handoff_phrases)
 
 
 def is_availability_query(text: str) -> bool:
-    """Detect questions about date availability."""
     if not text:
         return False
-    tl = text.strip().lower()
-    return any(p in tl for p in _get_vocab().availability_phrases)
+    normalized = text.strip().lower()
+    return any(phrase in normalized for phrase in _get_vocab().availability_phrases)
 
 
 def is_end_request(text: str) -> bool:
-    """Detect conversation end requests."""
     if not text:
         return False
-    tl = text.strip().lower()
-    vocab = _get_vocab()
-    if tl in set(vocab.end_exact):
+
+    normalized = text.strip().lower()
+    vocabulary = _get_vocab()
+    if normalized in set(vocabulary.end_exact):
         return True
-    return any(p in tl for p in vocab.end_phrases)
+    return any(phrase in normalized for phrase in vocabulary.end_phrases)
 
 
 def is_status_query(text: str) -> bool:
-    """Detect booking status or check-in/out inquiries."""
     if not text:
         return False
-    tl = text.strip().lower()
 
-    # UUID presence is a strong signal
-    if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", tl):
+    normalized = text.strip().lower()
+    if UUID_PATTERN.search(normalized):
         return True
 
-    # Semantic classification
-    all_intents = list(_get_catalog().intents.keys())
-    intent = classify_intent_sync(tl, all_intents)
-    if intent == "status_update":
-        threshold = _get_catalog().intents["status_update"].threshold if "status_update" in _get_catalog().intents else 0.55
-        conf = _semantic_confidence(tl, "status_update")
-        if conf >= threshold:
+    intents = list(_get_catalog().intents.keys())
+    if intents and classify_intent_sync(normalized, intents) == "status_update":
+        confidence = _semantic_confidence(normalized, "status_update")
+        if confidence >= _get_intent_threshold("status_update"):
             return True
 
-    # Keyword fallback
-    return any(s in tl for s in _get_vocab().status_seeds)
+    return any(seed in normalized for seed in _get_vocab().status_seeds)
 
 
 def is_property_search(text: str) -> bool:
-    """Detect property search intent, excluding status queries."""
     if not text:
         return False
-    tl = text.strip().lower()
 
-    # Exclude status queries
+    normalized = text.strip().lower()
     if is_status_query(text):
         return False
 
-    # Exclude booking ID mentions
-    vocab = _get_vocab()
-    booking_id_markers = list(vocab.status_booking_id_markers)
-    if any(x in tl for x in booking_id_markers):
+    vocabulary = _get_vocab()
+    if any(marker in normalized for marker in vocabulary.status_booking_id_markers):
         return False
-    if re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", tl):
+    if UUID_PATTERN.search(normalized):
         return False
 
-    # Semantic classification
-    all_intents = list(_get_catalog().intents.keys())
-    intent = classify_intent_sync(tl, all_intents)
-    if intent == "property_search":
-        threshold = _get_catalog().intents["property_search"].threshold if "property_search" in _get_catalog().intents else 0.50
-        conf = _semantic_confidence(tl, "property_search")
-        if conf >= threshold:
+    intents = list(_get_catalog().intents.keys())
+    if intents and classify_intent_sync(normalized, intents) == "property_search":
+        confidence = _semantic_confidence(normalized, "property_search")
+        if confidence >= _get_intent_threshold("property_search"):
             return True
 
-    # Keyword + NER fallback (V2: vocabulary provided by dynamic_config/dataset_loader)
-    KNOWN_CITIES: set = set()
-    CITY_ALIASES: dict = {}
-    PROPERTY_TYPES: list = []
+    vocab_cfg = _get_vocabulary()
+    property_types = set(vocab_cfg.seed_property_types)
+    known_cities = set(vocab_cfg.fallback_cities)
+    city_aliases = set(vocab_cfg.city_aliases.keys()) | set(vocab_cfg.city_aliases.values())
 
-    money_pat = None
-    if vocab.money_intent_pattern:
+    money_pattern = None
+    if vocabulary.money_intent_pattern:
         try:
-            money_pat = re.compile(vocab.money_intent_pattern, re.I)
+            money_pattern = re.compile(vocabulary.money_intent_pattern, re.I)
         except re.error:
-            money_pat = None
+            money_pattern = None
 
-    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in PROPERTY_TYPES):
+    if any(re.search(r"\b" + re.escape(item) + r"\b", normalized) for item in property_types):
         return True
-    if any(re.search(r'\b' + re.escape(c) + r'\b', tl) for c in KNOWN_CITIES):
+    if any(re.search(r"\b" + re.escape(item) + r"\b", normalized) for item in known_cities):
         return True
-    if any(re.search(r'\b' + re.escape(a) + r'\b', tl) for a in CITY_ALIASES):
+    if any(re.search(r"\b" + re.escape(item) + r"\b", normalized) for item in city_aliases):
         return True
-    if money_pat and money_pat.search(tl):
+    if money_pattern and money_pattern.search(normalized):
         return True
-    if any(re.search(r'\b' + re.escape(w) + r'\b', tl) for w in vocab.search_signals):
+    if any(re.search(r"\b" + re.escape(item) + r"\b", normalized) for item in vocabulary.search_signals):
         return True
-    if any(re.search(r'\b' + re.escape(p) + r'\b', tl) for p in vocab.search_phrases):
+    if any(re.search(r"\b" + re.escape(item) + r"\b", normalized) for item in vocabulary.search_phrases):
         return True
 
     return False
 
 
 def wants_modification(text: str) -> bool:
-    """Detect intent to modify booking details."""
     if not text or not text.strip():
         return False
-    tl = text.strip().lower()
-    if _max_semantic_similarity(tl, _get_modification_prototypes()) >= 0.70:
+
+    normalized = text.strip().lower()
+    threshold = _get_nlp_thresholds().modification_semantic_threshold
+    if _max_semantic_similarity(normalized, _get_modification_prototypes()) >= threshold:
         return True
 
-    # Keyword fallback when semantic model is unavailable or uncertain.
-    return any(w in tl for w in _get_vocab().modification_seeds)
+    return any(seed in normalized for seed in _get_vocab().modification_seeds)
 
 
 def wants_property_search_request(text: str) -> bool:
-    """Detect intent to search for different/more properties."""
     if not text or not text.strip():
         return False
-    tl = text.strip().lower()
-    if _max_semantic_similarity(tl, _get_property_search_request_prototypes()) >= 0.70:
+
+    normalized = text.strip().lower()
+    threshold = _get_nlp_thresholds().property_search_request_semantic_threshold
+    if _max_semantic_similarity(normalized, _get_property_search_request_prototypes()) >= threshold:
         return True
 
-    # Keyword fallback when semantic model is unavailable or uncertain.
-    return any(p in tl for p in _get_vocab().property_search_request_seeds)
+    return any(seed in normalized for seed in _get_vocab().property_search_request_seeds)
 
 
 def is_receipt_request(text: str) -> bool:
-    """Detect requests to view booking total/receipt."""
     if not text or not text.strip():
         return False
-    tl = text.strip().lower()
-    if _max_semantic_similarity(tl, _get_receipt_request_prototypes()) >= 0.65:
+
+    normalized = text.strip().lower()
+    threshold = _get_nlp_thresholds().receipt_semantic_threshold
+    if _max_semantic_similarity(normalized, _get_receipt_request_prototypes()) >= threshold:
         return True
-    
-    # Keyword fallback when semantic model is unavailable or uncertain.
-    vocab = _get_vocab()
-    if any(seed in tl for seed in vocab.receipt_seeds):
+
+    vocabulary = _get_vocab()
+    if any(seed in normalized for seed in vocabulary.receipt_seeds):
         return True
-    if any(p in tl for p in vocab.receipt_phrases):
+    if any(phrase in normalized for phrase in vocabulary.receipt_phrases):
         return True
     return (
-        any(q in tl for q in vocab.receipt_quantity_terms)
-        and any(term in tl for term in vocab.receipt_amount_terms)
+        any(term in normalized for term in vocabulary.receipt_quantity_terms)
+        and any(term in normalized for term in vocabulary.receipt_amount_terms)
     )
 
 
 def is_resume_request(text: str) -> bool:
-    """Detect whether user wants to resume/continue the previous flow."""
     if not text or not text.strip():
         return False
-    tl = text.strip().lower()
-    if _max_semantic_similarity(tl, _get_resume_request_prototypes()) >= 0.65:
+
+    normalized = text.strip().lower()
+    threshold = _get_nlp_thresholds().resume_semantic_threshold
+    if _max_semantic_similarity(normalized, _get_resume_request_prototypes()) >= threshold:
         return True
-    
-    # Keyword fallback when semantic model is unavailable or uncertain.
-    if tl in set(_get_vocab().resume_exact_phrases):
+
+    vocabulary = _get_vocab()
+    if normalized in set(vocabulary.resume_exact_phrases):
         return True
-    return any(p in tl for p in _get_vocab().resume_phrases)
+    return any(phrase in normalized for phrase in vocabulary.resume_phrases)
 
 
 def wants_previous_results_sync(text: str) -> bool:
-    """Semantic detection: does user want to return to previous search results?"""
     if not text or not text.strip():
         return False
-    
-    model = _get_st_model()
-    if model is None:
-        # Fallback keyword logic
-        tl = text.lower()
-        _prev_cfg = _get_catalog().previous_results_prototypes
-        return any(p in tl for p in _prev_cfg.fallback_keywords)
 
-    import numpy as np
-    _prev_cfg = _get_catalog().previous_results_prototypes
-    prototypes = _prev_cfg.prototypes
-    
-    text_vec = model.encode([text], convert_to_numpy=True)[0]
-    proto_vecs = model.encode(prototypes, convert_to_numpy=True)
-    
-    # Compute similarity against all prototypes
-    scores = np.dot(proto_vecs, text_vec) / (np.linalg.norm(proto_vecs, axis=1) * np.linalg.norm(text_vec) + 1e-8)
-    threshold = _get_catalog().previous_results_prototypes.threshold
-    return float(np.max(scores)) > threshold
+    previous_cfg = _get_catalog().previous_results_prototypes
+    model = _get_st_model()
+    if model is None or not previous_cfg.prototypes:
+        normalized = text.lower()
+        return any(keyword in normalized for keyword in previous_cfg.fallback_keywords)
+
+    try:
+        import numpy as np
+
+        text_vec = model.encode([text], convert_to_numpy=True)[0]
+        prototype_vectors = model.encode(previous_cfg.prototypes, convert_to_numpy=True)
+        sims = np.dot(prototype_vectors, text_vec) / (
+            (np.linalg.norm(prototype_vectors, axis=1) * np.linalg.norm(text_vec)) + 1e-8
+        )
+        configured = float(previous_cfg.threshold or 0.0)
+        threshold = configured if configured > 0 else _get_nlp_thresholds().previous_results_semantic_threshold
+        return float(np.max(sims)) >= threshold
+    except Exception:
+        normalized = text.lower()
+        return any(keyword in normalized for keyword in previous_cfg.fallback_keywords)
 
 
 def detect_faq_intent(text: str) -> bool:
-    """Detect FAQ/policy questions using semantic classification."""
     if not text or not text.strip():
         return False
-    tl = text.strip().lower()
 
-    # Semantic classification
-    all_intents = list(_get_catalog().intents.keys())
-    intent = classify_intent_sync(tl, all_intents)
-    if intent == "faq":
-        threshold = _get_catalog().intents["faq"].threshold if "faq" in _get_catalog().intents else 0.50
-        conf = _semantic_confidence(tl, "faq")
-        if conf >= threshold:
+    normalized = text.strip().lower()
+    intents = list(_get_catalog().intents.keys())
+    if intents and classify_intent_sync(normalized, intents) == "faq":
+        if _semantic_confidence(normalized, "faq") >= _get_intent_threshold("faq"):
             return True
 
-    # Strong trigger keywords (policy/terms are always FAQ — regardless of booking context)
-    vocab = _get_vocab()
-    if any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in vocab.faq_strong_keywords):
+    vocabulary = _get_vocab()
+    if any(re.search(r"\b" + re.escape(keyword) + r"\b", normalized) for keyword in vocabulary.faq_strong_keywords):
         return True
 
-    # Broader keyword + question pattern check
-    has_faq_seed = any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in vocab.faq_seeds)
+    has_faq_seed = any(re.search(r"\b" + re.escape(seed) + r"\b", normalized) for seed in vocabulary.faq_seeds)
     has_question = (
-        "?" in tl
-        or any(tl.startswith(q) for q in vocab.faq_question_starts)
-        or any(cue in tl for cue in vocab.faq_question_cues)
+        "?" in normalized
+        or any(normalized.startswith(starter) for starter in vocabulary.faq_question_starts)
+        or any(cue in normalized for cue in vocabulary.faq_question_cues)
     )
     return has_faq_seed and has_question
 
 
-# ─────────────────────────────────────────────────────────────────────
-# NER Extraction (spaCy-based with fallback)
-# ─────────────────────────────────────────────────────────────────────
-
 def extract_person_name(text: str) -> Optional[str]:
-    """Extract person name via spaCy PERSON NER, with regex fallback."""
     if not text:
         return None
 
-    t_lower = text.lower().strip()
-    # Guard: skip if text looks like a search query
-    vocab = _get_vocab()
-    if any(term in t_lower for term in vocab.name_search_guards):
+    thresholds = _get_nlp_thresholds()
+    normalized = text.lower().strip()
+    vocabulary = _get_vocab()
+
+    if any(term in normalized for term in vocabulary.name_search_guards):
         return None
 
     nlp = _get_spacy()
     if nlp:
         doc = nlp(text)
-        for ent in doc.ents:
-            if ent.label_ == "PERSON":
-                name = ent.text.strip().rstrip('.').strip()
-                if len(name) >= 2:
-                    return name
+        for entity in doc.ents:
+            if entity.label_ == "PERSON":
+                candidate = entity.text.strip().rstrip(".").strip()
+                if len(candidate) >= thresholds.name_min_length:
+                    return candidate
 
-    # Regex fallback — STRICT to prevent capturing conversational sentences
-    # Guard: reject text that contains common conversational/functional words
-    words = set(re.findall(r"[a-z]+", t_lower))
-    _has_conversational = bool(words & set(vocab.name_conversational_guards))
+    words = set(re.findall(r"[a-z]+", normalized))
+    has_conversational_words = bool(words & set(vocabulary.name_conversational_guards))
 
-    # Explicit "my name is ..." / "I am ..." patterns — always safe
-    for pat_str in vocab.name_explicit_patterns:
-        m = re.search(pat_str, text, re.I)
-        if m:
-            cand = m.group(1).strip().rstrip('.').strip()
-            # Limit explicit captures to 1-3 meaningful words
-            if len(cand.split()) <= 3 and len(cand) >= 2 and not _looks_like_email_username(cand):
-                return cand
+    for pattern in vocabulary.name_explicit_patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            candidate = match.group(1).strip().rstrip(".").strip()
+            if (
+                len(candidate.split()) <= thresholds.name_max_words
+                and len(candidate) >= thresholds.name_min_length
+                and not _looks_like_email_username(candidate)
+            ):
+                return candidate
 
-    # Full-string fallback — ONLY if no conversational words detected
-    # and text is very short (1-3 words, looks like a raw name)
-    if not _has_conversational:
+    if not has_conversational_words:
         stripped = text.strip()
         word_count = len(stripped.split())
-        if 1 <= word_count <= 3:
-            _NAME_FULL_PAT = re.compile(r"^([A-Za-z][A-Za-z .'-]{1,60})$", re.I)
-            m = _NAME_FULL_PAT.match(stripped)
-            if m:
-                cand = m.group(1).strip().rstrip('.').strip()
-                if len(cand) >= 2 and not _looks_like_email_username(cand):
-                    return cand
+        pattern = _name_full_pattern(thresholds.name_pattern_max_chars)
+        if 1 <= word_count <= thresholds.name_max_words:
+            match = pattern.match(stripped)
+            if match:
+                candidate = match.group(1).strip().rstrip(".").strip()
+                if len(candidate) >= thresholds.name_min_length and not _looks_like_email_username(candidate):
+                    return candidate
 
     return None
 
 
-def _looks_like_email_username(s: str) -> bool:
-    if not s:
+def _looks_like_email_username(value: str) -> bool:
+    if not value:
         return False
+
     common = set(_get_vocab().email_username_common)
-    return (len(s) <= 3 or s.lower() in common or
-            bool(re.search(r'\d', s)) or
-            bool(re.search(r"[^a-zA-Z\s\-.'']", s)))
+    return (
+        len(value) <= 3
+        or value.lower() in common
+        or bool(re.search(r"\d", value))
+        or bool(re.search(r"[^a-zA-Z\s\-.'']", value))
+    )
 
 
 def extract_dates(text: str) -> List[str]:
-    """Extract dates from text using spaCy DATE NER + regex fallback."""
-    results: List[str] = []
     if not text:
-        return results
+        return []
 
-    # Primary: ISO date regex (always reliable for YYYY-MM-DD)
-    iso_dates = re.findall(r"\b(\d{4}-\d{1,2}-\d{1,2})\b", text)
-    results.extend(iso_dates)
-
+    results = ISO_DATE_PATTERN.findall(text)
     if results:
         return results
 
-    # spaCy DATE entity extraction (for natural language dates)
     nlp = _get_spacy()
-    if nlp:
-        doc = nlp(text)
-        for ent in doc.ents:
-            if ent.label_ == "DATE":
-                results.append(ent.text)
+    if not nlp:
+        return []
 
-
-def wants_previous_results_sync(text: str) -> bool:
-    """Semantic detection: does user want to return to previous search results?"""
-    if not text or not text.strip():
-        return False
-    
-    model = _get_st_model()
-    if model is None:
-        # Fallback keyword logic
-        tl = text.lower()
-        _prev_cfg = _get_catalog().previous_results_prototypes
-        return any(p in tl for p in _prev_cfg.fallback_keywords)
-
-    import numpy as np
-    _prev_cfg = _get_catalog().previous_results_prototypes
-    prototypes = _prev_cfg.prototypes
-    
-    text_vec = model.encode([text], convert_to_numpy=True)[0]
-    proto_vecs = model.encode(prototypes, convert_to_numpy=True)
-    
-    # Compute similarity against all prototypes
-    scores = np.dot(proto_vecs, text_vec) / (np.linalg.norm(proto_vecs, axis=1) * np.linalg.norm(text_vec) + 1e-8)
-    threshold = _get_catalog().previous_results_prototypes.threshold
-    return float(np.max(scores)) > threshold
-
-
-def detect_faq_intent(text: str) -> bool:
-    """Detect FAQ/policy questions using semantic classification."""
-    if not text or not text.strip():
-        return False
-    tl = text.strip().lower()
-
-    # Semantic classification
-    all_intents = list(_get_catalog().intents.keys())
-    intent = classify_intent_sync(tl, all_intents)
-    if intent == "faq":
-        threshold = _get_catalog().intents["faq"].threshold if "faq" in _get_catalog().intents else 0.50
-        conf = _semantic_confidence(tl, "faq")
-        if conf >= threshold:
-            return True
-
-    # Strong trigger keywords (policy/terms are always FAQ — regardless of booking context)
-    vocab = _get_vocab()
-    if any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in vocab.faq_strong_keywords):
-        return True
-
-    # Broader keyword + question pattern check
-    has_faq_seed = any(re.search(r'\b' + re.escape(s) + r'\b', tl) for s in vocab.faq_seeds)
-    has_question = (
-        "?" in tl
-        or any(tl.startswith(q) for q in vocab.faq_question_starts)
-        or any(cue in tl for cue in vocab.faq_question_cues)
-    )
-    return has_faq_seed and has_question
-
-
-# ─────────────────────────────────────────────────────────────────────
-# NER Extraction (spaCy-based with fallback)
-# ─────────────────────────────────────────────────────────────────────
-
-def extract_person_name(text: str) -> Optional[str]:
-    """Extract person name via spaCy PERSON NER, with regex fallback."""
-    if not text:
-        return None
-
-    t_lower = text.lower().strip()
-    # Guard: skip if text looks like a search query
-    vocab = _get_vocab()
-    if any(term in t_lower for term in vocab.name_search_guards):
-        return None
-
-    nlp = _get_spacy()
-    if nlp:
-        doc = nlp(text)
-        for ent in doc.ents:
-            if ent.label_ == "PERSON":
-                name = ent.text.strip().rstrip('.').strip()
-                if len(name) >= 2:
-                    return name
-
-    # Regex fallback — STRICT to prevent capturing conversational sentences
-    # Guard: reject text that contains common conversational/functional words
-    words = set(re.findall(r"[a-z]+", t_lower))
-    _has_conversational = bool(words & set(vocab.name_conversational_guards))
-
-    # Explicit "my name is ..." / "I am ..." patterns — always safe
-    for pat_str in vocab.name_explicit_patterns:
-        m = re.search(pat_str, text, re.I)
-        if m:
-            cand = m.group(1).strip().rstrip('.').strip()
-            # Limit explicit captures to 1-3 meaningful words
-            if len(cand.split()) <= 3 and len(cand) >= 2 and not _looks_like_email_username(cand):
-                return cand
-
-    # Full-string fallback — ONLY if no conversational words detected
-    # and text is very short (1-3 words, looks like a raw name)
-    if not _has_conversational:
-        stripped = text.strip()
-        word_count = len(stripped.split())
-        if 1 <= word_count <= 3:
-            _NAME_FULL_PAT = re.compile(r"^([A-Za-z][A-Za-z .'-]{1,60})$", re.I)
-            m = _NAME_FULL_PAT.match(stripped)
-            if m:
-                cand = m.group(1).strip().rstrip('.').strip()
-                if len(cand) >= 2 and not _looks_like_email_username(cand):
-                    return cand
-
-    return None
-
-
-def _looks_like_email_username(s: str) -> bool:
-    if not s:
-        return False
-    common = set(_get_vocab().email_username_common)
-    return (len(s) <= 3 or s.lower() in common or
-            bool(re.search(r'\d', s)) or
-            bool(re.search(r"[^a-zA-Z\s\-.'']", s)))
-
-
-def extract_dates(text: str) -> List[str]:
-    """Extract dates from text using spaCy DATE NER + regex fallback."""
-    results: List[str] = []
-    if not text:
-        return results
-
-    # Primary: ISO date regex (always reliable for YYYY-MM-DD)
-    iso_dates = re.findall(r"\b(\d{4}-\d{1,2}-\d{1,2})\b", text)
-    results.extend(iso_dates)
-
-    if results:
-        return results
-
-    # spaCy DATE entity extraction (for natural language dates)
-    nlp = _get_spacy()
-    if nlp:
-        doc = nlp(text)
-        for ent in doc.ents:
-            if ent.label_ == "DATE":
-                results.append(ent.text)
-
-    return results
-
-
-def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Use LLM structured output to classify intent with minimal hardcoded rules."""
-    if not (OPENAI_API_KEY and LLM_STRUCTURED and SOFT_INTENT_ROUTER):
-        return None
-
-    text = (user_text or "").strip()
-    if not text:
-        return None
-
-    active_filters = filters or {}
-    
-    # 1. Build the dynamic system prompt
-    system_prompt = (
-        "You are an intent classifier for a hotel booking chatbot. "
-        "Classify the user's message into ONE intent. Return strict JSON: {intent, confidence, brief_reason}. "
-        "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
-        "status_update, payment_link, handoff, availability, end.\n\n"
-        "CRITICAL RULES:\n"
-        "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, etc. A policy question always overrides booking context.\n"
-        "- 'confirmation' = user is selecting a numbered option, providing booking details, or affirming/declining a step.\n"
-        "- 'property_search' = user is looking for a place or asking about properties.\n"
-        "- 'greeting' = ONLY pure greetings with NO other intent.\n"
-    )
-
-    # 2. INJECT STATE DIRECTLY INTO SYSTEM PROMPT (The Super Soft-Coded Fix)
-    has_last_results = bool(active_filters.get("last_results"))
-    if has_last_results:
-        count = len(active_filters.get("last_results") or [])
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You just showed the user a numbered list of {count} properties. If their message is a number (e.g. '1', '{count}'), an ordinal, or a selection phrase like 'option 7', they are making a selection. You MUST classify this intent strictly as 'confirmation'. Do NOT classify as property_search."
-
-    if active_filters.get("awaiting_field"):
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get('awaiting_field')}'. Treat their input as a 'confirmation' of this data."
-
-    try:
-        valid_types = get_vocabulary().seed_property_types
-        if valid_types:
-            system_prompt += f"\n\nValid property types in our database: {', '.join(valid_types)}."
-    except Exception:
-        pass
-
-    # 3. Send ONLY the user text, no confusing JSON context block
-    payload: Dict[str, Any] = {
-        "model": OPENAI_CHAT_MODEL,
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text}, 
-        ],
-    }
-
-    try:
-        with httpx.Client(timeout=8.0) as client:
-            r = client.post("https://api.openai.com/v1/chat/completions", headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            }, json=payload)
-        if r.status_code != 200:
-            return None
-        body = r.json()
-        content = (((body or {}).get("choices") or [{}])[0] or {}).get("message", {}).get("content", "")
-        if not content:
-            return None
-        parsed = json.loads(content)
-        intent = str(parsed.get("intent", "")).strip()
-        confidence = float(parsed.get("confidence", 0.0) or 0.0)
-        if intent in _ALLOWED_INTENTS and confidence >= 0.45:
-            return intent
-    except Exception:
-        return None
-    return None
-
-
-def _llm_route_intent(user_text: str, filters: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Use LLM structured output to classify intent with minimal hardcoded rules."""
-    if not (OPENAI_API_KEY and LLM_STRUCTURED and SOFT_INTENT_ROUTER):
-        return None
-
-    text = (user_text or "").strip()
-    if not text:
-        return None
-
-    active_filters = filters or {}
-    
-    # 1. Build the dynamic system prompt
-    system_prompt = (
-        "You are an intent classifier for a hotel booking chatbot. "
-        "Classify the user's message into ONE intent. Return strict JSON: {intent, confidence, brief_reason}. "
-        "Intent must be one of: greeting, faq, confirmation, property_search, booking, "
-        "status_update, payment_link, handoff, availability, end.\n\n"
-        "CRITICAL RULES:\n"
-        "- 'faq' = user is asking about rules, policy, refund, cancellation, pets, etc. A policy question always overrides booking context.\n"
-        "- 'confirmation' = user is selecting a numbered option, providing booking details, or affirming/declining a step.\n"
-        "- 'property_search' = user is looking for a place or asking about properties.\n"
-        "- 'greeting' = ONLY pure greetings with NO other intent.\n"
-    )
-
-    # 2. INJECT STATE DIRECTLY INTO SYSTEM PROMPT (The Super Soft-Coded Fix)
-    has_last_results = bool(active_filters.get("last_results"))
-    if has_last_results:
-        count = len(active_filters.get("last_results") or [])
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You just showed the user a numbered list of {count} properties. If their message is a number (e.g. '1', '{count}'), an ordinal, or a selection phrase like 'option 7', they are making a selection. You MUST classify this intent strictly as 'confirmation'. Do NOT classify as property_search."
-
-    if active_filters.get("awaiting_field"):
-        system_prompt += f"\n[CRITICAL STATE OVERRIDE]: You are currently awaiting the user to provide their '{active_filters.get('awaiting_field')}'. Treat their input as a 'confirmation' of this data."
-
-    try:
-        valid_types = get_vocabulary().seed_property_types
-        if valid_types:
-            system_prompt += f"\n\nValid property types in our database: {', '.join(valid_types)}."
-    except Exception:
-        pass
-
-    # 3. Send ONLY the user text, no confusing JSON context block
-    payload: Dict[str, Any] = {
-        "model": OPENAI_CHAT_MODEL,
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text}, 
-        ],
-    }
-
-    try:
-        with httpx.Client(timeout=8.0) as client:
-            r = client.post("https://api.openai.com/v1/chat/completions", headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            }, json=payload)
-        if r.status_code != 200:
-            return None
-        body = r.json()
-        content = (((body or {}).get("choices") or [{}])[0] or {}).get("message", {}).get("content", "")
-        if not content:
-            return None
-        parsed = json.loads(content)
-        intent = str(parsed.get("intent", "")).strip()
-        confidence = float(parsed.get("confidence", 0.0) or 0.0)
-        if intent in _ALLOWED_INTENTS and confidence >= 0.45:
-            return intent
-    except Exception:
-        return None
-    return None
+    output: List[str] = []
+    doc = nlp(text)
+    for entity in doc.ents:
+        if entity.label_ == "DATE":
+            output.append(entity.text)
+    return output
 
 
 def extract_cardinal(text: str) -> Optional[int]:
-    """V2 Soft-Coded: Use the LLM's semantic reasoning to extract the selection index."""
-    if not text:
-        return None
-    tl = text.strip().lower()
-
-    # 1. Native Digit Check (Keep this ONLY for 0ms latency when the user types '9')
-    if tl.isdigit():
-        val = int(tl)
-        return val if val >= 1 else None
-
-    # 2. V2 True Semantic Extraction (Self-Determination)
-    import httpx
-    import os
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if not text or not text.strip():
         return None
 
-    # We ask the LLM to figure out the math/language logic dynamically
-    system_prompt = (
-        "You are an extraction tool. The user is selecting an option from a numbered list. "
-        "Extract the number they are choosing based on their language. "
-        "Return ONLY the raw integer (e.g., '9'). If no selection is detected, return '0'."
-    )
+    normalized = text.strip().lower()
+    if normalized.isdigit():
+        value = int(normalized)
+        return value if value >= 1 else None
 
-    try:
-        payload = {
-            "model": "gpt-5-nano",
-            "temperature": 0,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text},
-            ],
-        }
+    vocabulary = _get_vocab()
 
-        with httpx.Client(timeout=4.0) as client:
-            r = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json=payload,
-            )
+    for pattern in vocabulary.selection_patterns:
+        try:
+            match = re.search(pattern, normalized, re.I)
+        except re.error:
+            continue
+        if not match:
+            continue
+        raw = next((group for group in match.groups() if group), "")
+        if raw.isdigit():
+            value = int(raw)
+            if value >= 1:
+                return value
 
-        if r.status_code == 200:
-            content = r.json()["choices"][0]["message"]["content"].strip()
-            if content.isdigit() and int(content) >= 1:
-                return int(content)
-    except Exception:
-        pass
+    for token, value in vocabulary.selection_ordinals.items():
+        if re.search(r"\b" + re.escape(str(token)) + r"\b", normalized):
+            if value >= 1:
+                return int(value)
+
+    for token, value in vocabulary.selection_cardinals.items():
+        if re.search(r"\b" + re.escape(str(token)) + r"\b", normalized):
+            if value >= 1:
+                return int(value)
+
+    if vocabulary.selection_cardinal_context_pattern and vocabulary.selection_cardinals:
+        alternatives = "|".join(re.escape(token) for token in vocabulary.selection_cardinals.keys())
+        context_pattern = vocabulary.selection_cardinal_context_pattern.replace("{cardinals}", alternatives)
+        try:
+            match = re.search(context_pattern, normalized, re.I)
+        except re.error:
+            match = None
+        if match:
+            candidate = match.group(1).strip().lower()
+            if candidate in vocabulary.selection_cardinals:
+                value = int(vocabulary.selection_cardinals[candidate])
+                if value >= 1:
+                    return value
+
+    nlp = _get_spacy()
+    if nlp and vocabulary.selection_entity_labels:
+        labels = set(vocabulary.selection_entity_labels)
+        doc = nlp(normalized)
+        for entity in doc.ents:
+            if entity.label_ not in labels:
+                continue
+            token = entity.text.strip().lower()
+            if token.isdigit() and int(token) >= 1:
+                return int(token)
+            if token in vocabulary.selection_ordinals and vocabulary.selection_ordinals[token] >= 1:
+                return int(vocabulary.selection_ordinals[token])
+            if token in vocabulary.selection_cardinals and vocabulary.selection_cardinals[token] >= 1:
+                return int(vocabulary.selection_cardinals[token])
 
     return None
 
+
 def has_cardinal_extraction(text: str) -> bool:
-    """Return True when the utterance contains a valid selection cardinal."""
     return extract_cardinal(text) is not None
 
 
 def is_low_semantic_density(text: str) -> bool:
-    """Treat cardinal-only replies as low-information until state gives them meaning."""
     if not text or not text.strip():
         return True
-    tl = text.strip().lower()
-    if has_cardinal_extraction(tl) and not re.search(r"[a-z]", tl):
+
+    normalized = text.strip().lower()
+    if has_cardinal_extraction(normalized) and not re.search(r"[a-z]", normalized):
         return True
     return False
 
 
 def extract_guests(text: str) -> Optional[int]:
-    """Extract guest count from text."""
     if not text:
         return None
-    tl = text.lower().strip()
-    units_alt = "|".join(re.escape(u) for u in _get_vocab().guest_unit_terms)
-    if units_alt:
-        m = re.search(rf"(\d{{1,3}})\s*(?:{units_alt})?\b", tl) or re.search(r"^(\d{1,3})$", tl)
+
+    normalized = text.lower().strip()
+    unit_terms = _get_vocab().guest_unit_terms
+    unit_pattern = "|".join(re.escape(unit) for unit in unit_terms)
+
+    if unit_pattern:
+        match = re.search(rf"(\d{{1,3}})\s*(?:{unit_pattern})?\b", normalized) or re.search(r"^(\d{1,3})$", normalized)
     else:
-        m = re.search(r"(\d{1,3})\b", tl) or re.search(r"^(\d{1,3})$", tl)
-    if m:
-        try:
-            n = int(m.group(1))
-            return n if 1 <= n <= 100 else None
-        except (ValueError, IndexError):
-            pass
-    return None
+        match = re.search(r"(\d{1,3})\b", normalized) or re.search(r"^(\d{1,3})$", normalized)
+
+    if not match:
+        return None
+
+    try:
+        value = int(match.group(1))
+    except (ValueError, IndexError):
+        return None
+
+    return value if 1 <= value <= 100 else None
 
 
 def extract_phone(text: str) -> Optional[str]:
-    """Extract phone number from text using regex."""
     if not text:
         return None
-    m = re.search(r"(\+?[\d\s\-]{8,15}\d)", text)
-    if m:
-        num = re.sub(r"[\s\-]", "", m.group(1))
-        # Reject if it looks like a date
-        if re.search(r"\d{4}-\d{1,2}-\d{1,2}", text):
-            return None
-        if re.match(r"^\d{8}$", num):
-            return None
-        return num
-    return None
+
+    match = re.search(r"(\+?[\d\s\-]{8,15}\d)", text)
+    if not match:
+        return None
+
+    normalized = re.sub(r"[\s\-]", "", match.group(1))
+    if ISO_DATE_PATTERN.search(text):
+        return None
+    if re.match(r"^\d{8}$", normalized):
+        return None
+    return normalized
 
 
 def extract_email(text: str) -> Optional[str]:
-    """Extract email address from text."""
     if not text:
         return None
-    m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
-    return m.group(0) if m else None
+
+    match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    return match.group(0) if match else None
 
 
 def extract_booking_id(text: str) -> Optional[str]:
-    """Extract UUID or hex booking ID from text."""
     if not text:
         return None
-    tl = text.lower()
-    uuid_m = re.search(
-        r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b", tl
-    )
-    if uuid_m:
-        return uuid_m.group(1)
-    short_m = re.search(r"\b([0-9a-f]{8})\b", tl)
-    if short_m:
-        return short_m.group(1)
+
+    normalized = text.lower()
+    match = UUID_PATTERN.search(normalized)
+    if match:
+        return match.group(0)
+
+    short_match = re.search(r"\b([0-9a-f]{8})\b", normalized)
+    if short_match:
+        return short_match.group(1)
+
     return None
 
 
 def detect_requested_fields(text: str) -> List[str]:
-    """Detect which booking fields the user wants to modify."""
     if not text:
         return []
     if is_low_semantic_density(text):
         return []
-    tl = text.lower()
+
+    normalized = text.lower()
     fields: List[str] = []
 
     model = _get_st_model()
     if model:
-        import numpy as np
-        text_emb = model.encode([tl], convert_to_numpy=True)[0]
-        for field, phrases in _get_field_prototypes().items():
-            field_embs = model.encode(phrases, convert_to_numpy=True)
-            mean_emb = np.mean(field_embs, axis=0)
-            sim = float(np.dot(text_emb, mean_emb) /
-                        (np.linalg.norm(text_emb) * np.linalg.norm(mean_emb) + 1e-8))
-            if sim > 0.50:
-                if field not in fields:
+        try:
+            import numpy as np
+
+            semantic_threshold = _get_nlp_thresholds().field_detection_semantic_threshold
+            text_embedding = model.encode([normalized], convert_to_numpy=True)[0]
+            for field, phrases in _get_field_prototypes().items():
+                if not phrases:
+                    continue
+                embeddings = model.encode(phrases, convert_to_numpy=True)
+                mean_embedding = np.mean(embeddings, axis=0)
+                similarity = float(
+                    np.dot(text_embedding, mean_embedding)
+                    / ((np.linalg.norm(text_embedding) * np.linalg.norm(mean_embedding)) + 1e-8)
+                )
+                if similarity >= semantic_threshold and field not in fields:
                     fields.append(field)
+        except Exception:
+            fields = []
 
     if fields:
         return fields
 
-    # Keyword fallback from config-driven field prototypes.
-    def _phrase_hit(phrase: str) -> bool:
-        p = (phrase or "").strip().lower()
-        if not p:
+    fillers = set(_get_vocab().phrase_fillers)
+
+    def phrase_hit(phrase: str) -> bool:
+        clean = (phrase or "").strip().lower()
+        if not clean:
             return False
-        if p in tl:
+        if clean in normalized:
             return True
-        # Soft lexical match: allow light filler words like "my".
-        filler = set(_get_vocab().phrase_fillers)
-        tokens = [t for t in re.findall(r"[a-z0-9_+-]+", p) if t not in filler]
-        return bool(tokens) and all(tok in tl for tok in tokens)
+        tokens = [token for token in re.findall(r"[a-z0-9_+-]+", clean) if token not in fillers]
+        return bool(tokens) and all(token in normalized for token in tokens)
 
     for field, phrases in _get_field_prototypes().items():
-        if any(_phrase_hit(p) for p in phrases) and field not in fields:
+        if any(phrase_hit(phrase) for phrase in phrases) and field not in fields:
             fields.append(field)
+
     return fields
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Semantic classification (sentence-transformers)
-# ─────────────────────────────────────────────────────────────────────
-
 def _semantic_confidence(text: str, intent: str) -> float:
-    """Return cosine similarity between text and a specific intent prototype."""
     model = _get_st_model()
     if model is None:
         return 0.0
-    embs = _get_intent_embeddings()
-    if embs is None or intent not in embs:
+
+    embeddings = _get_intent_embeddings()
+    if embeddings is None or intent not in embeddings:
         return 0.0
-    import numpy as np
-    text_vec = model.encode([text], convert_to_numpy=True)[0]
-    intent_vec = embs[intent]
-    sim = float(np.dot(text_vec, intent_vec) /
-                (np.linalg.norm(text_vec) * np.linalg.norm(intent_vec) + 1e-8))
-    return sim
+
+    try:
+        import numpy as np
+
+        text_vector = model.encode([text], convert_to_numpy=True)[0]
+        intent_vector = embeddings[intent]
+        similarity = float(
+            np.dot(text_vector, intent_vector)
+            / ((np.linalg.norm(text_vector) * np.linalg.norm(intent_vector)) + 1e-8)
+        )
+        return similarity
+    except Exception:
+        return 0.0
 
 
 def classify_intent_sync(text: str, candidates: List[str]) -> str:
-    """Classify text against candidate intents using sentence-transformers.
+    if not candidates:
+        return "other"
 
-    Falls back to keyword-based heuristics if sentence-transformers unavailable.
-    """
     model = _get_st_model()
-    if model is None:
+    embeddings = _get_intent_embeddings()
+    if model is None or embeddings is None:
         return _classify_intent_keyword_fallback(text, candidates)
 
-    embs = _get_intent_embeddings()
-    if embs is None:
+    try:
+        import numpy as np
+
+        text_vector = model.encode([text], convert_to_numpy=True)[0]
+        best_intent = candidates[-1]
+        best_score = -1.0
+
+        for intent in candidates:
+            if intent not in embeddings:
+                continue
+            similarity = float(
+                np.dot(text_vector, embeddings[intent])
+                / ((np.linalg.norm(text_vector) * np.linalg.norm(embeddings[intent])) + 1e-8)
+            )
+            if similarity > best_score:
+                best_score = similarity
+                best_intent = intent
+
+        return best_intent
+    except Exception:
         return _classify_intent_keyword_fallback(text, candidates)
-
-    import numpy as np
-    text_vec = model.encode([text], convert_to_numpy=True)[0]
-
-    best_intent = candidates[-1] if candidates else "other"
-    best_score = -1.0
-    for intent in candidates:
-        if intent not in embs:
-            continue
-        sim = float(np.dot(text_vec, embs[intent]) /
-                    (np.linalg.norm(text_vec) * np.linalg.norm(embs[intent]) + 1e-8))
-        if sim > best_score:
-            best_score = sim
-            best_intent = intent
-    return best_intent
 
 
 def _classify_intent_keyword_fallback(text: str, candidates: List[str]) -> str:
-    """Keyword-based intent classification fallback."""
-    tl = text.lower()
-    _KEYWORD_MAP = _get_catalog().keyword_fallback_map
-    best = candidates[-1] if candidates else "other"
+    normalized = text.lower()
+    keyword_map = _get_catalog().keyword_fallback_map
+
+    best_intent = candidates[-1] if candidates else "other"
     best_count = 0
+
     for intent in candidates:
-        kws = _KEYWORD_MAP.get(intent, [])
-        count = sum(1 for k in kws if k in tl)
+        keywords = keyword_map.get(intent, [])
+        count = sum(1 for keyword in keywords if keyword in normalized)
         if count > best_count:
             best_count = count
-            best = intent
-    return best
+            best_intent = intent
 
+    return best_intent
 
-# ─────────────────────────────────────────────────────────────────────
-# Async wrappers (for use in FastAPI handlers)
-# ─────────────────────────────────────────────────────────────────────
 
 def is_greeting_sync(text: str) -> bool:
-    """Sync alias for greeting detection (used by graph/session guards)."""
     return is_greeting(text)
+
 
 async def classify_affirmation_async(text: str) -> str:
     return await asyncio.to_thread(classify_affirmation, text)
 
+
 async def is_greeting_async(text: str) -> bool:
     return await asyncio.to_thread(is_greeting, text)
+
 
 async def extract_person_name_async(text: str) -> Optional[str]:
     return await asyncio.to_thread(extract_person_name, text)
 
+
 async def extract_dates_async(text: str) -> List[str]:
     return await asyncio.to_thread(extract_dates, text)
+
 
 async def extract_cardinal_async(text: str) -> Optional[int]:
     return await asyncio.to_thread(extract_cardinal, text)
@@ -1192,27 +908,34 @@ async def has_cardinal_extraction_async(text: str) -> bool:
 async def is_low_semantic_density_async(text: str) -> bool:
     return await asyncio.to_thread(is_low_semantic_density, text)
 
+
 async def classify_intent_async(text: str, candidates: List[str]) -> str:
     return await asyncio.to_thread(classify_intent_sync, text, candidates)
+
 
 async def detect_faq_intent_async(text: str) -> bool:
     return await asyncio.to_thread(detect_faq_intent, text)
 
+
 async def detect_requested_fields_async(text: str) -> List[str]:
     return await asyncio.to_thread(detect_requested_fields, text)
+
 
 async def is_property_search_async(text: str) -> bool:
     return await asyncio.to_thread(is_property_search, text)
 
+
 async def is_status_query_async(text: str) -> bool:
     return await asyncio.to_thread(is_status_query, text)
+
 
 async def is_receipt_request_async(text: str) -> bool:
     return await asyncio.to_thread(is_receipt_request, text)
 
+
 async def is_resume_request_async(text: str) -> bool:
     return await asyncio.to_thread(is_resume_request, text)
 
+
 async def wants_previous_results_async(text: str) -> bool:
     return await asyncio.to_thread(wants_previous_results_sync, text)
-

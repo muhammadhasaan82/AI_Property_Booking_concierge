@@ -1,4 +1,4 @@
-"""
+﻿"""
 Enhanced FAQ Service with PDF Processing and Vector Search
 Handles company policy questions using semantic search
 """
@@ -17,10 +17,8 @@ litellm.drop_params = True
 
 logger = logging.getLogger(__name__)
 
-# PDF Processing
 from PyPDF2 import PdfReader
 
-# LangChain imports
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -32,9 +30,8 @@ except Exception:  # noqa: BLE001 - package may not be installed in all envs
     except Exception:  # noqa: BLE001 - degrade with explicit runtime error in initializer
         HuggingFaceBgeEmbeddings = None  # type: ignore[assignment]
 
-# Load environment variables
 from dotenv import load_dotenv
-from ..services.dynamic_config import get_vocabulary
+from ..services.dynamic_config import get_retrieval_config, get_vocabulary
 
 env_path_root = Path(__file__).resolve().parents[2] / ".env"
 env_path_services = Path(__file__).parent / ".env"
@@ -47,10 +44,18 @@ elif env_path_services.exists():
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-5-nano")
 
-# Initialize ChromaDB path
-CHROMA_PATH = Path(__file__).resolve().parents[2] / "data" / "chroma_faq"
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+_RETRIEVAL_CFG = get_retrieval_config()
+_chroma_dir_value = os.getenv("FAQ_CHROMA_PATH", _RETRIEVAL_CFG.chroma.persist_dir)
+_chroma_dir_path = Path(_chroma_dir_value)
+if not _chroma_dir_path.is_absolute():
+    _chroma_dir_path = _BACKEND_ROOT / _chroma_dir_path
+
+CHROMA_PATH = _chroma_dir_path
 CHROMA_PATH.mkdir(parents=True, exist_ok=True)
-EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+EMBED_MODEL = os.getenv("EMBED_MODEL", _RETRIEVAL_CFG.embeddings.model_name)
+EMBED_NORMALIZE = bool(_RETRIEVAL_CFG.embeddings.normalize_embeddings)
+FAQ_COLLECTION_NAME = _RETRIEVAL_CFG.chroma.collection_name
 RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
 
 
@@ -137,9 +142,6 @@ class _SentenceTransformerEmbeddings:
         vector = self._model.encode(text, normalize_embeddings=self._normalize_embeddings)
         return self._as_list(vector)
 
-# ---------------------------------------------------------------------------
-# FAQService class — replaces global state with dependency injection
-# ---------------------------------------------------------------------------
 
 class FAQService:
     """
@@ -160,7 +162,6 @@ class FAQService:
     def is_healthy(self) -> bool:
         return self._healthy
 
-    # --- PDF ingestion ---
 
     @staticmethod
     def load_pdf_document(pdf_path: str) -> str:
@@ -179,6 +180,10 @@ class FAQService:
 
     @staticmethod
     def _detect_device() -> str:
+        configured = str(_RETRIEVAL_CFG.embeddings.device or "auto").strip().lower()
+        if configured in {"cpu", "cuda"}:
+            return configured
+
         device = "cpu"
         try:
             import torch  # type: ignore
@@ -191,9 +196,12 @@ class FAQService:
 
     @staticmethod
     def _build_documents_from_text(pdf_text: str) -> List[Document]:
+        chunk_cfg = _RETRIEVAL_CFG.chunking
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, chunk_overlap=200,
-            length_function=len, separators=["\n\n", "\n", ". ", " ", ""],
+            chunk_size=chunk_cfg.chunk_size,
+            chunk_overlap=chunk_cfg.chunk_overlap,
+            length_function=len,
+            separators=list(chunk_cfg.separators),
         )
         chunks = text_splitter.split_text(pdf_text)
         documents = []
@@ -229,7 +237,7 @@ class FAQService:
                     self._embeddings = HuggingFaceBgeEmbeddings(
                         model_name=EMBED_MODEL,
                         model_kwargs={"device": device},
-                        encode_kwargs={"normalize_embeddings": True},
+                        encode_kwargs={"normalize_embeddings": EMBED_NORMALIZE},
                     )
                 return self._embeddings
             except Exception as exc:  # noqa: BLE001 - fallback to direct sentence-transformers adapter
@@ -240,7 +248,7 @@ class FAQService:
             self._embeddings = _SentenceTransformerEmbeddings(
                 EMBED_MODEL,
                 device=device,
-                normalize_embeddings=True,
+                normalize_embeddings=EMBED_NORMALIZE,
             )
             return self._embeddings
         except Exception as exc:  # noqa: BLE001 - final fallback is lexical retrieval
@@ -312,9 +320,8 @@ class FAQService:
                 temp_store = Chroma(
                     persist_directory=persist_directory,
                     embedding_function=embeddings,
-                    collection_name="company_policies",
+                    collection_name=FAQ_COLLECTION_NAME,
                 )
-                # 🛡️ SHIELD: Ensure the database isn't empty before accepting it!
                 if temp_store._collection.count() > 0:
                     self._vector_store = temp_store
                     self._healthy = True
@@ -342,7 +349,7 @@ class FAQService:
                 documents=self._documents,
                 embedding=embeddings,
                 persist_directory=persist_directory,
-                collection_name="company_policies",
+                collection_name=FAQ_COLLECTION_NAME,
             )
             self._healthy = True
             logger.info("Vector store created and persisted")
@@ -353,7 +360,6 @@ class FAQService:
             self._healthy = bool(self._documents)
             return None
 
-    # --- Semantic search (enhanced with full RAG pipeline) ---
 
     def semantic_search(self, question: str, k: int = 3, score_threshold: float = 0.5) -> Tuple[str, List[Dict[str, Any]]]:
         from ..services.rag_pipeline import (
@@ -362,7 +368,6 @@ class FAQService:
         )
         from ..services.dynamic_config import get_retrieval_config
 
-        # --- CAG: check cache first ---
         cache = get_cag_cache()
         cached = cache.get(question)
         if cached is not None:
@@ -374,11 +379,8 @@ class FAQService:
                 return "Company policy document not found. Please ensure the PDF is uploaded.", []
             self.process_policy_document(str(pdf_path))
 
-        # --- Query rewriting ---
         rewritten = rewrite_query(question)
 
-        # --- Hybrid retrieval (vector + BM25 via RRF) ---
-        # Bridge strategy: query with both rewritten and original forms, then merge.
         rag_cfg = get_retrieval_config().rag
         retrieval_k = max(k, rag_cfg.vector_k, rag_cfg.bm25_k)
         hybrid_results: List[Tuple[Document, float]] = []
@@ -399,27 +401,22 @@ class FAQService:
             if rewritten.strip().lower() != question.strip().lower() and not secondary_results:
                 secondary_results = self._keyword_retrieve(question, k=retrieval_k)
 
-        # Keep top candidates by rank. Raw scores differ by retriever type
-        # (RRF, cosine distance, etc.), so rank is more stable than absolute thresholds.
         merged_results = _merge_ranked_docs(hybrid_results, secondary_results)
         relevant_limit = max(k * 2, rag_cfg.vector_k, rag_cfg.bm25_k)
         relevant_docs = list(merged_results[: max(relevant_limit, 1)])
         if not relevant_docs:
             return "I couldn't find specific information about that in our policies. Would you like to speak with a human agent?", []
 
-        # --- Cross-encoder re-ranking ---
         docs_only = [doc for doc, _ in relevant_docs]
         rerank_top_n = min(len(docs_only), max(k, rag_cfg.vector_k))
         reranked = rerank(rewritten, docs_only, top_n=rerank_top_n)
 
-        # --- Build sources from reranked docs ---
         sources: List[Dict[str, Any]] = []
         raw_chunks: List[str] = []
         total_docs = max(len(relevant_docs), 1)
         for doc in reranked:
             content = doc.page_content.strip()
             page = doc.metadata.get("page", "Unknown")
-            # Convert rank to a normalized relevance score in [0,1].
             orig_rank = next(
                 (idx for idx, (d, _) in enumerate(relevant_docs) if d.page_content == doc.page_content),
                 total_docs - 1,
@@ -435,31 +432,20 @@ class FAQService:
                 }
             )
 
-        # --- Context compression ---
         compressed = compress_context(rewritten, raw_chunks)
 
-        # --- Generate answer ---
         answer = generate_concise_answer(question, compressed)
 
-        # --- Answer grounding verification ---
         answer, grounding_score = verify_grounding(answer, raw_chunks)
         _grounding_threshold = rag_cfg.grounding_threshold
         if grounding_score < _grounding_threshold:
             answer += "\n\n[Note: Some details may need verification. Please contact support for confirmation.]"
 
-        # --- Page references ---
-        # We are turning off the page reference tags to make the chat feel more natural.
-        # pages = list(set(doc.metadata.get("page", "Unknown") for doc in reranked))
-        # if pages and pages != ["Unknown"]:
-        #     page_refs = ", ".join(f"Page {p}" for p in pages if p != "Unknown")
-        #     answer += f"\n\n[Reference: {page_refs} of Company Policy]"
 
-        # --- CAG: store in cache ---
         cache.set(question, (answer, sources))
 
         return answer, sources
 
-    # --- Health & initialization ---
 
     def initialize(self) -> bool:
         """Initialize FAQ system. Returns True on success."""
@@ -470,16 +456,13 @@ class FAQService:
                 logger.info("System initialized successfully")
                 return True
             else:
-                logger.critical("Company policy.pdf not found — FAQ will not function")
+                logger.critical("Company policy.pdf not found - FAQ will not function")
                 return False
         except Exception as e:
             logger.critical("Initialization failed: %s", e)
             return False
 
 
-# ---------------------------------------------------------------------------
-# Module-level singleton for backwards compatibility
-# ---------------------------------------------------------------------------
 _faq_service = FAQService()
 
 
@@ -530,15 +513,12 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         }
     
     try:
-        # Perform semantic search
         answer, sources = semantic_faq_search(user_text)
         
-        # Check if we found a good answer
         top_score = float((sources[0] or {}).get("score", 0.0)) if sources else 0.0
         from ..services.dynamic_config import get_thresholds
         _faq_thresholds = get_thresholds().faq
         if sources and answer and top_score >= _faq_thresholds.high_confidence:
-            # High confidence answer
             result = {
                 "reply": answer,
                 "tool_result": {
@@ -548,7 +528,6 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
                 }
             }
         elif sources and answer and top_score >= _faq_thresholds.low_confidence:
-            # Medium confidence - add disclaimer
             result = {
                 "reply": f"{answer}\n\n[Note: If this doesn't fully answer your question, I can connect you with our support team.]",
                 "tool_result": {
@@ -558,7 +537,6 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
                 }
             }
         elif sources and answer:
-            # Still provide best effort answer when retrieval returned evidence.
             result = {
                 "reply": f"{answer}\n\n[Note: If you want, I can also connect you with support for confirmation.]",
                 "tool_result": {
@@ -568,7 +546,6 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
                 }
             }
         else:
-            # Low confidence or no results
             result = {
                 "reply": "I couldn't find specific information about that in our policies. Would you like me to:\n1. Try rephrasing your question\n2. Connect you with our support team\n3. Continue with your booking",
                 "tool_result": {
@@ -578,7 +555,6 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
                 }
             }
         
-        # Add context preservation and continuation prompt if in booking flow
         if context and context.get("in_booking_flow"):
             result["preserve_context"] = True
             result["return_to"] = context.get("return_to", "booking")
@@ -610,7 +586,6 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         }
 
 
-# Initialize the vector store on module load
 def initialize_faq_system():
     """Initialize the FAQ system with the company policy document."""
     return _faq_service.initialize()
@@ -646,11 +621,9 @@ def generate_concise_answer(question: str, context: str) -> str:
         Concise answer (5-20 lines based on complexity)
     """
     if not OPENAI_API_KEY:
-        # Fallback to extracting key sentences if no OpenAI key
         return extract_key_sentences(context, question)
     
     try:
-        # Determine question complexity using VADER + heuristics
         from . import nlp_engine
         vader = nlp_engine._get_vader()
         q_lower = question.lower()
@@ -718,7 +691,6 @@ def _clean_pdf_artifacts(text: str) -> str:
     if not text:
         return text
     
-    # Remove common PDF header patterns (company names, document titles)
     patterns_to_remove = [
         r'xyz\s*company\s*Internal\s*Policies?\s*&\s*Terms?\s*v?\d+\.\d+',
         r'Company\s*Policy',
@@ -730,11 +702,9 @@ def _clean_pdf_artifacts(text: str) -> str:
     for pattern in patterns_to_remove:
         cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
     
-    # Clean up multiple spaces and newlines
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     cleaned = re.sub(r' {2,}', ' ', cleaned)
     
-    # Remove any remaining page-like artifacts at the start
     cleaned = re.sub(r'^\s*[-=]+\s*$', '', cleaned, flags=re.MULTILINE)
     
     return cleaned.strip()
@@ -752,35 +722,28 @@ def extract_key_sentences(context: str, question: str, max_lines: int = 10) -> s
     Returns:
         Key sentences related to the question
     """
-    # Split into sentences
     sentences = re.split(r'(?<=[.!?])\s+', context)
     
-    # Find sentences with keywords from the question
     question_words = set(question.lower().split())
     relevant_sentences = []
     
     for sentence in sentences:
         sentence_lower = sentence.lower()
-        # Count matching words
         matches = sum(1 for word in question_words if word in sentence_lower)
         fallback_kws = get_vocabulary().nlp_fallback.faq_seeds + get_vocabulary().nlp_fallback.faq_strong_keywords
         if matches >= 2 or any(kw in sentence_lower for kw in fallback_kws):
             relevant_sentences.append(sentence.strip())
     
-    # Return the most relevant sentences
     result = " ".join(relevant_sentences[:5])
     
-    # Clean up the text
     result = re.sub(r'\s+', ' ', result)
-    result = re.sub(r'[©\[\]]', '', result)
+    result = re.sub(r'[\[\]]', '', result)
     
-    # Limit to reasonable length
     if len(result) > 800:
         result = result[:800] + "..."
     
     return _clean_pdf_artifacts(result)
 
 
-# Auto-initialize when module is imported
 initialize_faq_system()
 

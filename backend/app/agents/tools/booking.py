@@ -35,6 +35,30 @@ from app.config.agent_config_loader import cfg
 logger = logging.getLogger(__name__)
 
 
+def _resolve_property_id_from_state(
+    property_id: Optional[str],
+    soft_state: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    if property_id:
+        return property_id
+    if not isinstance(soft_state, dict):
+        return None
+    pending = soft_state.get("pending_booking")
+    if isinstance(pending, dict):
+        pending_id = pending.get("property_id")
+        if pending_id:
+            return str(pending_id)
+    booking_state = soft_state.get("booking_state")
+    if isinstance(booking_state, dict):
+        state_id = booking_state.get("property_id")
+        if state_id:
+            return str(state_id)
+    last_selected = soft_state.get("last_selected_property_id")
+    if last_selected:
+        return str(last_selected)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Tool: request_booking_details
 # ---------------------------------------------------------------------------
@@ -83,6 +107,7 @@ async def request_booking_details(
     elif missing_info:
         resolved_fields = [f.strip() for f in missing_info.split(",") if f.strip()]
     soft_state = _get_soft_state(tool_context)
+    property_id = _resolve_property_id_from_state(property_id, soft_state)
     booking_state = {}
     updates: Dict[str, Any] = {}
     if isinstance(soft_state, dict):
@@ -213,6 +238,8 @@ async def review_booking_details(
         guests: Number of guests.
         price_per_night: The nightly price of the property.
     """
+    soft_state = _get_soft_state(tool_context)
+    property_id = _resolve_property_id_from_state(property_id, soft_state)
     missing, guests_value, price_value = _validate_booking_fields(
         property_id, property_title, guest_name, guest_email,
         guest_phone, check_in, check_out, guests, price_per_night,
@@ -238,7 +265,6 @@ async def review_booking_details(
         "total": total_price,
     }
 
-    soft_state = _get_soft_state(tool_context)
     update_context = None
     if isinstance(soft_state, dict):
         previous_summary = soft_state.get("pending_booking")
@@ -305,6 +331,8 @@ async def process_v2_booking(
         guests: Number of guests.
         price_per_night: The nightly price of the property.
     """
+    soft_state = _get_soft_state(tool_context)
+    property_id = _resolve_property_id_from_state(property_id, soft_state)
     missing, guests_value, price_value = _validate_booking_fields(
         property_id, property_title, guest_name, guest_email,
         guest_phone, check_in, check_out, guests, price_per_night,
@@ -354,7 +382,6 @@ async def process_v2_booking(
         },
     }
 
-    soft_state = _get_soft_state(tool_context)
     if isinstance(soft_state, dict):
         soft_state.pop("pending_booking", None)
         soft_state.pop("pending_booking_updated_at", None)
