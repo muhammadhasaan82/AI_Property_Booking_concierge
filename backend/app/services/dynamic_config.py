@@ -242,6 +242,21 @@ class NlpThresholdsConfig(BaseModel):
     fuzzy_match_high: float = 0.90
     fuzzy_match_medium: float = 0.88
     fuzzy_match_low: float = 0.78
+    intent_threshold_default: float = 0.55
+    affirmation_semantic_threshold: float = 0.65
+    affirmation_margin: float = 0.04
+    affirmation_compound_positive: float = 0.28
+    affirmation_compound_negative: float = -0.28
+    affirmation_max_tokens: int = 10
+    modification_semantic_threshold: float = 0.70
+    property_search_request_semantic_threshold: float = 0.70
+    receipt_semantic_threshold: float = 0.65
+    resume_semantic_threshold: float = 0.65
+    previous_results_semantic_threshold: float = 0.55
+    field_detection_semantic_threshold: float = 0.50
+    name_min_length: int = 2
+    name_max_words: int = 3
+    name_pattern_max_chars: int = 60
 
 
 class FaqThresholdsConfig(BaseModel):
@@ -280,10 +295,47 @@ class RetrievalRuntimeConfig(BaseModel):
     scoring_weights: RetrievalScoringWeightsConfig = Field(default_factory=RetrievalScoringWeightsConfig)
 
 
+class RetrievalEmbeddingsConfig(BaseModel):
+    """Embedding model configuration."""
+    model_name: str = "BAAI/bge-small-en-v1.5"
+    normalize_embeddings: bool = True
+    device: str = "auto"
+
+
+class RetrievalChunkingConfig(BaseModel):
+    """Chunking strategy for FAQ policy ingestion."""
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    separators: List[str] = Field(default_factory=lambda: ["\n\n", "\n", ". ", " ", ""])
+
+
+class RetrievalChromaConfig(BaseModel):
+    """Chroma persistence settings."""
+    persist_dir: str = "data/chroma_faq"
+    collection_name: str = "company_policies"
+
+
+class RetrievalRankingConfig(BaseModel):
+    """Ranking model settings."""
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+
+
+class RetrievalLlmConfig(BaseModel):
+    """LLM settings for retrieval-adjacent tasks."""
+    query_rewrite_model: str = "gpt-5-nano"
+    query_rewrite_timeout_seconds: float = 6.0
+    query_rewrite_max_tokens: int = 80
+
+
 class RetrievalConfig(BaseModel):
     """RAG + retrieval settings loaded from retrieval.yaml."""
     rag: RagThresholdsConfig = Field(default_factory=RagThresholdsConfig)
     retrieval: RetrievalRuntimeConfig = Field(default_factory=RetrievalRuntimeConfig)
+    embeddings: RetrievalEmbeddingsConfig = Field(default_factory=RetrievalEmbeddingsConfig)
+    chunking: RetrievalChunkingConfig = Field(default_factory=RetrievalChunkingConfig)
+    chroma: RetrievalChromaConfig = Field(default_factory=RetrievalChromaConfig)
+    ranking: RetrievalRankingConfig = Field(default_factory=RetrievalRankingConfig)
+    llm: RetrievalLlmConfig = Field(default_factory=RetrievalLlmConfig)
 
 
 # ═══════════════════════════════════════════════════════════════════════

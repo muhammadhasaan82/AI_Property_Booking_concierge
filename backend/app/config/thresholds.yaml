@@ -3,6 +3,21 @@ nlp:
   fuzzy_match_high: 0.90
   fuzzy_match_medium: 0.88
   fuzzy_match_low: 0.78
+  intent_threshold_default: 0.55
+  affirmation_semantic_threshold: 0.65
+  affirmation_margin: 0.04
+  affirmation_compound_positive: 0.28
+  affirmation_compound_negative: -0.28
+  affirmation_max_tokens: 10
+  modification_semantic_threshold: 0.70
+  property_search_request_semantic_threshold: 0.70
+  receipt_semantic_threshold: 0.65
+  resume_semantic_threshold: 0.65
+  previous_results_semantic_threshold: 0.55
+  field_detection_semantic_threshold: 0.50
+  name_min_length: 2
+  name_max_words: 3
+  name_pattern_max_chars: 60
 
 faq:
   high_confidence: 0.7
