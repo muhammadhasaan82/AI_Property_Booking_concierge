@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 from __future__ import annotations
 import argparse
 import asyncio
@@ -14,6 +11,7 @@ if sys.platform == 'win32':
 from typing import Any, Dict, List, Optional
 import os
 import subprocess
+from pathlib import Path
 
 # ------------------------------------------------------------
 # Optional: auto-start Supabase and export env before service imports
@@ -100,24 +98,60 @@ def _parse_kv_list(values: Optional[List[str]]) -> Dict[str, Any]:
 
 def _pretty(o: Any) -> str: return json.dumps(o, indent=2, ensure_ascii=False)
 
+
+def _load_script_messages(script_path: Optional[str]) -> List[str]:
+    if not script_path:
+        return []
+    path = Path(script_path)
+    if not path.exists():
+        return []
+    lines = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _resolve_flow_steps(args: argparse.Namespace) -> List[str]:
+    steps = list(args.steps or [])
+    steps.extend(_load_script_messages(args.script))
+    if steps:
+        return steps
+    if args.demo_memory_fallback:
+        return [
+            "Show me apartments in New York under $200",
+            "I will take option 2",
+            "I want to book now",
+            "My name is Jane Doe",
+            "Email jane@example.com",
+            "Phone 5551234567",
+            "Check in 2026-05-01",
+            "Check out 2026-05-03",
+            "2 guests",
+            "Yes confirm booking",
+        ]
+    if not args.demo_booking:
+        return []
+    return [
+        "Show me apartments in New York under $200",
+        "Option 1",
+        "Book this property",
+        "My name is Jane Doe",
+        "Email jane@example.com",
+        "Phone 5551234567",
+        "Check in 2026-05-01",
+        "Check out 2026-05-03",
+        "2 guests",
+        "Yes confirm booking",
+    ]
+
 async def cmd_chat(args: argparse.Namespace) -> int:
     print("[BOT] AI Concierge Console (interactive). Type 'exit' to quit.")
     # Streaming callback for CLI (default ON)
     def stream_cb(chunk: str):
         print(chunk, end="", flush=True)
-
-    session_filters: Dict[str, Any] = {
-        "budget": args.budget,
-        "beds": args.beds,
-        "location": args.city,
-        "amenities": args.amenities or [],
-        "locale": args.locale,
-        "stream": not args.no_stream,         # default True
-        "stream_callback": stream_cb if not args.no_stream else None,
-    }
-    session_booking = _parse_kv_list(args.booking_args)
-    session_status = _parse_kv_list(args.status_args)
-    session_payment = _parse_kv_list(args.payment_args)
 
     while True:
         try:
@@ -130,12 +164,9 @@ async def cmd_chat(args: argparse.Namespace) -> int:
             print("Bye!")
             return 0
 
-        overrides = _parse_kv_list(args.with_kv)
-        current_filters = {**session_filters, **overrides}
-
         # Create a static session ID for the CLI test
-        session_id = "cli_test_session_001"
-        user_id = args.user_id if hasattr(args, 'user_id') and args.user_id else "cli_user"
+        session_id = args.session_id or "cli_test_session_001"
+        user_id = args.user_id or "cli_user"
 
         # Run the message through the ADK (streaming)
         print("\nConcierge: ", end="", flush=True)
@@ -150,8 +181,8 @@ async def cmd_chat(args: argparse.Namespace) -> int:
 
 async def cmd_say(args: argparse.Namespace) -> int:
     """Send one message through the V2 ADK pipeline."""
-    session_id = "cli_say_session"
-    user_id = args.user_id if hasattr(args, 'user_id') and args.user_id else "cli_user"
+    session_id = args.session_id or "cli_say_session"
+    user_id = args.user_id or "cli_user"
 
     print("\nConcierge: ", end="", flush=True)
     async for chunk in run_adk_turn(
@@ -162,6 +193,31 @@ async def cmd_say(args: argparse.Namespace) -> int:
         sys.stdout.write(chunk)
         sys.stdout.flush()
     print("\n")
+    return 0
+
+
+async def cmd_flow(args: argparse.Namespace) -> int:
+    """Run a multi-step conversation through the ADK pipeline."""
+    steps = _resolve_flow_steps(args)
+    if not steps:
+        print("No steps provided. Use --steps, --script, --demo-booking, or --demo-memory-fallback.")
+        return 1
+
+    session_id = args.session_id or "cli_flow_session"
+    user_id = args.user_id or "cli_user"
+
+    for idx, message in enumerate(steps, 1):
+        print(f"\n[Step {idx}/{len(steps)}] You: {message}")
+        print("Concierge: ", end="", flush=True)
+        async for chunk in run_adk_turn(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+        ):
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+        print("\n")
+
     return 0
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -213,13 +269,15 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--with", dest="with_kv", nargs="*", default=[], help="Per-message filter overrides key=value")
         sp.add_argument("--no-stream", action="store_true", help="Disable streaming (default: stream enabled)")
         sp.add_argument("--auto-supabase", action="store_true", help="Auto-start Supabase and export env for this session")
+        sp.add_argument("--session-id", type=str, default=None, help="Reuse a session ID for multi-turn tests")
+        sp.add_argument("--user-id", type=str, default=None, help="User ID for the session")
 
     # root options (so running without subcommand works)
     add_common_chat_opts(p)
 
     sub = p.add_subparsers(dest="cmd")
 
-    sp_chat = sub.add_parser("chat", help="Interactive chat loop (LangGraph)")
+    sp_chat = sub.add_parser("chat", help="Interactive chat loop (ADK)")
     add_common_chat_opts(sp_chat)
     sp_chat.set_defaults(func=lambda a: _run_async(cmd_chat(a)))
 
@@ -227,6 +285,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_chat_opts(sp_say)
     sp_say.add_argument("message", type=str, help="User message")
     sp_say.set_defaults(func=lambda a: _run_async(cmd_say(a)))
+
+    sp_flow = sub.add_parser("flow", help="Run a multi-step chat flow")
+    add_common_chat_opts(sp_flow)
+    sp_flow.add_argument("--steps", nargs="*", default=[], help="Messages to send in order")
+    sp_flow.add_argument("--script", type=str, default=None, help="Path to a text file with one message per line")
+    sp_flow.add_argument("--demo-booking", action="store_true", help="Run a built-in booking demo flow")
+    sp_flow.add_argument("--demo-memory-fallback", action="store_true", help="Run a booking flow that relies on memory for property_id")
+    sp_flow.set_defaults(func=lambda a: _run_async(cmd_flow(a)))
 
     sp_search = sub.add_parser("search", help="Direct property search (debug)")
     sp_search.add_argument("--query", type=str, default="", help="Free-text query")

@@ -8,10 +8,11 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from app.services.dynamic_config import get_retrieval_config
 
-# ---------- Config ----------
-CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "thenlper/gte-small")  # e.g., 'BAAI/bge-small-en-v1.5'
-CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "properties")
+_RETRIEVAL_CFG = get_retrieval_config()
+CHROMA_DIR = os.getenv("CHROMA_DIR", _RETRIEVAL_CFG.chroma.persist_dir)
+EMBED_MODEL = os.getenv("EMBED_MODEL", _RETRIEVAL_CFG.embeddings.model_name)
+EMBED_NORMALIZE = bool(_RETRIEVAL_CFG.embeddings.normalize_embeddings)
+CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", _RETRIEVAL_CFG.chroma.collection_name)
 RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
 
 
@@ -135,8 +136,7 @@ def _init_vector_mode() -> bool:
 def _embed_texts(texts: List[str]) -> List[List[float]]:
     if _embedder is None:
         raise RuntimeError("Embedder not initialized")
-    # SentenceTransformer returns numpy array; convert to python lists for Chroma
-    embs = _embedder.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+    embs = _embedder.encode(texts, normalize_embeddings=EMBED_NORMALIZE, show_progress_bar=False)
     return [e.tolist() if hasattr(e, "tolist") else list(e) for e in embs]
 
 # ---------- Public API ----------

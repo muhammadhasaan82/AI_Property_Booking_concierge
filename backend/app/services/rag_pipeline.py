@@ -37,7 +37,7 @@ else:
         load_dotenv(env_path_svc)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+EMBED_MODEL = ""
 EMBED_NORMALIZE = True
 RAG_LOCAL_MODELS_ONLY = os.getenv("RAG_LOCAL_MODELS_ONLY", "1").lower() not in {"0", "false", "no"}
 
@@ -74,6 +74,21 @@ def _rag_thresholds():
     from app.services.dynamic_config import get_retrieval_config
     return get_retrieval_config().rag
 
+
+def _retrieval_cfg():
+    from app.services.dynamic_config import get_retrieval_config
+
+    return get_retrieval_config()
+
+
+def _embedding_model_name() -> str:
+    cfg = _retrieval_cfg().embeddings
+    return os.getenv("EMBED_MODEL", cfg.model_name)
+
+
+def _embedding_normalize() -> bool:
+    return bool(_retrieval_cfg().embeddings.normalize_embeddings)
+
 # ---------------------------------------------------------------------------
 # Lazy-loaded models (avoid import-time downloads)
 # ---------------------------------------------------------------------------
@@ -85,8 +100,8 @@ _rerank_pool = ThreadPoolExecutor(max_workers=2)
 def get_embedding_backend_config() -> Dict[str, Any]:
     """Return the baseline embedding backend expected by retrieval layers."""
     return {
-        "model_name": EMBED_MODEL,
-        "normalize_embeddings": EMBED_NORMALIZE,
+        "model_name": _embedding_model_name(),
+        "normalize_embeddings": _embedding_normalize(),
     }
 
 
@@ -97,7 +112,7 @@ def _get_cross_encoder():
         with _cross_encoder_lock:
             if _cross_encoder is None:
                 try:
-                    model_name = "cross-encoder/ms-marco-MiniLM-L6-v2"
+                    model_name = _retrieval_cfg().ranking.cross_encoder_model
                     if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(model_name):
                         return None
 
@@ -123,13 +138,14 @@ def rewrite_query(user_text: str) -> str:
         return user_text
 
     try:
+        llm_cfg = _retrieval_cfg().llm
         r = httpx.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "gpt-5-nano",
+                "model": llm_cfg.query_rewrite_model,
                 "temperature": 0,
-                "max_tokens": 80,
+                "max_tokens": llm_cfg.query_rewrite_max_tokens,
                 "messages": [
                     {
                         "role": "system",
@@ -141,7 +157,7 @@ def rewrite_query(user_text: str) -> str:
                     {"role": "user", "content": user_text},
                 ],
             },
-            timeout=6.0,
+            timeout=llm_cfg.query_rewrite_timeout_seconds,
         )
         if r.status_code == 200:
             rewritten = r.json()["choices"][0]["message"]["content"].strip()
