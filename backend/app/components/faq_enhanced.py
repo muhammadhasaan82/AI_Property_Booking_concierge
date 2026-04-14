@@ -1,4 +1,4 @@
-"""
+﻿"""
 Enhanced FAQ Service with PDF Processing and Vector Search
 Handles company policy questions using semantic search
 """
