@@ -119,6 +119,19 @@ def _resolve_flow_steps(args: argparse.Namespace) -> List[str]:
     steps.extend(_load_script_messages(args.script))
     if steps:
         return steps
+    if args.demo_memory_fallback:
+        return [
+            "Show me apartments in New York under $200",
+            "I will take option 2",
+            "I want to book now",
+            "My name is Jane Doe",
+            "Email jane@example.com",
+            "Phone 5551234567",
+            "Check in 2026-05-01",
+            "Check out 2026-05-03",
+            "2 guests",
+            "Yes confirm booking",
+        ]
     if not args.demo_booking:
         return []
     return [
@@ -187,7 +200,7 @@ async def cmd_flow(args: argparse.Namespace) -> int:
     """Run a multi-step conversation through the ADK pipeline."""
     steps = _resolve_flow_steps(args)
     if not steps:
-        print("No steps provided. Use --steps, --script, or --demo-booking.")
+        print("No steps provided. Use --steps, --script, --demo-booking, or --demo-memory-fallback.")
         return 1
 
     session_id = args.session_id or "cli_flow_session"
@@ -278,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp_flow.add_argument("--steps", nargs="*", default=[], help="Messages to send in order")
     sp_flow.add_argument("--script", type=str, default=None, help="Path to a text file with one message per line")
     sp_flow.add_argument("--demo-booking", action="store_true", help="Run a built-in booking demo flow")
+    sp_flow.add_argument("--demo-memory-fallback", action="store_true", help="Run a booking flow that relies on memory for property_id")
     sp_flow.set_defaults(func=lambda a: _run_async(cmd_flow(a)))
 
     sp_search = sub.add_parser("search", help="Direct property search (debug)")
