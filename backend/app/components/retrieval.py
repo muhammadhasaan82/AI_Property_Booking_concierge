@@ -1,13 +1,17 @@
-# services/retrieval.py
 from __future__ import annotations
 from contextlib import contextmanager
+from huggingface_hub import login, whoami
 import os
+from dotenv import load_dotenv
 import json
 import threading
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+from huggingface_hub import login, whoami
 from app.services.dynamic_config import get_retrieval_config
 
+load_dotenv()
+login(token=os.getenv("HF_TOKEN"))
 _RETRIEVAL_CFG = get_retrieval_config()
 CHROMA_DIR = os.getenv("CHROMA_DIR", _RETRIEVAL_CFG.chroma.persist_dir)
 EMBED_MODEL = os.getenv("EMBED_MODEL", _RETRIEVAL_CFG.embeddings.model_name)
@@ -42,7 +46,7 @@ def _is_local_model_reference(model_name: str) -> bool:
     except OSError:
         return False
 
-# ---------- Lazy imports / feature flags ----------
+
 _HAS_VECTOR = True
 try:
     import chromadb
@@ -52,7 +56,7 @@ except Exception as _e:
     print(f"[retrieval] Vector mode unavailable ({_e}); using JSON fallback.")
     _HAS_VECTOR = False
 
-# ---------- Fallback storage (JSON) ----------
+
 _properties_file = Path(CHROMA_DIR) / "properties.json"
 _properties_data: List[Dict] = []
 _properties_lock = threading.RLock()
@@ -97,11 +101,11 @@ def build_doc_text(p: Dict) -> str:
         f"Location: {city}, {country}."
     )
 
-# ---------- Vector mode (Chroma + HF) ----------
+
 _chroma_client = None
 _collection = None
 _embedder = None
-
+login(token=os.getenv("HF_TOKEN"))
 def _init_vector_mode() -> bool:
     """Initialize Chroma persistent client, collection, and embedder."""
     global _chroma_client, _collection, _embedder, _HAS_VECTOR
@@ -114,18 +118,20 @@ def _init_vector_mode() -> bool:
                 settings=Settings(anonymized_telemetry=False),
             )
         if _collection is None:
-            # Use a sentence-transformer embedder manually
+            login(token=os.getenv("HF_TOKEN"))
             _collection = _chroma_client.get_or_create_collection(
                 name=CHROMA_COLLECTION,
                 metadata={"hnsw:space": "cosine"},
             )
         if _embedder is None:
             if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(EMBED_MODEL):
+                login(token=os.getenv("HF_TOKEN"))
                 raise RuntimeError(
                     f"Embedding model '{EMBED_MODEL}' is not local. "
                     "Set RAG_LOCAL_MODELS_ONLY=0 to allow remote model downloads."
                 )
             with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+                cache_folder = os.getenv("cache_folder")
                 _embedder = SentenceTransformer(EMBED_MODEL)
         return True
     except Exception as e:
@@ -139,7 +145,7 @@ def _embed_texts(texts: List[str]) -> List[List[float]]:
     embs = _embedder.encode(texts, normalize_embeddings=EMBED_NORMALIZE, show_progress_bar=False)
     return [e.tolist() if hasattr(e, "tolist") else list(e) for e in embs]
 
-# ---------- Public API ----------
+
 def upsert_property(p: Dict) -> None:
     """
     Upsert a single property. Expects a stable 'id'.
@@ -161,7 +167,7 @@ def upsert_property(p: Dict) -> None:
 
     if _init_vector_mode():
         try:
-            # Delete old if exists
+   
             try:
                 _collection.delete(ids=[prop["id"]])
             except Exception:
@@ -183,7 +189,7 @@ def upsert_property(p: Dict) -> None:
         except Exception as e:
             print(f"[retrieval] vector upsert error (fallback to JSON): {e}")
 
-    # Fallback path
+
     with _properties_lock:
         _properties_data[:] = [x for x in _properties_data if str(x.get("id")) != prop["id"]]
         _properties_data.append(prop)
@@ -208,7 +214,7 @@ def bulk_upsert(properties: List[Dict]) -> None:
                     "bedrooms": p.get("bedrooms"),
                     "amenities": json.dumps(p.get("amenities", []) or []),
                 })
-            # Delete duplicates first to keep Chroma clean
+
             try:
                 _collection.delete(ids=[str(p["id"]) for p in properties])
             except Exception:
@@ -223,7 +229,7 @@ def bulk_upsert(properties: List[Dict]) -> None:
         except Exception as e:
             print(f"[retrieval] vector bulk_upsert error (fallback to JSON): {e}")
 
-    # Fallback: JSON append with de-dupe
+
     with _properties_lock:
         incoming_ids = {str(p["id"]) for p in properties}
         _properties_data[:] = [x for x in _properties_data if str(x.get("id")) not in incoming_ids]
@@ -259,11 +265,11 @@ def query_properties(
     if k is None:
         k = runtime.top_k
 
-    # ---------- Vector mode ----------
+
     if _init_vector_mode():
         try:
             q_emb = _embed_texts([query_text])[0]
-            # Initial ANN search
+
             res = _collection.query(
                 query_embeddings=[q_emb],
                 n_results=k,
@@ -275,8 +281,8 @@ def query_properties(
             dists = (res.get("distances") or [[]])[0]
 
             for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists)):
-                pid = meta.get("id", f"property_{i}")  # Use id from metadata or generate one
-                # Convert amenities back from JSON string
+                pid = meta.get("id", f"property_{i}")
+ 
                 try:
                     am = json.loads(meta.get("amenities") or "[]")
                 except Exception:
@@ -291,20 +297,20 @@ def query_properties(
                     "bedrooms": meta.get("bedrooms"),
                     "amenities": am,
                     "snippet": (doc or "")[:240] + ("..." if doc and len(doc) > 240 else ""),
-                    # smaller distance = closer → convert to score ~ 1 - normalized distance
+
                     "score": float(max(0.0, 1.0 - (dist or 0.0))),
                 }
                 items.append(row)
 
-            # Apply filters post-retrieval
+
             items = _apply_filters(items, budget=budget, city=city, beds=beds, amenities=amenities)
-            # Sort by score descending & truncate to 5
+
             items.sort(key=lambda x: x.get("score", 0), reverse=True)
             return items[:runtime.result_limit]
         except Exception as e:
             print(f"[retrieval] vector query error (fallback to JSON): {e}")
 
-    # ---------- Fallback: JSON text search ----------
+
     with _properties_lock:
         snapshot = list(_properties_data)
     filtered = []
@@ -320,7 +326,7 @@ def query_properties(
             "document": prop.get("document", ""),
         })
 
-    # Config-driven heuristic scoring for JSON fallback mode
+  
     q = (query_text or "").lower()
     weights = runtime.scoring_weights
     scored: List[Tuple[float, Dict]] = []
@@ -343,13 +349,10 @@ def query_properties(
             p2["score"] = score
             scored.append((score, p2))
 
-    # apply filters and sort
+
     out = [p for _, p in sorted(scored, key=lambda x: x[0], reverse=True)]
     out = _apply_filters(out, budget=budget, city=city, beds=beds, amenities=amenities)
     return out[:runtime.result_limit]
-
-# ---------- Helpers ----------
-# In query_properties function, update the filter logic:
 
 def _apply_filters(items: List[Dict],
                    budget: Optional[float],
@@ -358,27 +361,27 @@ def _apply_filters(items: List[Dict],
                    amenities: Optional[List[str]]) -> List[Dict]:
     res = []
     for p in items:
-        # Budget filter
+
         if budget is not None:
             price = float(p.get("price_per_night") or 0)
             if price > budget:
                 continue
         
-        # City filter - more flexible matching
+
         if city:
             city_lower = city.lower().strip()
             prop_city = (p.get("city") or "").lower().strip()
-            # Check if the search city is contained in property city
+
             if city_lower not in prop_city and prop_city not in city_lower:
                 continue
         
-        # Beds filter
+
         if beds:
             prop_beds = int(p.get("bedrooms") or 0)
             if prop_beds < beds:
                 continue
         
-        # Amenities filter
+
         if amenities:
             prop_amenities = [a.lower() for a in (p.get("amenities") or [])]
             required_amenities = [a.lower() for a in amenities]
