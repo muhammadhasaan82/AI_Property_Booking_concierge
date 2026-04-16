@@ -8,11 +8,12 @@ Advanced RAG Pipeline Utilities
 - Answer grounding verification
 - CAG (Cache-Augmented Generation)
 """
-
 from __future__ import annotations
 
 import hashlib
+from huggingface_hub import whoami
 import os
+from huggingface_hub import login
 import re
 import threading
 import time
@@ -27,7 +28,7 @@ from dotenv import load_dotenv
 import logging
 
 logger = logging.getLogger(__name__)
-
+load_dotenv()
 env_path = Path(__file__).resolve().parents[3] / ".env"
 if env_path.exists():
     load_dotenv(env_path)
@@ -35,6 +36,8 @@ else:
     env_path_svc = Path(__file__).parent / ".env"
     if env_path_svc.exists():
         load_dotenv(env_path_svc)
+        login(token=os.getenv("HF_TOKEN"))
+        print(whoami())
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 EMBED_MODEL = ""
@@ -89,9 +92,6 @@ def _embedding_model_name() -> str:
 def _embedding_normalize() -> bool:
     return bool(_retrieval_cfg().embeddings.normalize_embeddings)
 
-# ---------------------------------------------------------------------------
-# Lazy-loaded models (avoid import-time downloads)
-# ---------------------------------------------------------------------------
 _cross_encoder = None
 _cross_encoder_lock = threading.Lock()
 _rerank_pool = ThreadPoolExecutor(max_workers=2)
@@ -115,19 +115,17 @@ def _get_cross_encoder():
                     model_name = _retrieval_cfg().ranking.cross_encoder_model
                     if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(model_name):
                         return None
-
+                    login(token=os.getenv("HF_TOKEN"))
+                    print(whoami())
                     from sentence_transformers import CrossEncoder
 
                     with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+                        cache_folder = os.getenv("cache_folder")
                         _cross_encoder = CrossEncoder(model_name)
                 except Exception as e:
                     logger.warning("Cross-encoder unavailable: %s", e)
     return _cross_encoder
 
-
-# ---------------------------------------------------------------------------
-# 1. Query Rewriting
-# ---------------------------------------------------------------------------
 def rewrite_query(user_text: str) -> str:
     """Rewrite a casual user question into a precise policy/FAQ query.
 
@@ -170,9 +168,7 @@ def rewrite_query(user_text: str) -> str:
     return user_text
 
 
-# ---------------------------------------------------------------------------
-# 2. BM25 Keyword Search
-# ---------------------------------------------------------------------------
+
 def bm25_search(query: str, corpus: List[str], k: Optional[int] = None) -> List[Tuple[int, float]]:
     """Run BM25 over a list of text chunks.
 
@@ -196,10 +192,6 @@ def bm25_search(query: str, corpus: List[str], k: Optional[int] = None) -> List[
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
     return ranked[:k]
 
-
-# ---------------------------------------------------------------------------
-# 3. Hybrid Retrieval (Vector + BM25 via Reciprocal Rank Fusion)
-# ---------------------------------------------------------------------------
 def hybrid_retrieve(
     vector_store,
     query: str,
@@ -220,14 +212,14 @@ def hybrid_retrieve(
         bm25_k = cfg.bm25_k
     if rrf_constant is None:
         rrf_constant = cfg.rrf_constant
-    # --- Vector search ---
+
     try:
         vector_results = vector_store.similarity_search_with_score(query, k=vector_k)
     except Exception as e:
         logger.error("Vector search failed: %s", e)
         vector_results = []
 
-    # --- Build corpus from vector store for BM25 ---
+
     try:
         collection = vector_store._collection
         all_docs = collection.get(include=["documents"])
@@ -237,20 +229,16 @@ def hybrid_retrieve(
         corpus = []
         doc_ids = []
 
-    # --- BM25 search ---
     bm25_results = bm25_search(query, corpus, k=bm25_k) if corpus else []
 
-    # --- Reciprocal Rank Fusion ---
     rrf_scores: Dict[str, float] = {}
     doc_map: Dict[str, Any] = {}
 
-    # Score vector results
     for rank, (doc, score) in enumerate(vector_results):
         key = doc.page_content[:100]
         rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (rrf_constant + rank + 1)
         doc_map[key] = doc
 
-    # Score BM25 results
     for rank, (idx, score) in enumerate(bm25_results):
         if idx < len(corpus):
             text = corpus[idx]
@@ -263,16 +251,11 @@ def hybrid_retrieve(
                     meta["id"] = doc_ids[idx]
                 doc_map[key] = Document(page_content=text, metadata=meta)
 
-    # Sort by fused score descending
     ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
     results = [(doc_map[key], score) for key, score in ranked if key in doc_map]
 
     return results[:k]
 
-
-# ---------------------------------------------------------------------------
-# 4. Cross-Encoder Re-ranking
-# ---------------------------------------------------------------------------
 def _predict_sync(encoder, pairs: List[Tuple[str, str]]) -> List[float]:
     """Run encoder.predict in a worker thread (CPU-bound)."""
     return encoder.predict(pairs).tolist()
@@ -301,10 +284,6 @@ def rerank(query: str, documents: List[Any], top_n: int = 3) -> List[Any]:
         logger.warning("Re-ranking failed (using original order): %s", e)
         return documents[:top_n]
 
-
-# ---------------------------------------------------------------------------
-# 5. Context Compression
-# ---------------------------------------------------------------------------
 def compress_context(question: str, chunks: List[str], max_chars: Optional[int] = None) -> str:
     """Extract only the sentences most relevant to the question.
 
@@ -316,7 +295,7 @@ def compress_context(question: str, chunks: List[str], max_chars: Optional[int] 
         return ""
 
     q_words = set(re.sub(r"[^\w\s]", "", question.lower()).split())
-    # Remove stop words
+
     stop = {"the", "a", "an", "is", "are", "was", "were", "do", "does", "did",
             "what", "how", "can", "i", "my", "me", "we", "our", "to", "of", "in",
             "for", "and", "or", "on", "it", "this", "that", "with", "be", "at"}
@@ -343,17 +322,12 @@ def compress_context(question: str, chunks: List[str], max_chars: Optional[int] 
             break
         result += sent + " "
 
-    # If compression yielded too little, fall back to truncated raw chunks
     if len(result.strip()) < 50:
         raw = " ".join(chunks)
         return raw[:max_chars]
 
     return result.strip()
 
-
-# ---------------------------------------------------------------------------
-# 6. Answer Grounding Verification
-# ---------------------------------------------------------------------------
 def verify_grounding(answer: str, source_chunks: List[str]) -> Tuple[str, float]:
     """Check that each sentence in the answer has supporting evidence.
 
@@ -373,7 +347,7 @@ def verify_grounding(answer: str, source_chunks: List[str]) -> Tuple[str, float]
     grounded_count = 0
     for sent in sentences:
         sent_words = set(re.sub(r"[^\w\s]", "", sent.lower()).split())
-        # Remove common stop words
+
         meaningful = sent_words - {"the", "a", "an", "is", "are", "was", "were",
                                     "this", "that", "it", "to", "of", "and", "or",
                                     "in", "for", "on", "with", "be", "can", "you",
@@ -389,10 +363,6 @@ def verify_grounding(answer: str, source_chunks: List[str]) -> Tuple[str, float]
     score = grounded_count / max(len(sentences), 1)
     return answer, score
 
-
-# ---------------------------------------------------------------------------
-# 7. CAG Cache (Cache-Augmented Generation)
-# ---------------------------------------------------------------------------
 class CAGCache:
     """Thread-safe in-memory cache for generated FAQ answers.
 
@@ -400,7 +370,7 @@ class CAGCache:
     """
 
     def __init__(self, max_entries: int = 500, default_ttl: int = 900):
-        self._store: Dict[str, Tuple[Any, float, float]] = {}  # key -> (value, created, ttl)
+        self._store: Dict[str, Tuple[Any, float, float]] = {}
         self._lock = threading.Lock()
         self._max = max_entries
         self._default_ttl = default_ttl
@@ -434,7 +404,6 @@ class CAGCache:
         key = self._hash(self._normalize(query))
         with self._lock:
             if len(self._store) >= self._max:
-                # Evict oldest entry
                 oldest_key = min(self._store, key=lambda k: self._store[k][1])
                 del self._store[oldest_key]
             self._store[key] = (value, time.time(), ttl or self._default_ttl)
@@ -445,8 +414,6 @@ class CAGCache:
             active = sum(1 for _, (_, c, t) in self._store.items() if (now - c) <= t)
             return {"total": len(self._store), "active": active}
 
-
-# Module-level singleton
 _cag_cache = CAGCache()
 
 

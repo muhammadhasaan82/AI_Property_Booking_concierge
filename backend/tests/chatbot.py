@@ -13,10 +13,11 @@ import os
 import subprocess
 from pathlib import Path
 
-# ------------------------------------------------------------
-# Optional: auto-start Supabase and export env before service imports
-# Usage: add --auto-supabase to your command, or set AUTO_SUPABASE=1
-# ------------------------------------------------------------
+_HERE = Path(__file__).resolve()
+_BACKEND = _HERE.parent.parent
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str (_BACKEND))
+
 def _maybe_auto_supabase() -> None:
     auto = ("--auto-supabase" in sys.argv) or (os.getenv("AUTO_SUPABASE") in ("1","true","True"))
     open_studio = ("--open-studio" in sys.argv) or (os.getenv("OPEN_STUDIO") in ("1","true","True"))

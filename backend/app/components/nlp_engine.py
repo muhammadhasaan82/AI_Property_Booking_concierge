@@ -11,10 +11,15 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 import logging
+from dotenv import load_dotenv
+from huggingface_hub import login, whoami
 import os
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
+
+load_dotenv()
+login(token=os.getenv("HF_TOKEN"))
 
 from app.services.dynamic_config import get_intent_catalog as _get_catalog
 from app.services.dynamic_config import get_retrieval_config as _get_retrieval_config
@@ -152,6 +157,9 @@ def _get_st_model():
             from sentence_transformers import SentenceTransformer
 
             with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+                login(token=os.getenv("HF_TOKEN"))
+                print(whoami())
+
                 _st_model = SentenceTransformer(model_name)
             logger.info("[nlp_engine] sentence-transformers loaded: %s", model_name)
         except Exception as exc:

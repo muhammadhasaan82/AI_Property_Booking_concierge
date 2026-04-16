@@ -30,9 +30,11 @@ if _backend_root not in sys.path:
 # THE NUCLEAR OVERRIDE:
 # Inject the connection string directly into the environment memory,
 # bypassing all .env files and caching. Use the internal Docker IP and native port.
+
 os.environ["SUPABASE_DB_URL"] = "https://your-project-ref.supabase.co"
 os.environ["SUPABASE_DB_USER"] = "supabase_admin"
 os.environ["SUPABASE_DB_PASSWORD"] = "your_database_password_here"
+
 
 from app.services.adk_runner import run_adk_turn
 
@@ -265,7 +267,9 @@ def _schema_statements_for(conninfo: str):
 @cl.data_layer
 def get_data_layer():
     # PERMANENT HARDCODE: Bypass all .env variables and caches
+
     conninfo = "https://your-project-ref.supabase.co"
+
     return SQLAlchemyDataLayer(conninfo=conninfo)
 
 def _get_data_layer():
