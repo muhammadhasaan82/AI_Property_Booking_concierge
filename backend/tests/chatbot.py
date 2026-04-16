@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 _HERE = Path(__file__).resolve()
-_BACKEND = _HERE_.parent.parent
+_BACKEND = _HERE.parent.parent
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str (_BACKEND))
 
