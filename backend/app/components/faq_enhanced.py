@@ -6,6 +6,7 @@ Handles company policy questions using semantic search
 from __future__ import annotations
 from contextlib import contextmanager
 import os
+from huggingface_hub import login, whoami
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
@@ -24,20 +25,24 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 try:
     from langchain_huggingface import HuggingFaceBgeEmbeddings
-except Exception:  # noqa: BLE001 - package may not be installed in all envs
+except Exception:  
     try:
         from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-    except Exception:  # noqa: BLE001 - degrade with explicit runtime error in initializer
-        HuggingFaceBgeEmbeddings = None  # type: ignore[assignment]
+    except Exception:  
+        HuggingFaceBgeEmbeddings = None
 
 from dotenv import load_dotenv
 from ..services.dynamic_config import get_retrieval_config, get_vocabulary
+
 
 env_path_root = Path(__file__).resolve().parents[2] / ".env"
 env_path_services = Path(__file__).parent / ".env"
 
 if env_path_root.exists():
     load_dotenv(env_path_root)
+    login(token=os.getenv("HF_TOKEN"))
+    print(whoami())
+
 elif env_path_services.exists():
     load_dotenv(env_path_services)
 
@@ -119,12 +124,17 @@ class _SentenceTransformerEmbeddings:
     """Minimal LangChain-compatible embeddings adapter."""
 
     def __init__(self, model_name: str, *, device: str = "cpu", normalize_embeddings: bool = True):
-        try:
+        try: 
+            load_dotenv()
+            login(token=os.getenv("HF_TOKEN"))
+            print(whoami())
+            
             from sentence_transformers import SentenceTransformer
-        except Exception as exc:  # noqa: BLE001 - optional dependency in some envs
+        except Exception as exc:
             raise ImportError("sentence-transformers is unavailable") from exc
 
         with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+            cache_folder = os.getenv("cache_folder")
             self._model = SentenceTransformer(model_name, device=device)
         self._normalize_embeddings = normalize_embeddings
 
@@ -186,7 +196,7 @@ class FAQService:
 
         device = "cpu"
         try:
-            import torch  # type: ignore
+            import torch
 
             if torch.cuda.is_available():
                 device = "cuda"
@@ -240,7 +250,7 @@ class FAQService:
                         encode_kwargs={"normalize_embeddings": EMBED_NORMALIZE},
                     )
                 return self._embeddings
-            except Exception as exc:  # noqa: BLE001 - fallback to direct sentence-transformers adapter
+            except Exception as exc:
                 backend_error = exc
                 logger.warning("BGE embedding backend unavailable, falling back: %s", exc)
 
@@ -251,7 +261,7 @@ class FAQService:
                 normalize_embeddings=EMBED_NORMALIZE,
             )
             return self._embeddings
-        except Exception as exc:  # noqa: BLE001 - final fallback is lexical retrieval
+        except Exception as exc:
             backend_error = exc
             logger.warning("SentenceTransformer embedding backend unavailable: %s", exc)
 
@@ -272,7 +282,7 @@ class FAQService:
                     for idx, text in enumerate(raw_docs)
                     if text
                 ]
-            except Exception as exc:  # noqa: BLE001 - store introspection is best effort
+            except Exception as exc:
                 logger.warning("Could not load lexical FAQ corpus from Chroma: %s", exc)
 
         if not docs:
@@ -283,7 +293,7 @@ class FAQService:
             from ..services.rag_pipeline import bm25_search
 
             ranked = bm25_search(query, [doc.page_content for doc in docs], k=max(k, 1))
-        except Exception as exc:  # noqa: BLE001 - final fallback uses token overlap
+        except Exception as exc:
             logger.warning("BM25 FAQ retrieval failed, using token overlap: %s", exc)
 
         if not ranked:
@@ -312,7 +322,7 @@ class FAQService:
         embeddings = None
         try:
             embeddings = self._ensure_embeddings()
-        except Exception as exc:  # noqa: BLE001 - lexical fallback keeps FAQ usable
+        except Exception as exc:
             logger.warning("Embeddings unavailable, using lexical FAQ retrieval: %s", exc)
 
         if embeddings is not None and os.path.exists(persist_directory) and not force_reload:
@@ -354,7 +364,7 @@ class FAQService:
             self._healthy = True
             logger.info("Vector store created and persisted")
             return self._vector_store
-        except Exception as exc:  # noqa: BLE001 - do not take FAQ offline if vector indexing fails
+        except Exception as exc:
             logger.warning("Vector store creation failed, using lexical FAQ retrieval: %s", exc)
             self._vector_store = None
             self._healthy = bool(self._documents)
@@ -371,7 +381,7 @@ class FAQService:
         cache = get_cag_cache()
         cached = cache.get(question)
         if cached is not None:
-            return cached  # (answer, sources) tuple
+            return cached
 
         if self._vector_store is None and not self._documents:
             pdf_path = Path(__file__).resolve().parents[2] / "data" / "Company policy.pdf"
@@ -604,7 +614,7 @@ def best_effort_policy_answer(question: str) -> Optional[str]:
         from .faq import faq_lookup
 
         return faq_lookup(question)
-    except Exception as exc:  # noqa: BLE001 - FAQ table may be offline too
+    except Exception as exc:
         logger.warning("Basic FAQ fallback failed: %s", exc)
         return None
 
