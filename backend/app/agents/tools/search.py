@@ -681,4 +681,4 @@ async def get_property_details(
 
     )
 
-    )
+    
