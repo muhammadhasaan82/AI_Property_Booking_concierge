@@ -158,19 +158,6 @@ async def extract_and_store(user_id: str, message: str) -> None:
     except Exception as exc:
         logger.warning("[Memory] Failed to store context for user %s: %s", user_id, exc)
 
-asynce def _build_invocation_state_delta(user_id: str, current_query: str) -> dict[str, Any]:
-    user_cognitive_context = ""
-    query_words = current_query.strip()
-    if len(query_words) > 2:
-        try:
-            from .memory_engine import fetch_user_context
-            mem0_context = await fetch_user_context(user_id = user_id, current_query=current_query)
-            user_cognitive_context = _normalize_cognitive_context(mem0_context)
-            user_cognitive_context = _truncate_text_chars(user_cognitive_context,
-            ADK_MAX_COGNITIVE_CONTEXT_CHARS)
-        except Exception as exc:
-            logger.debug("[ADK] could not fetch cognitive context: %s", exc)
-    return {"user_cognitive_context": user_cognitive_context}    
 
 async def fetch_user_context(user_id: str, current_query: str = "") -> str:
     """Retrieve relevant historical user preferences from local Mem0."""

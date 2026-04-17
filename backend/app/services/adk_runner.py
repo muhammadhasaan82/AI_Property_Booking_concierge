@@ -509,45 +509,35 @@ def _get_session_service() -> RedisSessionService:
 async def _build_invocation_state_delta(user_id: str, current_query: str) -> dict[str, Any]:
     user_cognitive_context = ""
 
-    try:
-        from .memory_engine import fetch_user_context
-        mem0_context = await fetch_user_context(
-            user_id=user_id,
-            current_query=current_query,
-        )
-        user_cognitive_context = _normalize_cognitive_context(mem0_context)
-        user_cognitive_context = _truncate_text_chars(
-            user_cognitive_context,
-            ADK_MAX_COGNITIVE_CONTEXT_CHARS,
-        )
-    except Exception as exc:
-        logger.debug("[ADK] Could not fetch cognitive context: %s", exc)
-    
+    if len(current_query.strip().split()) > 2:
+        try:
+            from .memory_engine import fetch_user_context
+            mem0_context = await fetch_user_context(
+                user_id=user_id,
+                current_query=current_query,
+            )
+            user_cognitive_context = _normalize_cognitive_context(mem0_context)
+            user_cognitive_context = _truncate_text_chars(
+                user_cognitive_context,
+                ADK_MAX_COGNITIVE_CONTEXT_CHARS,
+            )
+        except Exception as exc:
+            logger.debug("[ADK] Could not fetch cognitive context: %s", exc)
     soft_state = {}
     try:
         snapshot = await get_session_snapshot(user_id)
-        soft_state = snapshot.get("state, {}").get("soft_state", {})
+        soft_state = snapshot.get("state", {}).get("soft_state", {})
     except Exception:
         pass
-
     return {
         "user_cognitive_context": user_cognitive_context,
         "soft_state": soft_state,
-        }
-
+    }
 
 async def _render_voice_from_router_output(
     router_output: str,
     user_cognitive_context: str,
 ) -> str:
-    response = litellm.completion(
-        model = VOICE_MODEL,
-        messages = [
-            {"role": "system","content": system_prompt},
-VOICE_INSTRUCTION injected
-            {"role": "user", "content": "Generate the final concierge response..."},
-        ],
-    )
     """Force Node-2 voice synthesis when only router JSON is available."""
     if not router_output or not router_output.strip():
         return ""
@@ -684,7 +674,7 @@ async def run_adk_turn(
                             yield part.text
 
             if event.is_final_response():
-                if author == "triage_route":
+                if author == "triage_router":
                     continue
                 if author == "concierge_voice":
                     if not streamed_parts and event_text:
@@ -718,17 +708,20 @@ async def run_adk_turn(
                 current_snapshot = await get_session_snapshot(session_id)
                 merged_state = current_snapshot.get("state", {})
                 merged_state["soft_state"] = fresh_soft_state
-                await save_session_snapshot(session_id, merged_state)
+                await save_session_snapshot(session_id=session_id, state=merged_state)
                 logger.debug("[ADK] soft state presisted explicity for session %s", session_id)
     except Exception as exc:
-        logger.warning("[ADK] Could not presisted soft_state to Redis for session %s", exc)
-                
+        logger.warning("[ADK] Could not persist soft_state to Redis: %s", exc)
+
+    try:
+        if updated_session and updated_session.state:
             router_output = router_output or str(updated_session.state.get("router_output", "") or "")
             user_cognitive_context = _normalize_cognitive_context(
                 updated_session.state.get("user_cognitive_context", user_cognitive_context)
             )
     except Exception:
         pass
+
 
     if anomaly_triggered:
         final_reply = anomaly.GRACEFUL_FALLBACK_REPLY
@@ -742,19 +735,26 @@ async def run_adk_turn(
             pass
 
     if not final_reply and router_output:
-        if updated_session and routed_output:
-            final_reply = str(updated_session.state.get("final_reply", "")or "")
+        if updated_session and updated_session.state:
+            final_reply = str(updated_session.state.get("final_reply", "") or "")
 
         if not final_reply:
             voice_reply = await _render_voice_from_router_output(
-                route_output = router_output,
-                user_cognitive_context = user_cognitive_context,
+                router_output=router_output,
+                user_cognitive_context=user_cognitive_context,
             )
             if voice_reply:
                 final_reply = voice_reply
                 if not streamed_parts and not anomaly_triggered:
                     yield final_reply
-            
+
+
+    if not final_reply and pipeline_failed_reply:
+        final_reply = pipeline_failed_reply
+        yield final_reply
+    if not final_reply:
+        final_reply = "I'm sorry, I couldn't process your request. Could you try again?"
+        yield final_reply
 
     logged_reply = sanitize_output(final_reply)
 

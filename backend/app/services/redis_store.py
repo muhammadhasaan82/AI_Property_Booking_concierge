@@ -26,7 +26,8 @@ except Exception:
 _REDIS_CLIENT = None
 _LOCAL_FALLBACK: Dict[str, Dict[str, Any]] = {}
 
-_LAST_
+_LAST_PING_AT: float = 0.0
+_PING_INTERVAL_SECONDS: float = 5.0
 
 def _session_key(session_id: str) -> str:
     return f"adk:session:{session_id}"
