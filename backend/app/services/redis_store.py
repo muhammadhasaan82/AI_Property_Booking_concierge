@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import copy
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 try:
     from redis import asyncio as redis_asyncio
     from redis.exceptions import RedisError
-except Exception:  # pragma: no cover - fallback when redis is not installed
+except Exception:
     redis_asyncio = None
 
     class RedisError(Exception):
@@ -25,6 +26,7 @@ except Exception:  # pragma: no cover - fallback when redis is not installed
 _REDIS_CLIENT = None
 _LOCAL_FALLBACK: Dict[str, Dict[str, Any]] = {}
 
+_LAST_
 
 def _session_key(session_id: str) -> str:
     return f"adk:session:{session_id}"
@@ -134,7 +136,7 @@ def _build_snapshot(
 
 
 async def _get_redis_client():
-    global _REDIS_CLIENT
+    global _REDIS_CLIENT, _LAST_PING_AT
 
     if redis_asyncio is None:
         return None
@@ -153,14 +155,17 @@ async def _get_redis_client():
             logger.error("[Redis] Could not initialize Redis client: %s", exc)
             _REDIS_CLIENT = None
             return None
-
-    try:
-        await _REDIS_CLIENT.ping()
-        return _REDIS_CLIENT
-    except Exception as exc:
-        logger.error("[Redis] Redis unavailable, using local fallback: %s", exc)
-        return None
-
+    now = time.monotonic()
+    if now - _LAST_PING_AT > _PING_INTERVAL_SECONDS:
+        try:
+            await _REDIS_CLIENT.ping()
+            _LAST_PING_AT = now
+            return _REDIS_CLIENT
+        except Exception as exc:
+            logger.error("[Redis] Redis unavailable, using local fallback: %s", exc)
+            _REDIS_CLIENT = None
+            return None
+    return _REDIS_CLIENT
 
 async def get_redis_client():
     return await _get_redis_client()

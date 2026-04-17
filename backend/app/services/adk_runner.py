@@ -1,4 +1,3 @@
-# services/adk_runner.py
 """
 ADK 2.0 Runner - Execution bridge between Chainlit and the ADK SequentialAgent.
 
@@ -45,14 +44,8 @@ from .redis_store import (
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Feature flag (kept for backward compat - V2 is always enabled)
-# ---------------------------------------------------------------------------
 ADK_ENABLED = True
 
-# ---------------------------------------------------------------------------
-# Lazy-init globals (created on first call to avoid import-time side effects)
-# ---------------------------------------------------------------------------
 _session_service: Optional["RedisSessionService"] = None
 _runner: Optional[Runner] = None
 
@@ -518,7 +511,6 @@ async def _build_invocation_state_delta(user_id: str, current_query: str) -> dic
 
     try:
         from .memory_engine import fetch_user_context
-
         mem0_context = await fetch_user_context(
             user_id=user_id,
             current_query=current_query,
@@ -530,14 +522,32 @@ async def _build_invocation_state_delta(user_id: str, current_query: str) -> dic
         )
     except Exception as exc:
         logger.debug("[ADK] Could not fetch cognitive context: %s", exc)
+    
+    soft_state = {}
+    try:
+        snapshot = await get_session_snapshot(user_id)
+        soft_state = snapshot.get("state, {}").get("soft_state", {})
+    except Exception:
+        pass
 
-    return {"user_cognitive_context": user_cognitive_context}
+    return {
+        "user_cognitive_context": user_cognitive_context,
+        "soft_state": soft_state,
+        }
 
 
 async def _render_voice_from_router_output(
     router_output: str,
     user_cognitive_context: str,
 ) -> str:
+    response = litellm.completion(
+        model = VOICE_MODEL,
+        messages = [
+            {"role": "system","content": system_prompt},
+VOICE_INSTRUCTION injected
+            {"role": "user", "content": "Generate the final concierge response..."},
+        ],
+    )
     """Force Node-2 voice synthesis when only router JSON is available."""
     if not router_output or not router_output.strip():
         return ""
@@ -588,10 +598,6 @@ async def _render_voice_from_router_output(
         logger.warning("[ADK] Voice handoff fallback failed: %s", exc)
         return ""
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 async def run_adk_turn(
     user_id: str,
@@ -670,20 +676,22 @@ async def run_adk_turn(
             if author == "triage_router" and event_text:
                 router_output = event_text
 
-            if author == "concierge_voice" and event.content and event.content.parts:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text:
-                        streamed_parts.append(part.text)
-                        yield part.text
+            if author == "concierge_voice":
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            streamed_parts.append(part.text)
+                            yield part.text
 
             if event.is_final_response():
-                if author == "triage_router":
+                if author == "triage_route":
                     continue
-
                 if author == "concierge_voice":
                     if not streamed_parts and event_text:
                         streamed_parts.append(event_text)
                         yield event_text
+                    break
+                if streamed_parts:
                     break
 
     except Exception as exc:
@@ -705,6 +713,16 @@ async def run_adk_turn(
 
     try:
         if updated_session and updated_session.state:
+            fresh_soft_state = updated_session.state.get("soft_state")
+            if isinstance(fresh_soft_state, dict) and fresh_soft_state:
+                current_snapshot = await get_session_snapshot(session_id)
+                merged_state = current_snapshot.get("state", {})
+                merged_state["soft_state"] = fresh_soft_state
+                await save_session_snapshot(session_id, merged_state)
+                logger.debug("[ADK] soft state presisted explicity for session %s", session_id)
+    except Exception as exc:
+        logger.warning("[ADK] Could not presisted soft_state to Redis for session %s", exc)
+                
             router_output = router_output or str(updated_session.state.get("router_output", "") or "")
             user_cognitive_context = _normalize_cognitive_context(
                 updated_session.state.get("user_cognitive_context", user_cognitive_context)
@@ -724,22 +742,19 @@ async def run_adk_turn(
             pass
 
     if not final_reply and router_output:
-        voice_reply = await _render_voice_from_router_output(
-            router_output=router_output,
-            user_cognitive_context=user_cognitive_context,
-        )
-        if voice_reply:
-            final_reply = voice_reply
-            if not streamed_parts and not anomaly_triggered:
-                yield final_reply
+        if updated_session and routed_output:
+            final_reply = str(updated_session.state.get("final_reply", "")or "")
 
-    if not final_reply and pipeline_failed_reply:
-        final_reply = pipeline_failed_reply
-        yield final_reply
-
-    if not final_reply:
-        final_reply = "I'm sorry, I couldn't process your request. Could you try again?"
-        yield final_reply
+        if not final_reply:
+            voice_reply = await _render_voice_from_router_output(
+                route_output = router_output,
+                user_cognitive_context = user_cognitive_context,
+            )
+            if voice_reply:
+                final_reply = voice_reply
+                if not streamed_parts and not anomaly_triggered:
+                    yield final_reply
+            
 
     logged_reply = sanitize_output(final_reply)
 
