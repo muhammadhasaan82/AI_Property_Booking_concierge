@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 
-# Silence HuggingFace and Tokenizer warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import asyncio
@@ -28,10 +27,6 @@ transformers.logging.set_verbosity_error()
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 MEM0_TIMEOUT: float = float(os.getenv("MEM0_TIMEOUT", "3.0"))
 MEM0_SEARCH_LIMIT: int = int(os.getenv("MEM0_SEARCH_LIMIT", "5"))
 
@@ -128,20 +123,23 @@ def _get_client():
 
     return _client
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
 async def extract_and_store(user_id: str, message: str) -> None:
     """Extract durable user preferences from a message and store them locally."""
     client = _get_client()
     if client is None:
         return
 
-    if not message or len(message.strip()) < 5:
-        return
+    MIN_MEMORY_MSG_LEN = int(os.getenv("MEM0_MIN_MSG_LEN", "30"))
+    MEMORY_SKIP_PATTERN = {
+        "hi", "hello", "ok", "okay", "sure", "thanks", "bye",
+        "yes", "no", "great", "got it", "alright", "cool"
+    }
 
+    stripped = message.strip().lower()
+    if not stripped or len(stripped) < MIN_MEMORY_MSG_LEN:
+        return
+    if stripped in MEMORY_SKIP_PATTERN or len (stripped.split()) <=3:
+        return
     def _store() -> None:
         messages = [{"role": "user", "content": message}]
         _call_with_fallbacks(
@@ -169,6 +167,9 @@ async def fetch_user_context(user_id: str, current_query: str = "") -> str:
 
     query = (current_query or "").strip()
     if not query:
+        return ""
+
+    if len(query.split()) <= 2:
         return ""
 
     def _search() -> list[Any]:
