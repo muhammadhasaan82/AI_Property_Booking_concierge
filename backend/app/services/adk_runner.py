@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -41,9 +42,9 @@ from .redis_store import (
     get_session_snapshot,
     save_session_snapshot,
 )
-
+ADK_TURN_TIMEOUT = float(os.getenv("ADK_TURN_TIMEOUT", "30"))
 logger = logging.getLogger(__name__)
-
+MEM0_ENABLED = os.getenv("MEM0_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 ADK_ENABLED = True
 
 _session_service: Optional["RedisSessionService"] = None
@@ -506,26 +507,28 @@ def _get_session_service() -> RedisSessionService:
     return _session_service
 
 
-async def _build_invocation_state_delta(user_id: str, current_query: str) -> dict[str, Any]:
+async def _build_invocation_state_delta(user_id: str, current_query: str, session_id: str) -> dict[str, Any]:
     user_cognitive_context = ""
 
     if len(current_query.strip().split()) > 2:
-        try:
-            from .memory_engine import fetch_user_context
-            mem0_context = await fetch_user_context(
-                user_id=user_id,
-                current_query=current_query,
-            )
-            user_cognitive_context = _normalize_cognitive_context(mem0_context)
-            user_cognitive_context = _truncate_text_chars(
-                user_cognitive_context,
-                ADK_MAX_COGNITIVE_CONTEXT_CHARS,
-            )
-        except Exception as exc:
-            logger.debug("[ADK] Could not fetch cognitive context: %s", exc)
+        if MEM0_ENABLED:
+            try:
+                from .memory_engine import fetch_user_context
+                mem0_context = await fetch_user_context(
+                    user_id=user_id,
+                    current_query=current_query,
+                    session_id=session_id,
+                )
+                user_cognitive_context = _normalize_cognitive_context(mem0_context)
+                user_cognitive_context = _truncate_text_chars(
+                    user_cognitive_context,
+                    ADK_MAX_COGNITIVE_CONTEXT_CHARS,
+                )
+            except Exception as exc:
+                logger.debug("[ADK] Could not fetch cognitive context: %s", exc)
     soft_state = {}
     try:
-        snapshot = await get_session_snapshot(user_id)
+        snapshot = await get_session_snapshot(session_id)
         soft_state = snapshot.get("state", {}).get("soft_state", {})
     except Exception:
         pass
@@ -619,7 +622,7 @@ async def run_adk_turn(
 
     runner = _get_runner()
     session_service = _get_session_service()
-    state_delta = await _build_invocation_state_delta(user_id=user_id, current_query=cleaned_message)
+    state_delta = await _build_invocation_state_delta(user_id=user_id, current_query=cleaned_message, session_id=session_id)
     user_cognitive_context = _normalize_cognitive_context(state_delta.get("user_cognitive_context"))
 
     user_content = Content(parts=[Part(text=cleaned_message)])
@@ -632,57 +635,61 @@ async def run_adk_turn(
     pipeline_failed_reply = ""
 
     try:
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=user_content,
-            state_delta=state_delta,
-        ):
-            tool_name, tool_params = _extract_tool_call(event)
-            if tool_name:
-                if await anomaly.check_tool_loop(session_id, tool_name, tool_params):
-                    anomaly_triggered = True
+        async with asyncio.timeout(ADK_TURN_TIMEOUT):
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=user_content,
+                state_delta=state_delta,
+            ):
+                tool_name, tool_params = _extract_tool_call(event)
+                if tool_name:
+                    if await anomaly.check_tool_loop(session_id, tool_name, tool_params):
+                        anomaly_triggered = True
+                        tool_calls_log.append({
+                            "tool": tool_name,
+                            "params_hash": hashlib.md5(
+                                json.dumps(tool_params, sort_keys=True, default=str).encode()
+                            ).hexdigest()[:12],
+                            "result_status": "anomaly_blocked",
+                        })
+                        break
+                    await anomaly.record_tool_call(session_id, tool_name, tool_params)
                     tool_calls_log.append({
                         "tool": tool_name,
                         "params_hash": hashlib.md5(
                             json.dumps(tool_params, sort_keys=True, default=str).encode()
                         ).hexdigest()[:12],
-                        "result_status": "anomaly_blocked",
+                        "result_status": "ok",
                     })
-                    break
-                await anomaly.record_tool_call(session_id, tool_name, tool_params)
-                tool_calls_log.append({
-                    "tool": tool_name,
-                    "params_hash": hashlib.md5(
-                        json.dumps(tool_params, sort_keys=True, default=str).encode()
-                    ).hexdigest()[:12],
-                    "result_status": "ok",
-                })
-                continue
-
-            author = getattr(event, "author", None)
-            event_text = _extract_text_parts(event)
-
-            if author == "triage_router" and event_text:
-                router_output = event_text
-
-            if author == "concierge_voice":
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if hasattr(part, "text") and part.text:
-                            streamed_parts.append(part.text)
-                            yield part.text
-
-            if event.is_final_response():
-                if author == "triage_router":
                     continue
+
+                author = getattr(event, "author", None)
+                event_text = _extract_text_parts(event)
+
+                if author == "triage_router" and event_text:
+                    router_output = event_text
+
                 if author == "concierge_voice":
-                    if not streamed_parts and event_text:
-                        streamed_parts.append(event_text)
-                        yield event_text
-                    break
-                if streamed_parts:
-                    break
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, "text") and part.text:
+                                streamed_parts.append(part.text)
+                                yield part.text
+
+                if event.is_final_response():
+                    if author == "triage_router":
+                        continue
+                    if author == "concierge_voice":
+                        if not streamed_parts and event_text:
+                            streamed_parts.append(event_text)
+                            yield event_text
+                        break
+                    if streamed_parts:
+                        break
+
+    except asyncio.TimeoutError:
+        logger.error("[ADK] Turn timed out after %ss - check providers keys/networks", ADK_TURN_TIMEOUT)
 
     except Exception as exc:
         logger.error("[ADK] Pipeline execution error: %s", exc, exc_info=True)
