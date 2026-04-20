@@ -281,7 +281,7 @@ async def clear_session_snapshot(session_id: str) -> None:
             logger.error("[Redis] Failed to clear session snapshot for %s: %s", session_id, exc)
     _LOCAL_FALLBACK.pop(session_id, None)
 
-    async def reset_session_for_testing(session_id: str) -> None:
-            """Wipe all the state for a session. Use in tests to avoid stale data."""
-            await clear_session_snapshot(session_id)
-            logger.debug("[Redis] Session %s reset for testing. ", session_id)
+async def clear_session_for_testing(session_id: str) -> None:
+    """Wipe all the state for a session. Use in tests to avoid stale data."""
+    await clear_session_snapshot(session_id)
+    logger.debug("[Redis] Session %s reset for testing. ", session_id)

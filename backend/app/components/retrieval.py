@@ -1,17 +1,16 @@
 from __future__ import annotations
 from contextlib import contextmanager
-from huggingface_hub import login, whoami
+from huggingface_hub import login
 import os
 from dotenv import load_dotenv
 import json
 import threading
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
-from huggingface_hub import login, whoami
 from app.services.dynamic_config import get_retrieval_config
 
 load_dotenv()
-login(token=os.getenv("HF_TOKEN"))
+# login(token=os.getenv("HF_TOKEN"))
 _RETRIEVAL_CFG = get_retrieval_config()
 CHROMA_DIR = os.getenv("CHROMA_DIR", _RETRIEVAL_CFG.chroma.persist_dir)
 EMBED_MODEL = os.getenv("EMBED_MODEL", _RETRIEVAL_CFG.embeddings.model_name)
@@ -105,7 +104,7 @@ def build_doc_text(p: Dict) -> str:
 _chroma_client = None
 _collection = None
 _embedder = None
-login(token=os.getenv("HF_TOKEN"))
+# login(token=os.getenv("HF_TOKEN"))
 def _init_vector_mode() -> bool:
     """Initialize Chroma persistent client, collection, and embedder."""
     global _chroma_client, _collection, _embedder, _HAS_VECTOR
@@ -118,14 +117,14 @@ def _init_vector_mode() -> bool:
                 settings=Settings(anonymized_telemetry=False),
             )
         if _collection is None:
-            login(token=os.getenv("HF_TOKEN"))
+            # login(token=os.getenv("HF_TOKEN"))
             _collection = _chroma_client.get_or_create_collection(
                 name=CHROMA_COLLECTION,
                 metadata={"hnsw:space": "cosine"},
             )
         if _embedder is None:
             if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(EMBED_MODEL):
-                login(token=os.getenv("HF_TOKEN"))
+                # login(token=os.getenv("HF_TOKEN"))
                 raise RuntimeError(
                     f"Embedding model '{EMBED_MODEL}' is not local. "
                     "Set RAG_LOCAL_MODELS_ONLY=0 to allow remote model downloads."
