@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -43,7 +44,7 @@ from .redis_store import (
 )
 
 logger = logging.getLogger(__name__)
-
+MEM0_ENABLED = os.getenv("MEM0_ENABLED", "true").lower() == "true"
 ADK_ENABLED = True
 
 _session_service: Optional["RedisSessionService"] = None
@@ -506,26 +507,28 @@ def _get_session_service() -> RedisSessionService:
     return _session_service
 
 
-async def _build_invocation_state_delta(user_id: str, current_query: str) -> dict[str, Any]:
+async def _build_invocation_state_delta(user_id: str, current_query: str, session_id: str) -> dict[str, Any]:
     user_cognitive_context = ""
 
     if len(current_query.strip().split()) > 2:
-        try:
-            from .memory_engine import fetch_user_context
-            mem0_context = await fetch_user_context(
-                user_id=user_id,
-                current_query=current_query,
-            )
-            user_cognitive_context = _normalize_cognitive_context(mem0_context)
-            user_cognitive_context = _truncate_text_chars(
-                user_cognitive_context,
-                ADK_MAX_COGNITIVE_CONTEXT_CHARS,
-            )
-        except Exception as exc:
-            logger.debug("[ADK] Could not fetch cognitive context: %s", exc)
+        if MEM0_ENABLED:
+            try:
+                from .memory_engine import fetch_user_context
+                mem0_context = await fetch_user_context(
+                    user_id=user_id,
+                    current_query=current_query,
+                    session_id=session_id,
+                )
+                user_cognitive_context = _normalize_cognitive_context(mem0_context)
+                user_cognitive_context = _truncate_text_chars(
+                    user_cognitive_context,
+                    ADK_MAX_COGNITIVE_CONTEXT_CHARS,
+                )
+            except Exception as exc:
+                logger.debug("[ADK] Could not fetch cognitive context: %s", exc)
     soft_state = {}
     try:
-        snapshot = await get_session_snapshot(user_id)
+        snapshot = await get_session_snapshot(session_id)
         soft_state = snapshot.get("state", {}).get("soft_state", {})
     except Exception:
         pass
@@ -619,7 +622,7 @@ async def run_adk_turn(
 
     runner = _get_runner()
     session_service = _get_session_service()
-    state_delta = await _build_invocation_state_delta(user_id=user_id, current_query=cleaned_message)
+    state_delta = await _build_invocation_state_delta(user_id=user_id, current_query=cleaned_message, session_id=session_id)
     user_cognitive_context = _normalize_cognitive_context(state_delta.get("user_cognitive_context"))
 
     user_content = Content(parts=[Part(text=cleaned_message)])

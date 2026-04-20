@@ -159,8 +159,8 @@ def _get_st_model():
             with _local_model_load(RAG_LOCAL_MODELS_ONLY):
                 login(token=os.getenv("HF_TOKEN"))
                 print(whoami())
-
-                _st_model = SentenceTransformer(model_name)
+                cache_folder = os.getenv("cache_folder")
+                _st_model = SentenceTransformer(model_name, cache_folder=cache_folder)
             logger.info("[nlp_engine] sentence-transformers loaded: %s", model_name)
         except Exception as exc:
             logger.warning("[nlp_engine] sentence-transformers unavailable (%s)", exc)

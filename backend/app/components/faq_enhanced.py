@@ -135,7 +135,7 @@ class _SentenceTransformerEmbeddings:
 
         with _local_model_load(RAG_LOCAL_MODELS_ONLY):
             cache_folder = os.getenv("cache_folder")
-            self._model = SentenceTransformer(model_name, device=device)
+            self._model = SentenceTransformer(model_name, device=device, cache_folder = cache_folder)
         self._normalize_embeddings = normalize_embeddings
 
     @staticmethod

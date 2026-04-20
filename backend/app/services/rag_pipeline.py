@@ -121,7 +121,7 @@ def _get_cross_encoder():
 
                     with _local_model_load(RAG_LOCAL_MODELS_ONLY):
                         cache_folder = os.getenv("cache_folder")
-                        _cross_encoder = CrossEncoder(model_name)
+                        _cross_encoder = CrossEncoder(model_name, cache_folder=cache_folder)
                 except Exception as e:
                     logger.warning("Cross-encoder unavailable: %s", e)
     return _cross_encoder
