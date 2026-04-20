@@ -200,12 +200,13 @@ async def cmd_flow(args: argparse.Namespace) -> int:
     """Run a multi-step conversation through the ADK pipeline."""
 
     session_id = args.session_id or "cli_flow_session"
-    user_id = args.user.id or "cli_user"
+    user_id = args.user_id or "cli_user"
+    steps = _resolve_flow_steps(args)
     if args.reset_session:
         from app.services.redis_store import clear_session_snapshot
         await clear_session_snapshot(session_id)
         print(f"[Session] Cleared stale for session:{session_id}")
-        steps = _resolve_flow_steps(args)
+        
     if not steps:
         print("No steps provided. Use --steps, --script, --demo-booking, or --demo-memory-fallback.")
         return 1

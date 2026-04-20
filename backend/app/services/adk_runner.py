@@ -44,7 +44,7 @@ from .redis_store import (
 )
 
 logger = logging.getLogger(__name__)
-MEM0_ENABLED = os.getenv("MEM0_ENABLED", "true").lower() == "true"
+MEM0_ENABLED = os.getenv("MEM0_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 ADK_ENABLED = True
 
 _session_service: Optional["RedisSessionService"] = None
