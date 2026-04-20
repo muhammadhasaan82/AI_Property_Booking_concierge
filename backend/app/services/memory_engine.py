@@ -159,7 +159,7 @@ async def extract_and_store(user_id: str, message: str) -> None:
         logger.warning("[Memory] Failed to store context for user %s: %s", user_id, exc)
 
 
-async def fetch_user_context(user_id: str, current_query: str = "") -> str:
+async def fetch_user_context(user_id: str, current_query: str = "", session_id: str ="") -> str:
     """Retrieve relevant historical user preferences from local Mem0."""
     client = _get_client()
     if client is None:

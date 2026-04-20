@@ -24,12 +24,12 @@ def _maybe_auto_supabase() -> None:
     if not auto:
         return
     try:
-        # Start services (idempotent if already running)
+
         subprocess.run(["supabase", "start", "--yes"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
     try:
-        # Read env values for this project
+
         res = subprocess.run(["supabase", "status", "-o", "env"], check=False, capture_output=True, text=True)
         for line in (res.stdout or "").splitlines():
             if line.startswith("API_URL="):
@@ -42,7 +42,6 @@ def _maybe_auto_supabase() -> None:
                 os.environ["SUPABASE_ANON_KEY"] = line.split("=", 1)[1].strip()
         print("[Supabase] Studio: http://localhost:54323", flush=True)
         print("[Supabase] Tables: public.chat_history, public.successful_bookings", flush=True)
-        # Auto-init schema to ensure tables exist
         try:
             from app.services import db_setup as _db
             _db.init_schema(None)
@@ -56,14 +55,13 @@ def _maybe_auto_supabase() -> None:
             print(f"[Supabase] Schema init skipped: {_e}", flush=True)
     except Exception:
         pass
-    # Optionally open Studio in a browser
     if open_studio:
         try:
             import webbrowser
             webbrowser.open("http://localhost:54323")
         except Exception:
             pass
-    # Remove the flag before argparse
+
     if "--auto-supabase" in sys.argv:
         sys.argv.remove("--auto-supabase")
     if "--open-studio" in sys.argv:
@@ -149,8 +147,15 @@ def _resolve_flow_steps(args: argparse.Namespace) -> List[str]:
     ]
 
 async def cmd_chat(args: argparse.Namespace) -> int:
+    session_id = args.session_id or "cli_test_session_001"
+    user_id = args.user_id or "cli_user"
+
+    if args.reset_session:
+            from app.services.redis_store import clear_session_snapshot
+            await clear_session_snapshot(session_id)
+            print(f"[Session] Cleared stale for session:{session_id}")
+
     print("[BOT] AI Concierge Console (interactive). Type 'exit' to quit.")
-    # Streaming callback for CLI (default ON)
     def stream_cb(chunk: str):
         print(chunk, end="", flush=True)
 
@@ -164,12 +169,6 @@ async def cmd_chat(args: argparse.Namespace) -> int:
         if user.lower() in ("exit", "quit", ":q"):
             print("Bye!")
             return 0
-
-        # Create a static session ID for the CLI test
-        session_id = args.session_id or "cli_test_session_001"
-        user_id = args.user_id or "cli_user"
-
-        # Run the message through the ADK (streaming)
         print("\nConcierge: ", end="", flush=True)
         async for chunk in run_adk_turn(
             user_id=user_id,
@@ -199,7 +198,14 @@ async def cmd_say(args: argparse.Namespace) -> int:
 
 async def cmd_flow(args: argparse.Namespace) -> int:
     """Run a multi-step conversation through the ADK pipeline."""
-    steps = _resolve_flow_steps(args)
+
+    session_id = args.session_id or "cli_flow_session"
+    user_id = args.user.id or "cli_user"
+    if args.reset_session:
+        from app.services.redis_store import clear_session_snapshot
+        await clear_session_snapshot(session_id)
+        print(f"[Session] Cleared stale for session:{session_id}")
+        steps = _resolve_flow_steps(args)
     if not steps:
         print("No steps provided. Use --steps, --script, --demo-booking, or --demo-memory-fallback.")
         return 1
@@ -272,8 +278,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--auto-supabase", action="store_true", help="Auto-start Supabase and export env for this session")
         sp.add_argument("--session-id", type=str, default=None, help="Reuse a session ID for multi-turn tests")
         sp.add_argument("--user-id", type=str, default=None, help="User ID for the session")
+        sp.add_argument("--reset-session", action="store_true", help="Clear session state before running")
 
-    # root options (so running without subcommand works)
     add_common_chat_opts(p)
 
     sub = p.add_subparsers(dest="cmd")
@@ -293,8 +299,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp_flow.add_argument("--script", type=str, default=None, help="Path to a text file with one message per line")
     sp_flow.add_argument("--demo-booking", action="store_true", help="Run a built-in booking demo flow")
     sp_flow.add_argument("--demo-memory-fallback", action="store_true", help="Run a booking flow that relies on memory for property_id")
+    sp_flow.add_argument("--reset-session", action="store_true", help="clear session state before running")
     sp_flow.set_defaults(func=lambda a: _run_async(cmd_flow(a)))
-
+    
     sp_search = sub.add_parser("search", help="Direct property search (debug)")
     sp_search.add_argument("--query", type=str, default="", help="Free-text query")
     sp_search.add_argument("--budget", type=float, default=None)

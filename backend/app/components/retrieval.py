@@ -132,7 +132,7 @@ def _init_vector_mode() -> bool:
                 )
             with _local_model_load(RAG_LOCAL_MODELS_ONLY):
                 cache_folder = os.getenv("cache_folder")
-                _embedder = SentenceTransformer(EMBED_MODEL)
+                _embedder = SentenceTransformer(EMBED_MODEL, cache_folder=cache_folder)
         return True
     except Exception as e:
         print(f"[retrieval] Disable vector mode due to init error: {e}")
