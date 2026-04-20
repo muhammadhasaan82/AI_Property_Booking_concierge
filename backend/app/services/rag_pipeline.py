@@ -9,9 +9,7 @@ Advanced RAG Pipeline Utilities
 - CAG (Cache-Augmented Generation)
 """
 from __future__ import annotations
-
 import hashlib
-from huggingface_hub import whoami
 import os
 from huggingface_hub import login
 import re
@@ -21,10 +19,8 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
 import httpx
 from dotenv import load_dotenv
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,8 +32,8 @@ else:
     env_path_svc = Path(__file__).parent / ".env"
     if env_path_svc.exists():
         load_dotenv(env_path_svc)
-        login(token=os.getenv("HF_TOKEN"))
-        print(whoami())
+        # login(token=os.getenv("HF_TOKEN"))
+        # print(whoami())
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 EMBED_MODEL = ""
@@ -115,13 +111,14 @@ def _get_cross_encoder():
                     model_name = _retrieval_cfg().ranking.cross_encoder_model
                     if RAG_LOCAL_MODELS_ONLY and not _is_local_model_reference(model_name):
                         return None
-                    login(token=os.getenv("HF_TOKEN"))
-                    print(whoami())
+                    hf_token = os.getenv("HF_TOKEN")
+                    if hf_token:
+                        login(token=hf_token)
                     from sentence_transformers import CrossEncoder
 
                     with _local_model_load(RAG_LOCAL_MODELS_ONLY):
                         cache_folder = os.getenv("cache_folder")
-                        _cross_encoder = CrossEncoder(model_name)
+                        _cross_encoder = CrossEncoder(model_name, cache_folder=cache_folder)
                 except Exception as e:
                     logger.warning("Cross-encoder unavailable: %s", e)
     return _cross_encoder

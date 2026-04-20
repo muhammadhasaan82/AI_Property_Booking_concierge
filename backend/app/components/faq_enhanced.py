@@ -6,7 +6,7 @@ Handles company policy questions using semantic search
 from __future__ import annotations
 from contextlib import contextmanager
 import os
-from huggingface_hub import login, whoami
+from huggingface_hub import login
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
@@ -40,9 +40,6 @@ env_path_services = Path(__file__).parent / ".env"
 
 if env_path_root.exists():
     load_dotenv(env_path_root)
-    login(token=os.getenv("HF_TOKEN"))
-    print(whoami())
-
 elif env_path_services.exists():
     load_dotenv(env_path_services)
 
@@ -125,17 +122,19 @@ class _SentenceTransformerEmbeddings:
 
     def __init__(self, model_name: str, *, device: str = "cpu", normalize_embeddings: bool = True):
         try: 
-            load_dotenv()
-            login(token=os.getenv("HF_TOKEN"))
-            print(whoami())
+            # load_dotenv()
+            # login(token=os.getenv("HF_TOKEN"))
+            # print(whoami())
             
             from sentence_transformers import SentenceTransformer
         except Exception as exc:
             raise ImportError("sentence-transformers is unavailable") from exc
-
+        hf_token = os.getenv("HF_TOKEN")
+        if hf_token:
+            login(token=hf_token)
         with _local_model_load(RAG_LOCAL_MODELS_ONLY):
             cache_folder = os.getenv("cache_folder")
-            self._model = SentenceTransformer(model_name, device=device)
+            self._model = SentenceTransformer(model_name, device=device, cache_folder = cache_folder)
         self._normalize_embeddings = normalize_embeddings
 
     @staticmethod
@@ -755,5 +754,5 @@ def extract_key_sentences(context: str, question: str, max_lines: int = 10) -> s
     return _clean_pdf_artifacts(result)
 
 
-initialize_faq_system()
+# initialize_faq_system()
 

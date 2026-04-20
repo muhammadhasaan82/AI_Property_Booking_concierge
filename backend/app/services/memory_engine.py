@@ -62,7 +62,7 @@ def initialize_memory():
                 "config": {
                     "model": os.getenv(
                         "MEM0_EMBEDDER_MODEL",
-                        "BAAI/bge-large-en-v1.5",
+                        "BAAI/bge-base-en-v1.5",
                     ),
                 },
             },
@@ -115,7 +115,7 @@ def _get_client():
         logger.info(
             "[Memory] Local Mem0 initialized (llm=litellm:%s, embedder=huggingface:%s, vector_store=chroma:%s)",
             os.getenv("MEM0_LLM_MODEL", "groq/llama-3.3-70b-versatile"),
-            os.getenv("MEM0_EMBEDDER_MODEL", "BAAI/bge-large-en-v1.5"),
+            os.getenv("MEM0_EMBEDDER_MODEL", "BAAI/bge-base-en-v1.5"),
             os.getenv("MEM0_COLLECTION_NAME", "ai_concierge_memories"),
         )
     else:
@@ -159,7 +159,7 @@ async def extract_and_store(user_id: str, message: str) -> None:
         logger.warning("[Memory] Failed to store context for user %s: %s", user_id, exc)
 
 
-async def fetch_user_context(user_id: str, current_query: str = "") -> str:
+async def fetch_user_context(user_id: str, current_query: str = "", session_id: str ="") -> str:
     """Retrieve relevant historical user preferences from local Mem0."""
     client = _get_client()
     if client is None:

@@ -5,21 +5,19 @@ Intent and lexical behavior are loaded from dynamic YAML configuration.
 Model loading is lazy and degrades gracefully when optional NLP dependencies
 are unavailable.
 """
-
 from __future__ import annotations
-
 import asyncio
 from contextlib import contextmanager
 import logging
 from dotenv import load_dotenv
-from huggingface_hub import login, whoami
+from huggingface_hub import login
 import os
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 load_dotenv()
-login(token=os.getenv("HF_TOKEN"))
+# login(token=os.getenv("HF_TOKEN"))
 
 from app.services.dynamic_config import get_intent_catalog as _get_catalog
 from app.services.dynamic_config import get_retrieval_config as _get_retrieval_config
@@ -157,10 +155,12 @@ def _get_st_model():
             from sentence_transformers import SentenceTransformer
 
             with _local_model_load(RAG_LOCAL_MODELS_ONLY):
-                login(token=os.getenv("HF_TOKEN"))
-                print(whoami())
-
-                _st_model = SentenceTransformer(model_name)
+                hf_token = os.getenv("HF_TOKEN")
+                # print(whoami())
+                if hf_token:
+                    login(token=hf_token)
+                cache_folder = os.getenv("cache_folder")
+                _st_model = SentenceTransformer(model_name, cache_folder=cache_folder)
             logger.info("[nlp_engine] sentence-transformers loaded: %s", model_name)
         except Exception as exc:
             logger.warning("[nlp_engine] sentence-transformers unavailable (%s)", exc)

@@ -1,4 +1,3 @@
-##services/faq.py
 from __future__ import annotations
 import os
 from typing import Optional
@@ -7,9 +6,6 @@ from supabase import create_client, Client
 from app.services.config import MOCK_MODE
 
 _SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-# Use service role key for server-side operations (bypasses RLS appropriately).
-# The anon key is scoped to public/unauthenticated access and must NOT be used
-# for server-side writes.
 _SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 _sb: Client | None = None
@@ -39,12 +35,11 @@ def faq_lookup(question: str) -> Optional[str]:
         return None
 
     try:
-        # 1) Try exact case-insensitive
+
         res = sb.table("faqs").select("answer").ilike("question", q).limit(1).execute()
         if res.data:
             return res.data[0]["answer"]
 
-        # 2) Try contains match (wrap with %...%)
         res2 = sb.table("faqs").select("answer").ilike("question", f"%{q}%").limit(1).execute()
         if res2.data:
             return res2.data[0]["answer"]

@@ -1,4 +1,3 @@
-# app/agents/adk_agents.py
 """
 ADK 2.0 — Native V2 Agentic Architecture
 
@@ -29,29 +28,18 @@ from google.genai import types as genai_types
 from app.config.agent_config_loader import cfg
 from app.agents.prompts.loader import load_prompt
 
-# Disable LiteLLM telemetry
 litellm.telemetry = False
 os.environ["LITELLM_TELEMETRY"] = "False"
 os.environ["LITELLM_LOG"] = "ERROR"
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Expose model names for sub-modules that need them (no circular import)
-# Both come from cfg which reads env vars with YAML as fallback.
-# ---------------------------------------------------------------------------
 DISPATCHER_MODEL: str = cfg.dispatcher_model
 VOICE_MODEL: str = cfg.voice_model
 
-# ---------------------------------------------------------------------------
-# Dual-Model Backends (via LiteLLM — no Google Cloud dependency)
-# ---------------------------------------------------------------------------
 dispatcher_llm = LiteLlm(model=DISPATCHER_MODEL)
 voice_llm = LiteLlm(model=VOICE_MODEL)
 
-# ---------------------------------------------------------------------------
-# Generation configs — temperatures from agent_config.yaml
-# ---------------------------------------------------------------------------
 DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
     temperature=cfg.dispatcher_temperature,
 )
@@ -59,37 +47,27 @@ VOICE_CONFIG = genai_types.GenerateContentConfig(
     temperature=cfg.voice_temperature,
 )
 
-# ---------------------------------------------------------------------------
-# Prompt loading — prompts live in app/prompts/*.md
-# Editable without touching Python.
-# ---------------------------------------------------------------------------
 TRIAGE_INSTRUCTION: str = load_prompt("triage_instruction.md")
 VOICE_INSTRUCTION: str = load_prompt("voice_instruction.md")
 
-# ---------------------------------------------------------------------------
-# Tool imports — all tool functions live in their respective sub-modules
-# ---------------------------------------------------------------------------
-from .tools.search import (  # noqa: E402
+from .tools.search import (
     get_all_available_cities,
     search_properties,
     get_property_details,
     select_property,
 )
-from .tools.booking import (  # noqa: E402
+from .tools.booking import (
     request_booking_details,
     review_booking_details,
     process_v2_booking,
 )
-from .tools.support import (  # noqa: E402
+from .tools.support import (
     handle_small_talk,
     check_faq,
     check_booking_status,
     escalate_to_human,
 )
 
-# ---------------------------------------------------------------------------
-# ADK Agent Nodes
-# ---------------------------------------------------------------------------
 
 triage_router = LlmAgent(
     model=dispatcher_llm,
@@ -122,9 +100,6 @@ concierge_voice = LlmAgent(
     generate_content_config=VOICE_CONFIG,
 )
 
-# ---------------------------------------------------------------------------
-# Sequential Pipeline (The V2 Brain)
-# ---------------------------------------------------------------------------
 
 root_agent = SequentialAgent(
     name="concierge_pipeline",

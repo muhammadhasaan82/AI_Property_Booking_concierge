@@ -19,20 +19,14 @@ def _parse_bool(value: str) -> bool:
 def _parse_csv_set(raw: str) -> Set[str]:
     return {token.strip().lower() for token in raw.split(",") if token.strip()}
 
-
-# --- Environment Loading ---
 _repo_root = Path(__file__).resolve().parents[3]
 _env_root = _repo_root / ".env"
 _env_services = Path(__file__).parent / ".env"
 if _env_root.exists():
     load_dotenv(_env_root)
-elif _env_services.exists():
-    load_dotenv(_env_services)
+if _env_services.exists():
+    load_dotenv(_env_services, override=True)
 
-
-# ---------------------------------------------------------------------------
-# Environment-driven runtime settings
-# ---------------------------------------------------------------------------
 DATASET_PATH: str = os.getenv("DATASET_PATH", "data/dataset.csv")
 MOCK_MODE: bool = _parse_bool(os.getenv("MOCK_MODE", "false"))
 PAYMENT_BASE_URL: str = os.getenv("PAYMENT_BASE_URL", "https://example.com/pay")
@@ -42,8 +36,6 @@ ADK_SESSION_MAX_EVENTS: int = int(os.getenv("ADK_SESSION_MAX_EVENTS", "12"))
 ADK_SESSION_MAX_CONTEXT_CHARS: int = int(os.getenv("ADK_SESSION_MAX_CONTEXT_CHARS", "12000"))
 ADK_MAX_COGNITIVE_CONTEXT_CHARS: int = int(os.getenv("ADK_MAX_COGNITIVE_CONTEXT_CHARS", "3000"))
 
-
-# Non-routing compatibility constant used by search component.
 _DEFAULT_SEED_PROPERTY_TYPES: Final[Set[str]] = {
     "condo",
     "loft",
