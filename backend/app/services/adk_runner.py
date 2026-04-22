@@ -42,7 +42,7 @@ from .redis_store import (
     get_session_snapshot,
     save_session_snapshot,
 )
-ADK_TURN_TIMEOUT = float(os.getenv("ADK_TURN_TIMEOUT", "30"))
+ADK_TURN_TIMEOUT = float(os.getenv("ADK_TURN_TIMEOUT", "45"))
 logger = logging.getLogger(__name__)
 MEM0_ENABLED = os.getenv("MEM0_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 ADK_ENABLED = True

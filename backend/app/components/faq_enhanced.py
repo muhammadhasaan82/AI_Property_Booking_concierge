@@ -129,10 +129,10 @@ class _SentenceTransformerEmbeddings:
             from sentence_transformers import SentenceTransformer
         except Exception as exc:
             raise ImportError("sentence-transformers is unavailable") from exc
-        hf_token = os.getenv("HF_TOKEN")
-        if hf_token:
-            login(token=hf_token)
         with _local_model_load(RAG_LOCAL_MODELS_ONLY):
+            hf_token = os.getenv("HF_TOKEN")
+            if hf_token:
+                login(token=hf_token)
             cache_folder = os.getenv("cache_folder")
             self._model = SentenceTransformer(model_name, device=device, cache_folder = cache_folder)
         self._normalize_embeddings = normalize_embeddings
@@ -610,7 +610,7 @@ def best_effort_policy_answer(question: str) -> Optional[str]:
                 return answer
 
     try:
-        from .faq import faq_lookup
+        from app.services.faq import faq_lookup
 
         return faq_lookup(question)
     except Exception as exc:
