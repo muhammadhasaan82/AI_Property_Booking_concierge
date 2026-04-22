@@ -163,7 +163,7 @@ async def _get_redis_client():
             _LAST_PING_AT = now
             return _REDIS_CLIENT
         except Exception as exc:
-            logger.error("[Redis] Redis unavailable, using local fallback: %s", exc)
+            logger.debug("[Redis] Redis unavailable, using local fallback: %s", exc)
             _REDIS_CLIENT = None
             return None
     return _REDIS_CLIENT
