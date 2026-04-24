@@ -9,6 +9,7 @@ Advanced RAG Pipeline Utilities
 - CAG (Cache-Augmented Generation)
 """
 from __future__ import annotations
+import multiprocessing
 import hashlib
 import os
 from huggingface_hub import login
@@ -90,7 +91,7 @@ def _embedding_normalize() -> bool:
 
 _cross_encoder = None
 _cross_encoder_lock = threading.Lock()
-_rerank_pool = ThreadPoolExecutor(max_workers=2)
+_rerank_pool = ThreadPoolExecutor(max_workers=max(4, multiprocessing.cpu_count()*2))
 
 
 def get_embedding_backend_config() -> Dict[str, Any]:

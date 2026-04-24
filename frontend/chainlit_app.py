@@ -1,8 +1,9 @@
 import asyncio
+import concurrent.futures
+import multiprocessing
 from pathlib import Path
 import os
 import sys
-from pathlib import Path
 from uuid import uuid4
 
 if sys.platform == "win32":
@@ -281,10 +282,19 @@ async def on_chat_resume(thread):
             cl.user_session.set("past_thread_id", past_thread_id)
             cl.user_session.set("session_id", past_thread_id)
 
-
+_pool_initialized = False
 @cl.on_chat_start
 async def on_chat_start():
-
+    global _pool_initialized
+    if not _pool_initialized:
+        workers = multiprocessing.cpu_count() *5
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+        try:
+            asyncio.get_running_loop().set_default_executor(pool)
+            print(f"[*] Chainlit Multithread Pool Initialized with {workers} workers")
+        except Exception as e:
+            print(f"[*] Could not set thread pool: {e}")
+        _pool_initialized = True 
     cl.user_session.set("app_name", "AI Booking")
     cl.user_session.set("app_description", "AI Property Booking Concierge")
 
