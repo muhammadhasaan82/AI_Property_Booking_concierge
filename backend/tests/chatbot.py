@@ -1,7 +1,7 @@
 from torch import multiprocessing
 from __future__ import annotations
 import concurrent.futures
-import multiprocessing
+#
 import argparse
 import asyncio
 import json
@@ -148,7 +148,7 @@ def _resolve_flow_steps(args: argparse.Namespace) -> List[str]:
         "2 guests",
         "Yes confirm booking",
     ]
-async def setup_multithread_pool()
+async def setup_multithread_pool():
     """Shifts asyncio to use a multithread pool for parallel computing"""
     workers = multiprocessing.cpu_count() * 5
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
