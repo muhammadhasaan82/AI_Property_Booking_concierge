@@ -25,16 +25,8 @@ from typing import Any, FrozenSet
 
 import yaml
 
-
-# ---------------------------------------------------------------------------
-# YAML file location
-# ---------------------------------------------------------------------------
 _CONFIG_PATH = Path(__file__).resolve().parent / "agent_config.yaml"
 
-
-# ---------------------------------------------------------------------------
-# Minimal dot-access namespace
-# ---------------------------------------------------------------------------
 class _Namespace:
     """Recursive dot-access wrapper over a plain dict."""
 
@@ -50,13 +42,7 @@ class _Namespace:
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
 
-    def __repr__(self) -> str:  # pragma: no cover
-        return f"<Config {self.__dict__}>"
-
-
-# ---------------------------------------------------------------------------
-# Env-override helpers
-# ---------------------------------------------------------------------------
+        return f"<Config {self.__dict__}>"  
 
 def _env_int(key: str, default: int) -> int:
     raw = os.getenv(key, "").strip()
@@ -77,11 +63,6 @@ def _env_float(key: str, default: float) -> float:
 def _env_str(key: str, default: str) -> str:
     return os.getenv(key, "").strip() or default
 
-
-# ---------------------------------------------------------------------------
-# Loader
-# ---------------------------------------------------------------------------
-
 def _load() -> "_AgentConfig":
     with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
         raw: dict = yaml.safe_load(f)
@@ -99,7 +80,6 @@ class _AgentConfig:
     def __init__(self, raw: dict) -> None:
         self._raw = raw
 
-        # ── Models ──
         m = raw["models"]
         self.dispatcher_model: str = _env_str(
             m["dispatcher"]["env_key"], m["dispatcher"]["default"]
@@ -110,7 +90,6 @@ class _AgentConfig:
         )
         self.voice_temperature: float = m["voice"]["temperature"]
 
-        # ── Session ──
         s = raw["session"]
         self.session_ttl: int = _env_int(
             "SOFT_SESSION_CACHE_TTL_SECONDS", s["cache_ttl_seconds"]
@@ -122,7 +101,6 @@ class _AgentConfig:
             "ENGAGEMENT_EXHAUSTED_TURNS", s["unresolved_turns_exhausted"]
         )
 
-        # ── Search ──
         sr = raw["search"]
         self.rerank_limit: int = _env_int(
             "PROPERTY_RERANK_LIMIT", sr["rerank_limit"]
@@ -140,12 +118,10 @@ class _AgentConfig:
             "PROPERTY_SEARCH_SUMMARY_THRESHOLD", sr.get("summary_mode_threshold", 12)
         )
 
-        # ── Dataset ──
         ds = raw["dataset"]
         self.dataset_relative_path: str = ds["relative_path"]
         self.city_column_candidates: list[str] = ds["city_column_candidates"]
 
-        # ── Intent routing ──
         ir = raw["intent_routing"]
         self.history_action_intents: FrozenSet[str] = frozenset(
             ir["history_action_intents"]
@@ -154,7 +130,6 @@ class _AgentConfig:
             ir["new_search_action_intents"]
         )
 
-        # ── Booking ──
         bk = raw["booking"]
         self.date_format: str = bk["date_format"]
         self.booking_required_fields: list[str] = bk["required_fields"]
@@ -162,25 +137,21 @@ class _AgentConfig:
         self.booking_source_tag: str = bk["booking_source_tag"]
         self.booking_confirmed_status: str = bk["booking_confirmed_status"]
 
-        # ── Small talk ──
         st = raw["small_talk"]
         self.small_talk_valid_types: FrozenSet[str] = frozenset(st["valid_types"])
         self.small_talk_default_type: str = st["default_type"]
 
-        # ── Engagement ──
         en = raw["engagement"]
         self.engagement_valid_states: FrozenSet[str] = frozenset(
             en["valid_states"]
         )
 
-        # ── Resolution ──
         res = raw["resolution"]
         self.resolution_valid_intents: FrozenSet[str] = frozenset(
             res["valid_intent_classes"]
         )
         self.resolution_fallback_intent: str = res["fallback_intent"]
 
-        # ── Messages (user-facing copy) ──
         msg = raw["messages"]
         self.msg_resolution_default: str = msg["resolution_unresolved_default"]
         self.msg_resolution_frustrated: str = msg["resolution_unresolved_frustrated"]
@@ -191,15 +162,12 @@ class _AgentConfig:
         )
         self.msg_escalation_default: str = msg["escalation_default_reason"]
 
-        # ── Status strings ──
         st_raw = raw["status"]
         self.status = _Namespace(st_raw)
 
-        # ── Source tags ──
         src_raw = raw["sources"]
         self.source = _Namespace(src_raw)
 
-        # ── Anomaly Detection ──
         an = raw.get("anomaly", {})
         self.anomaly_tool_loop_threshold: int = _env_int(
             "ANOMALY_TOOL_LOOP_THRESHOLD", an.get("tool_loop_threshold", 5)
@@ -218,6 +186,22 @@ class _AgentConfig:
         self.anomaly_exempt_tools: FrozenSet[str] = frozenset(
             an.get("exempt_tools", [])
         )
+        ft = raw.get("features", {})
+        self.feature_understanding_frame: bool = _env_str(
+            "UNDERSTANDING_FRAME_ENABLED",
+            "1" if ft.get("understanding_frame_enabled", True) else "0",
+        ).lower() in {"1", "true", "yes"}
+        self.features_policy_router_mode: str = _env_str(
+            "POLICY_ROUTER_MODE",str(ft.get("policy_router_mode", "off")).lower()
+        )
+        self.feature_response_policies: bool = _env_str(
+            "RESPONSE_POLICIES_ENABLED",
+            "1" if ft.get("response_policies_enabled", True) else "0",
+        ).lower() in {"1", "true", "yes"}
+        self.features_tool_resgistry: bool=_env_str(
+            "TOOL_REGISTRY_ENABLED",
+            "1" if ft.get("tool_registry_enabled", True)else "0"
+        ).lower() in {"1", "true","yes"}
 
     def classify_engagement(self, unresolved_turns: int) -> str:
         """
@@ -235,8 +219,4 @@ class _AgentConfig:
         """Resolve the dataset path relative to the backend root."""
         return backend_root / self.dataset_relative_path
 
-
-# ---------------------------------------------------------------------------
-# Singleton — loaded once, shared everywhere
-# ---------------------------------------------------------------------------
 cfg: _AgentConfig = _load()

@@ -35,8 +35,6 @@ from .helpers import (
 
 logger = logging.getLogger(__name__)
 
-# Dataset path and search config — all driven from agent_config.yaml
-# To change the path or rerank limits: edit agent_config.yaml, not this file.
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 DATASET_PATH = _BACKEND_ROOT / cfg.dataset_relative_path
 CITY_COLUMN_CANDIDATES = cfg.city_column_candidates
@@ -45,11 +43,6 @@ PROPERTY_RERANK_TIMEOUT_SECONDS: float = cfg.rerank_timeout
 PROPERTY_RESULT_LIMIT_DEFAULT: int = cfg.search_result_limit
 PROPERTY_RESULT_LIMIT_MAX: int = cfg.search_result_limit_max
 PROPERTY_SUMMARY_THRESHOLD: int = cfg.search_summary_mode_threshold
-
-
-# ---------------------------------------------------------------------------
-# Internal search helpers
-# ---------------------------------------------------------------------------
 
 def _split_amenities_by_known(
     amenities: Optional[List[str]],
@@ -235,11 +228,6 @@ async def _rerank_properties_by_vibe(
         logger.warning("Property re-ranking failed; using default order: %s", exc)
         return results
 
-
-# ---------------------------------------------------------------------------
-# Tool: get_all_available_cities
-# ---------------------------------------------------------------------------
-
 def get_all_available_cities(
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
@@ -266,11 +254,6 @@ def get_all_available_cities(
         return _finalize_payload(payload, action_intent, context_flag)
     except Exception as e:
         return {"status": Status.ERROR, "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# Tool: search_properties
-# ---------------------------------------------------------------------------
 
 async def search_properties(
     city: Optional[str] = None,
@@ -492,11 +475,6 @@ async def search_properties(
     payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
     return _finalize_payload(payload, normalized_action or action_intent, context_flag)
 
-
-# ---------------------------------------------------------------------------
-# Tool: get_property_details
-# ---------------------------------------------------------------------------
-
 async def select_property(
     option_number: Optional[int] = None,
     property_reference: Optional[str] = None,
@@ -519,12 +497,6 @@ async def select_property(
         tool_context=tool_context,
     )
 
-
-# ---------------------------------------------------------------------------
-# Tool: get_property_details
-# ---------------------------------------------------------------------------
-
-
 async def get_property_details(
     property_id: Optional[str] = None,
     selection_number: Optional[int] = None,
@@ -536,18 +508,11 @@ async def get_property_details(
 ) -> dict:
     """Get full details of a specific property by its ID, index, or natural language reference."""
 
-
-    import os
-
     import time
     from ...components.search import _DATASET
     from ..resolvers.property_resolver import resolve_property_reference
 
-
     DISPATCHER_MODEL = cfg.dispatcher_model
-    DISPATCHER_MODEL = os.getenv("ADK_DISPATCHER_MODEL", "openai/gpt-5-nano")
-
-
     soft_state = _get_soft_state(tool_context)
     resolved_from_history = False
     resolution = None
@@ -555,7 +520,6 @@ async def get_property_details(
     last_search = _get_cached_last_search(soft_state)
     selected_item = None
 
-    # 1. DETERMINISTIC RESOLUTION: Match exact option number from memory
     if selection_value is not None and last_search:
         for item in last_search.get("properties", []):
             if item.get("number") == selection_value:
@@ -563,7 +527,6 @@ async def get_property_details(
                 resolved_from_history = True
                 break
 
-        # Handle edge case where number is out of bounds
         if not selected_item:
             shown_count, total_found = _get_active_option_window(soft_state, last_search)
             if shown_count > 0 and selection_value > shown_count:
@@ -582,7 +545,6 @@ async def get_property_details(
                 }
                 return _finalize_payload(payload, action_intent, context_flag)
 
-    # 2. PROBABILISTIC RESOLUTION: Match fuzzy descriptions/text using the LLM Router
     if not selected_item and not _is_blank(property_reference) and last_search:
         active_options = _build_active_options(last_search)
         if active_options:
@@ -615,7 +577,6 @@ async def get_property_details(
                 }
                 return _finalize_payload(payload, action_intent, context_flag)
 
-    # 3. Establish the base ID for dataset lookup
     if selected_item:
         property_id = str(selected_item.get("id") or selected_item.get("title"))
 
@@ -628,7 +589,6 @@ async def get_property_details(
             action_intent, context_flag,
         )
 
-    # 4. FULL DETAILS LOOKUP: Find full description & amenities from _DATASET
     property_id = str(property_id)
     matched_prop = None
     for r in _DATASET:
@@ -636,12 +596,11 @@ async def get_property_details(
         if r_id == property_id:
             matched_prop = r
             break
-        # DYNAMIC FALLBACK: If dataset lacks an explicit ID column, match by title + city
+        
         if selected_item and r.get("title") == selected_item.get("title") and r.get("city") == selected_item.get("city"):
             matched_prop = r
             break
 
-    # 5. ABSOLUTE FALLBACK: Use whatever properties we have in memory
     if not matched_prop and selected_item:
         matched_prop = selected_item
 
