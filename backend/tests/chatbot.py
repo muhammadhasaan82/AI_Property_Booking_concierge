@@ -1,5 +1,6 @@
 from __future__ import annotations
-import argparse
+import concurrent.futures
+from torch import multiprocessing
 import asyncio
 import json
 import selectors
@@ -145,8 +146,14 @@ def _resolve_flow_steps(args: argparse.Namespace) -> List[str]:
         "2 guests",
         "Yes confirm booking",
     ]
+async def setup_multithread_pool():
+    """Shifts asyncio to use a multithread pool for parallel computing"""
+    workers = multiprocessing.cpu_count() * 5
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+    asyncio.get_running_loop().set_default_executor(pool)
 
 async def cmd_chat(args: argparse.Namespace) -> int:
+    await setup_multithread_pool()
     session_id = args.session_id or "cli_test_session_001"
     user_id = args.user_id or "cli_user"
 
@@ -197,6 +204,7 @@ async def cmd_say(args: argparse.Namespace) -> int:
 
 
 async def cmd_flow(args: argparse.Namespace) -> int:
+    await setup_multithread_pool()
     """Run a multi-step conversation through the ADK pipeline."""
 
     session_id = args.session_id or "cli_flow_session"
