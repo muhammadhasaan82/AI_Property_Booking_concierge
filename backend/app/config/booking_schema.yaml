@@ -1,0 +1,96 @@
+# app/config/booking_schema.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Schema-driven booking flow.
+# Existing keys in agent_config.yaml#booking remain for backward compatibility;
+# this file ADDS richer metadata (validators, prompts, ask_order) consumed by
+# the policy router (Phase 3) and the structured understanding frame (Phase 2).
+#
+# To add/remove a booking field: edit this file. No Python changes needed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1.0"
+
+booking:
+  # Mirror agent_config.yaml#booking.required_fields — keep these two in sync
+  # until Phase 3 migrates booking.py off agent_config.yaml.
+  required_fields:
+    - property_id
+    - property_title
+    - guest_name
+    - guest_email
+    - guest_phone
+    - check_in
+    - check_out
+
+  required_numeric_fields:
+    - guests
+    - price_per_night
+
+  # Order in which the policy router asks for missing fields.
+  # Property fields (property_id, property_title, price_per_night) are typically
+  # populated by select_property; the user is asked for these in order:
+  ask_order:
+    - guest_name
+    - guest_email
+    - guest_phone
+    - check_in
+    - check_out
+    - guests
+
+  # User-facing prompts when a field is missing. Edit copy here, not in tools/.
+  field_prompts:
+    guest_name: "May I have your full name for the booking?"
+    guest_email: "What email should I use for your reservation?"
+    guest_phone: "What phone number should I attach to the booking?"
+    check_in: "What check-in date would you prefer?"
+    check_out: "And the check-out date?"
+    guests: "How many guests will be staying?"
+    property_id: "Could you tell me which property you'd like to book?"
+    property_title: "Which property are we booking?"
+    price_per_night: "What's the nightly price for this property?"
+
+  # Per-field validators. Used by policy router and review_booking_details.
+  validators:
+    guest_email:
+      type: regex
+      pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+      message: "That doesn't look like a valid email — could you double-check?"
+
+    guest_phone:
+      type: regex
+      pattern: '^[+]?[0-9 ()\-]{7,20}$'
+      message: "That phone number looks off — could you re-share it?"
+
+    guest_name:
+      type: length
+      min: 2
+      max: 100
+      message: "Could you share your full name?"
+
+    guests:
+      type: integer
+      min: 1
+      max: 20
+      message: "Number of guests must be between 1 and 20."
+
+    price_per_night:
+      type: float
+      min: 0
+      message: "Nightly price must be a non-negative number."
+
+    check_in:
+      type: date
+      format: "%Y-%m-%d"
+      not_before: today
+      message: "Check-in date must be today or later."
+
+    check_out:
+      type: date
+      format: "%Y-%m-%d"
+      after_field: check_in
+      message: "Check-out must be after check-in."
+
+  
+  date_format: "%Y-%m-%d"
+  source_tag: v2_adk
+  confirmed_status: confirmed
