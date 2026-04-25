@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 import asyncio
 import importlib
