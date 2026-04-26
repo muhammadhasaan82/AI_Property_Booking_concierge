@@ -8,7 +8,7 @@ Loads tool_registry.yaml and provides:
 Phase 1: agents/adk_agents.py uses resolve_callables() to build its tool list,
 so adding a tool no longer requires Python edits in adk_agents.py.
 """
-from __future__ import annota   
+from __future__ import annotations
 import importlib
 import logging
 from pathlib import Path
@@ -34,7 +34,7 @@ class ToolSpec(BaseModel):
     rerank: bool = False
     schema_ref: Optional[str] = None
     missing_input_strategy: Optional[str] = None
-    requires_explicit_user_authorization = False
+    requires_explicit_user_authorization: bool = False
 
 class _ToolRegistry:
     def __init__(self, raw: Dict[str, Any]) -> None:

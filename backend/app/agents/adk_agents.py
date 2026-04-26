@@ -20,7 +20,7 @@ from doctest import OutputChecker
 import logging
 import os
 
-from backend.app.agents.tools.search import get_all_available_cities, search_properties
+from app.agents.tools.search import get_all_available_cities, search_properties
 import litellm
 from google.adk.agents import LlmAgent
 from google.adk.agents.sequential_agent import SequentialAgent
@@ -54,9 +54,10 @@ TRIAGE_INSTRUCTION: str = load_prompt("triage_instruction.md")
 VOICE_INSTRUCTION: str = load_prompt("voice_instruction.md")
 
 if cfg.feature_tool_registry and _tool_registry.tools:
-    _resolved_tools = list(_tool_registry.resolve_callables().valuaes())
+        _resolved_tools = list(_tool_registry.resolve_callables().values())
 else:
-    from .tools.search import(
+    from .tools.support import handle_small_talk, check_faq, check_booking_status, escalate_to_human
+    from .tools.search import (
         get_all_available_cities,
         search_properties,
         get_property_details,
@@ -67,18 +68,12 @@ else:
         review_booking_details,
         process_v2_booking,
     )
-    _resolved_tools = (
-        handle_small_talk,
-        chack_faq,
-        check_booking_status,
-        escalate_to_human,
-    )
     _resolved_tools = [
         handle_small_talk,
         search_properties,
         select_property,
         get_property_details,
-        chack_faq,
+        check_faq,
         check_booking_status,
         request_booking_details,
         review_booking_details,

@@ -1,6 +1,4 @@
 """
-app/config/booking_schema_loader.py
-------------------------------------
 Loads booking_schema.yaml at startup. Provides typed validators and prompt
 lookup helpers consumed by the policy router (Phase 3) and downstream tools.
  
@@ -12,7 +10,7 @@ import logging
 import re 
 from datetime import date, datetime 
 from pathlib import Path
-from torch.optim.optimizer import required
+from typing import List, Dict, Optional, Tuple, Any
 import yaml
 from pydantic import BaseModel, Field
 
@@ -58,7 +56,7 @@ def get_required_fields() -> List[str]:
     return list(booking_schema.booking.required_fields)
 
 def get_required_numeric_fields() -> List[str]:
-    return List(booking_schema.booking.required_numeric_fields)
+    return list(booking_schema.booking.required_numeric_fields)
 
 def get_ask_order() -> List[str]:
     return list(booking_schema.booking.ask_order)
@@ -76,13 +74,13 @@ def next_field_to_ask(missing_fields: List[str]) -> Optional[str]:
             return field
     return missing_fields[0]
 
-def validate_field(field: str, value:Any, current_state: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
+def validate_field(field: str, value: Any, current_state: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
     """Validate a single field. Returns (ok, error_message)."""
     spec = booking_schema.booking.validators.get(field)
     if spec is None:
         return True, None
 
-    if value is None or (isinstance(value, str)and not value.strip()):
+    if value is None or (isinstance(value, str) and not value.strip()):
         return False, spec.message or f"{field} is required"
 
     try:
@@ -133,7 +131,7 @@ def validate_full_booking(state: Dict[str, Any]) -> tuple[list[str],Dict[str, st
     missing: List[str] = []
     errors: Dict[str, str] = {}
 
-    for field in get_required_fields() + get_required_fields():
+    for field in get_required_fields() + get_required_numeric_fields():
         value = state.get(field)
         if value is None or (isinstance(value, str) and not value.strip()):
             missing.append(field)

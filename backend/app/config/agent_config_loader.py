@@ -42,7 +42,7 @@ class _Namespace:
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
 
-        return f"<Config {self.__dict__}>"  
+        # return f"<Config {self.__dict__}>"  
 
 def _env_int(key: str, default: int) -> int:
     raw = os.getenv(key, "").strip()
@@ -198,7 +198,7 @@ class _AgentConfig:
             "RESPONSE_POLICIES_ENABLED",
             "1" if ft.get("response_policies_enabled", True) else "0",
         ).lower() in {"1", "true", "yes"}
-        self.features_tool_resgistry: bool=_env_str(
+        self.feature_tool_registry: bool=_env_str(
             "TOOL_REGISTRY_ENABLED",
             "1" if ft.get("tool_registry_enabled", True)else "0"
         ).lower() in {"1", "true","yes"}
