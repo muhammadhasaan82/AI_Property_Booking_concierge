@@ -1,0 +1,122 @@
+# app/config/agent_policy.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Declarative agent policy: confidence thresholds, intent priorities, and
+# per-intent tool-routing rules. The Phase 3 policy router consumes this file
+# to make deterministic decisions on top of the LLM's understanding frame.
+#
+# To change agent behavior — edit this file. No Python changes required.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1.0"
+
+# ── Confidence thresholds for the understanding frame ───────────────────────
+confidence:
+  high: 0.80      # >= high  → execute_tool
+  medium: 0.55    # >= medium → ask_clarification
+  low: 0.30       # < medium → fallback / small talk
+
+# ── Intent priorities (higher number wins) ──────────────────────────────────
+# When the understanding frame surfaces multiple candidate intents in one
+# turn, these rules decide which one wins — deterministically.
+priorities:
+  - id: human_handoff_overrides_all
+    when:
+      primary_intent_in: [human_handoff]
+    prefer_intent: human_handoff
+    priority: 200
+
+  - id: explicit_booking_confirmation
+    when:
+      primary_intent_in: [booking_confirmation]
+      has_pending_booking: true
+    prefer_intent: booking_confirmation
+    priority: 150
+
+  - id: active_selection_beats_faq
+    when:
+      has_active_shortlist: true
+      selection_number_present: true
+    prefer_intent: select_property
+    priority: 120
+
+  - id: booking_continuation_beats_new_search
+    when:
+      has_pending_booking: true
+      awaiting_field_present: true
+    prefer_intent: booking_continuation
+    priority: 100
+
+  - id: explicit_status_beats_booking
+    when:
+      primary_intent_in: [booking_status]
+      explicit_status_keywords: true
+    prefer_intent: booking_status
+    priority: 80
+
+  - id: faq_beats_smalltalk
+    when:
+      primary_intent_in: [faq]
+      faq_question_form: true
+    prefer_intent: faq
+    priority: 50
+
+# ── Per-intent routing rules ────────────────────────────────────────────────
+intents:
+  search_property:
+    allowed_tools: [search_properties]
+    required_fields: [city]
+    optional_fields: [budget, beds, property_type, amenities, free_text]
+    on_missing: ask_clarification
+    clarify_message: >-
+      Which city are you looking in? I can search by city, budget, beds,
+      property type, or vibe.
+
+  select_property:
+    allowed_tools: [select_property, get_property_details]
+    requires_context: [active_shortlist]
+    on_missing_context: ask_clarification
+    clarify_message: >-
+      I don't have an active list of options yet. Want me to search first?
+
+  property_details_request:
+    allowed_tools: [get_property_details]
+
+  faq:
+    allowed_tools: [check_faq]
+    source_priority: [rust_cag, rag, basic_faq]
+    response_policy: faq_answer
+
+  booking_continuation:
+    allowed_tools:
+      - request_booking_details
+      - review_booking_details
+    schema_ref: "booking_schema.yaml#booking"
+    on_missing: ask_next_field
+
+  booking_confirmation:
+    allowed_tools: [process_v2_booking]
+    schema_ref: "booking_schema.yaml#booking"
+    requires_explicit_user_authorization: true
+
+  booking_status:
+    allowed_tools: [check_booking_status]
+    required_fields: [booking_id]
+    on_missing: ask_clarification
+    clarify_message: "What's your booking ID?"
+
+  city_list:
+    allowed_tools: [get_all_available_cities]
+
+  small_talk:
+    allowed_tools: [handle_small_talk]
+
+  human_handoff:
+    allowed_tools: [escalate_to_human]
+    block_other_intents: true
+
+  unclear:
+    allowed_tools: [handle_small_talk]
+    response_policy: casual_interaction
+    fallback_message: >-
+      I want to make sure I help you correctly — could you share a bit more?
+      Are you looking to search properties, ask about policies, or continue a booking?
