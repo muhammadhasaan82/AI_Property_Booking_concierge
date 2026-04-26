@@ -1,0 +1,101 @@
+# app/config/tool_registry.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Soft-coded tool metadata. Tool *functions* stay in app/agents/tools/; this
+# file declares which tools the triage_router exposes, what each requires, and
+# how its output should be styled by the concierge_voice.
+#
+# To add a tool: 1) write the Python function, 2) add an entry here. The agent
+# will pick it up automatically (Phase 1.5 wiring).
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1.0"
+
+tools:
+  search_properties:
+    module: "app.agents.tools.search"
+    function: "search_properties"
+    description: "Search rental properties by city, budget, beds, amenities, type."
+    intents: [search_property, browse_property, compare_property]
+    required_inputs: [city]
+    optional_inputs: [budget, beds, property_type, amenities, free_text, max_results]
+    missing_input_strategy: ask_clarification
+    source_priority: [rust_search, python_search]
+    response_policy: properties_found
+    rerank: true
+
+  select_property:
+    module: "app.agents.tools.search"
+    function: "select_property"
+    description: "Resolve a user-selected option from the active shortlist."
+    intents: [select_property]
+    requires_context: [active_shortlist]
+    response_policy: property_details
+
+  get_property_details:
+    module: "app.agents.tools.search"
+    function: "get_property_details"
+    description: "Return full details for a property by ID, index, or natural reference."
+    intents: [property_details_request]
+    response_policy: property_details
+
+  get_all_available_cities:
+    module: "app.agents.tools.search"
+    function: "get_all_available_cities"
+    description: "List all cities available in the property catalog."
+    intents: [city_list]
+    response_policy: cities_found
+
+  check_faq:
+    module: "app.agents.tools.support"
+    function: "check_faq"
+    description: "Answer policy/cancellation/refund/check-in/house-rule questions."
+    intents: [faq, policy_question]
+    source_priority: [rust_cag, rag, basic_faq]
+    response_policy: faq_answer
+
+  check_booking_status:
+    module: "app.agents.tools.support"
+    function: "check_booking_status"
+    description: "Look up a booking by ID and report its status."
+    intents: [booking_status]
+    required_inputs: [booking_id]
+    response_policy: booking_status_lookup
+
+  handle_small_talk:
+    module: "app.agents.tools.support"
+    function: "handle_small_talk"
+    description: "Respond to greetings, thanks, goodbyes, acknowledgements."
+    intents: [small_talk]
+    response_policy: casual_interaction
+
+  escalate_to_human:
+    module: "app.agents.tools.support"
+    function: "escalate_to_human"
+    description: "Hand the conversation off to a human agent."
+    intents: [human_handoff]
+    response_policy: handoff_required
+
+  request_booking_details:
+    module: "app.agents.tools.booking"
+    function: "request_booking_details"
+    description: "Collect missing booking fields (driven by booking_schema)."
+    intents: [booking_continuation]
+    schema_ref: "booking_schema.yaml#booking"
+    response_policy: gathering_info
+
+  review_booking_details:
+    module: "app.agents.tools.booking"
+    function: "review_booking_details"
+    description: "Show booking summary for the user to confirm before final booking."
+    intents: [booking_continuation]
+    schema_ref: "booking_schema.yaml#booking"
+    response_policy: review_pending
+
+  process_v2_booking:
+    module: "app.agents.tools.booking"
+    function: "process_v2_booking"
+    description: "Finalize and persist the booking. Requires explicit user confirmation."
+    intents: [booking_confirmation]
+    schema_ref: "booking_schema.yaml#booking"
+    response_policy: booking_confirmed
+    requires_explicit_user_authorization: true
