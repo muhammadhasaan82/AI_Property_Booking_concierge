@@ -56,7 +56,7 @@ VOICE_INSTRUCTION: str = load_prompt("voice_instruction.md")
 if cfg.feature_tool_registry and _tool_registry.tools:
     _resolved_tools = list(_tool_registry.resolve_callables().valuaes())
 else:
-    from .tools.searchimport(
+    from .tools.search import(
         get_all_available_cities,
         search_properties,
         get_property_details,
