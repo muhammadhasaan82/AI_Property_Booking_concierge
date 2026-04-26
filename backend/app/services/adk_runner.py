@@ -42,6 +42,9 @@ from .redis_store import (
     get_session_snapshot,
     save_session_snapshot,
 )
+from app.config.response_policies_loader import render_policy_snippet
+from app.config.agent_config_loader import cfg as _cfg
+
 ADK_TURN_TIMEOUT = float(os.getenv("ADK_TURN_TIMEOUT", "45"))
 logger = logging.getLogger(__name__)
 MEM0_ENABLED = os.getenv("MEM0_ENABLED", "1").strip().lower() in ("1", "true", "yes")
@@ -548,6 +551,12 @@ async def _render_voice_from_router_output(
     try:
         import litellm
         from ..agents.adk_agents import VOICE_CONFIG, VOICE_INSTRUCTION, VOICE_MODEL
+        status = None
+        if isinstance(router_output, dict):
+            status = router_output.get("status")
+        response_policy_snippet = ""
+        if _cfg.feature_response and status:
+            response_policy_snippet = render_policy_snippet(status)
 
         system_prompt = (
             VOICE_INSTRUCTION
@@ -568,7 +577,9 @@ async def _render_voice_from_router_output(
                 ],
                 temperature=temperature,
             )
-
+            if response_policy_snippet:
+                system_prompt = system_prompt + "\n\n" + response_policy_snippet
+                
             if getattr(response, "choices", None):
                 choice0 = response.choices[0]
                 message = getattr(choice0, "message", None)
