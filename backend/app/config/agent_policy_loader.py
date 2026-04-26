@@ -4,21 +4,22 @@ router. Pure data layer — no LLM calls, no business logic.
 """
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 import yaml
+import logging
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 _POLICY_PATH = Path(__file__).parent / "agent_policy.yaml"
 
-class CofidenceConfig(BaseModel):
+class ConfidenceConfig(BaseModel):
     high: float = 0.80
     medium: float = 0.55
     low: float = 0.30
 
 class PriorityCondition(BaseModel):
     primary_intent_in: List[str] = Field(default_factory=list)
-    has_active_shortlist: Optioanl[bool] = None
+    has_active_shortlist: Optional[bool] = None
     has_pending_booking: Optional[bool] = None
     awaiting_field_present: Optional[bool] = None
     selection_number_present: Optional[bool] = None
@@ -34,7 +35,7 @@ class PriorityRule(BaseModel):
 class IntentRule(BaseModel):
     allowed_tools: List[str] = Field(default_factory=list)
     required_fields: List[str] = Field(default_factory=list)
-    optional_fields: List[str] = Field(defualt_factory=list)
+    optional_fields: List[str] = Field(default_factory=list)
     requires_context: List[str] = Field(default_factory=list)
     source_priority: List[str] = Field(default_factory=list)
     on_missing: Optional[str] = None
@@ -43,7 +44,7 @@ class IntentRule(BaseModel):
     fallback_intent: Optional[str] = None
     schema_ref: Optional[str] = None
     response_policy: Optional[str] = None
-    requires_explicit_user_authorization: bool = None
+    requires_explicit_user_authorization: Optional[bool] = None
     block_other_intents: bool = False
 
 class _AgentPolicyRoot(BaseModel):
