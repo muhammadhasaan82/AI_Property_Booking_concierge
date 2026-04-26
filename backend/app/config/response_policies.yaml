@@ -1,0 +1,94 @@
+# app/config/response_policies.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-status / per-tool response styling rules. The concierge_voice receives
+# the matching policy block as context so it can format consistently without
+# the prompt being modified for every status.
+#
+# Maps to status strings in agent_config.yaml#status. Add new statuses here
+# whenever a new tool returns a new status.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1.0"
+
+defaults:
+  max_sentences: 5
+  tone: warm
+  language: en
+
+responses:
+  properties_found:
+    style: concise
+    max_items_default: 5
+    include_fields: [number, title, price_per_night, bedrooms, rating]
+    include_fields_summary_mode: [number, title, price_per_night, rating]
+    closing_question: "Would you like details on any of these?"
+
+  no_results:
+    style: helpful
+    suggest_relax_filters: true
+    closing_question: "Want me to widen the search — different city, higher budget, or fewer filters?"
+
+  property_details:
+    style: enthusiastic
+    include_fields: [title, city, price_per_night, bedrooms, bathrooms, amenities, rating, description]
+    closing_question: "Want to book this one?"
+
+  property_selection_unresolved:
+    style: clarifying
+    short: true
+
+  cities_found:
+    style: list
+    include_count: true
+
+  faq_answer:
+    style: grounded
+    require_source_when_available: true
+    forbid_extra_claims: true
+    max_sentences: 4
+
+  faq_not_found:
+    style: helpful
+    suggest_handoff: true
+
+  gathering_info:
+    style: warm
+    one_field_at_a_time: true
+
+  review_pending:
+    style: warm
+    show_total: true
+    show_per_night: true
+    closing_question: "Should I confirm this booking?"
+
+  amendment_acknowledged:
+    style: warm
+    confirm_change: true
+    closing_question: "Anything else you'd like to change?"
+
+  booking_confirmed:
+    style: warm
+    include_receipt_summary: true
+    include_booking_id: true
+
+  booking_not_found:
+    style: helpful
+    ask_for: [booking_id]
+
+  found:
+    style: factual
+
+  handoff_required:
+    style: empathetic
+
+  casual_interaction:
+    style: friendly
+    max_sentences: 2
+
+  missing_critical_data:
+    style: clarifying
+    one_field_at_a_time: true
+
+  error:
+    style: apologetic
+    suggest_retry: true
