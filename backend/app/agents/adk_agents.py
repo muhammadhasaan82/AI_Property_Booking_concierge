@@ -16,9 +16,11 @@ FILE SIZE POLICY — this file contains ONLY agent wiring.
 """
 from __future__ import annotations
 
+from doctest import OutputChecker
 import logging
 import os
 
+from backend.app.agents.tools.search import get_all_available_cities, search_properties
 import litellm
 from google.adk.agents import LlmAgent
 from google.adk.agents.sequential_agent import SequentialAgent
@@ -27,6 +29,7 @@ from google.genai import types as genai_types
 
 from app.config.agent_config_loader import cfg
 from app.agents.prompts.loader import load_prompt
+from app.config.tool_registry_loader import registry as _tool_registry
 
 litellm.telemetry = False
 os.environ["LITELLM_TELEMETRY"] = "False"
@@ -50,43 +53,52 @@ VOICE_CONFIG = genai_types.GenerateContentConfig(
 TRIAGE_INSTRUCTION: str = load_prompt("triage_instruction.md")
 VOICE_INSTRUCTION: str = load_prompt("voice_instruction.md")
 
-from .tools.search import (
-    get_all_available_cities,
-    search_properties,
-    get_property_details,
-    select_property,
-)
-from .tools.booking import (
-    request_booking_details,
-    review_booking_details,
-    process_v2_booking,
-)
-from .tools.support import (
-    handle_small_talk,
-    check_faq,
-    check_booking_status,
-    escalate_to_human,
-)
-
-
-triage_router = LlmAgent(
-    model=dispatcher_llm,
-    name="triage_router",
-    description="Routes user intent to the correct tool. Does not generate conversational text.",
-    instruction=TRIAGE_INSTRUCTION,
-    tools=[
+if cfg.feature_tool_registry and _tool_registry.tools:
+    _resolved_tools = list(_tool_registry.resolve_callables().valuaes())
+else:
+    from .tools.searchimport(
+        get_all_available_cities,
+        search_properties,
+        get_property_details,
+        select_property,
+    )
+    from .tools.booking import(
+        request_booking_details,
+        review_booking_details,
+        process_v2_booking,
+    )
+    _resolved_tools = (
+        handle_small_talk,
+        chack_faq,
+        check_booking_status,
+        escalate_to_human,
+    )
+    _resolved_tools = [
         handle_small_talk,
         search_properties,
         select_property,
         get_property_details,
-        check_faq,
+        chack_faq,
         check_booking_status,
         request_booking_details,
         review_booking_details,
         process_v2_booking,
         escalate_to_human,
         get_all_available_cities,
-    ],
+    ]
+
+logger.info(
+    "[adk_agents] triage_router built with %d tools (registry=%s)",
+    len(_resolved_tools),
+    cfg.feature_tool_registry and bool(_tool_registry.tools),
+)
+
+triage_router = LlmAgent(
+    model=dispatcher_llm,
+    name="triage_router",
+    description="Routes user intent to the correct tool. Does not generate conversational text.",
+    instruction=TRIAGE_INSTRUCTION,
+    tools=_resolved_tools,
     output_key="router_output",
     generate_content_config=DISPATCHER_CONFIG,
 )
