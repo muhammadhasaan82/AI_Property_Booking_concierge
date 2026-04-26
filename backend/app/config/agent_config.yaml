@@ -63,9 +63,6 @@ search:
   result_limit_max: 50             # env: PROPERTY_SEARCH_RESULT_LIMIT_MAX
   summary_mode_threshold: 8        # env: PROPERTY_SEARCH_SUMMARY_THRESHOLD
 
-  result_limit_max: 20             # env: PROPERTY_SEARCH_RESULT_LIMIT_MAX
-  summary_mode_threshold: 8       # env: PROPERTY_SEARCH_SUMMARY_THRESHOLD
-
 
 # ── Dataset ─────────────────────────────────────────────────────────────────
 dataset:
@@ -193,3 +190,10 @@ sources:
   rag: rag_pipeline
   basic_faq: basic_faq
   v2_adk: v2_adk
+
+#───Feature Flags───────────────────────────────────────────────────────────────────────────
+features:
+  understanding_frame_enabled: true
+  policy_router_mode: "off"
+  response_policies_enabled: true
+  tool_registry_enabled: true

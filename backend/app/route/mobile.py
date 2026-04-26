@@ -1,4 +1,3 @@
-# route/mobile.py - Mobile API endpoints
 from typing import Any, Dict, Optional, List
 from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Query
@@ -6,11 +5,8 @@ from pydantic import BaseModel
 from app.services.adk_runner import run_adk_turn
 from app.components.search import property_search
 from app.services.booking import create_booking, update_booking_status, get_booking_status
-from app.services.faq import faq_lookup
 
 router = APIRouter()
-
-# ==================== MOBILE AUTHENTICATION ====================
 
 class MobileLoginRequest(BaseModel):
     email: str
@@ -28,8 +24,6 @@ async def mobile_login(request: MobileLoginRequest):
     """
     Mobile user authentication endpoint
     """
-    # TODO: Implement actual authentication logic
-    # For now, return a mock response
     return MobileLoginResponse(
         success=True,
         user_id="mobile_user_123",
@@ -43,8 +37,6 @@ async def mobile_logout(user_id: str):
     Mobile user logout endpoint
     """
     return {"success": True, "message": "Logout successful"}
-
-# ==================== MOBILE PROPERTIES ====================
 
 class MobilePropertySearchRequest(BaseModel):
     query: str = ""
@@ -80,10 +72,9 @@ async def mobile_search_properties(request: MobilePropertySearchRequest):
             location=request.location,
             beds=request.guests
         )
-        
-        # Transform results for mobile format
+
         mobile_results = []
-        for prop in results[:20]:  # Limit to 20 results for mobile
+        for prop in results[:20]:
             mobile_results.append(MobilePropertyResponse(
                 id=str(prop.get("id", "")),
                 title=prop.get("title", "Property"),
@@ -109,7 +100,6 @@ async def mobile_get_property(property_id: str):
     """
     Get detailed property information for mobile
     """
-    # TODO: Implement property details lookup
     return {
         "success": True,
         "property": {
@@ -124,8 +114,6 @@ async def mobile_get_property(property_id: str):
             "reviews_count": 25
         }
     }
-
-# ==================== MOBILE BOOKING ====================
 
 class MobileBookingRequest(BaseModel):
     user_id: str
@@ -200,14 +188,11 @@ async def mobile_get_user_bookings(user_id: str):
     """
     Get all bookings for a mobile user
     """
-    # TODO: Implement user bookings lookup
     return {
         "success": True,
         "bookings": [],
         "message": "User bookings retrieved"
     }
-
-# ==================== MOBILE CHAT ====================
 
 class MobileChatRequest(BaseModel):
     user_id: str
@@ -249,27 +234,27 @@ async def mobile_chat(request: MobileChatRequest):
             response=f"Sorry, I encountered an error: {str(e)}"
         )
 
-
-# ==================== MOBILE FAQ ====================
-
 @router.get("/mobile/faq")
-async def mobile_faq(question: str = Query(..., min_length=2)):
-    """
-    Mobile FAQ endpoint with simplified response
-    """
-    try:
-        answer = faq_lookup(question)
-        return {
-            "success": True,
-            "question": question,
-            "answer": answer or "I don't have information about that. Please contact support.",
-            "helpful": answer is not None
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"FAQ lookup failed: {str(e)}"
-        }
+async def mobile_faq(request: dict):
+    """Mobile FAQ goes through the full ADK pipeline (CAG -> RAG -> fallback)."""
+    question = (request.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is required")
+
+    session_id  = request.get("session_id") or f"mobile-{uuid4()}"
+    user_id = request.get("user_id") or "mobile-anon"
+
+    result = await run_adk_turn(
+        user_message=question,
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+    return{
+        "success":True,
+        "answer": result.get("reply") or result.get("final_reply") or "",
+        "session_id": session_id
+    }
 
 @router.get("/mobile/faq/categories")
 async def mobile_faq_categories():
@@ -287,14 +272,12 @@ async def mobile_faq_categories():
         ]
     }
 
-# ==================== MOBILE PROFILE ====================
 
 @router.get("/mobile/user/{user_id}/profile")
 async def mobile_get_profile(user_id: str):
     """
     Get user profile for mobile
     """
-    # TODO: Implement user profile lookup
     return {
         "success": True,
         "profile": {
@@ -314,13 +297,10 @@ async def mobile_update_profile(user_id: str, profile_data: dict):
     """
     Update user profile for mobile
     """
-    # TODO: Implement profile update
     return {
         "success": True,
         "message": "Profile updated successfully"
     }
-
-# ==================== MOBILE NOTIFICATIONS ====================
 
 @router.get("/mobile/user/{user_id}/notifications")
 async def mobile_get_notifications(user_id: str):
@@ -350,8 +330,6 @@ async def mobile_mark_notification_read(user_id: str, notification_id: str):
         "success": True,
         "message": "Notification marked as read"
     }
-
-# ==================== MOBILE HEALTH ====================
 
 @router.get("/mobile/health")
 async def mobile_health():
