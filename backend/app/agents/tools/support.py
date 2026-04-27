@@ -1,6 +1,4 @@
 """
-app/agents/tools/support.py
-----------------------------
 Tools: handle_small_talk, check_faq, check_booking_status, escalate_to_human
 """
 from __future__ import annotations
@@ -13,11 +11,6 @@ from .helpers import _finalize_payload, _is_blank, _missing_critical_data
 from app.config.agent_config_loader import cfg
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Tool: handle_small_talk
-# ---------------------------------------------------------------------------
 
 def handle_small_talk(
     message_type: Optional[str] = None,
@@ -53,11 +46,6 @@ def handle_small_talk(
         action_intent, context_flag,
     )
 
-
-# ---------------------------------------------------------------------------
-# Tool: check_faq
-# ---------------------------------------------------------------------------
-
 async def check_faq(
     question: Optional[str] = None,
     action_intent: Optional[str] = None,
@@ -84,7 +72,7 @@ async def check_faq(
 
     from ..tools.rust_client import execute_tool
 
-    # Rust CAG layer first
+
     try:
         result = await execute_tool(data={"intent": "faq", "question": question})
         if result is not None and not result.get("fallback"):
@@ -97,7 +85,7 @@ async def check_faq(
     except Exception as e:
         logger.warning("Rust FAQ lookup failed: %s, using Python fallback", e)
 
-    # Enhanced FAQ with RAG
+
     try:
         from ...components.faq_enhanced import enhanced_faq_agent
         faq_result = enhanced_faq_agent(question, {})
@@ -110,7 +98,7 @@ async def check_faq(
     except Exception as e:
         logger.warning("FAQ enhanced agent failed: %s", e)
 
-    # Basic FAQ fallback
+
     try:
         from ...services.faq import faq_lookup
         ans = faq_lookup(question)
@@ -126,11 +114,6 @@ async def check_faq(
         {"status": Status.FAQ_NOT_FOUND, "question": question},
         action_intent, context_flag,
     )
-
-
-# ---------------------------------------------------------------------------
-# Tool: check_booking_status
-# ---------------------------------------------------------------------------
 
 async def check_booking_status(
     booking_id: Optional[str] = None,
@@ -194,11 +177,6 @@ async def check_booking_status(
         {"status": Status.BOOKING_NOT_FOUND, "booking_id": booking_id},
         action_intent, context_flag,
     )
-
-
-# ---------------------------------------------------------------------------
-# Tool: escalate_to_human
-# ---------------------------------------------------------------------------
 
 async def escalate_to_human(
     reason: Optional[str] = None,

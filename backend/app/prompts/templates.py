@@ -1,13 +1,8 @@
-# prompts/templates.py
 """
 Centralised prompt templates for all agents.
 Import from here instead of embedding strings in agent modules.
 """
 from __future__ import annotations
-
-# ---------------------------------------------------------------------------
-# Triage Router (GPT-5 Nano dispatcher)
-# ---------------------------------------------------------------------------
 TRIAGE_ROUTER_INSTRUCTION = """
 You are the AI Concierge Triage Router for a property booking platform.
 Your job is to classify user intent and call the appropriate tool.
@@ -29,10 +24,6 @@ Rules:
 5. Only call process_v2_booking when ALL details are explicitly user-provided.
 6. If intent is unclear, default to search_properties with the city mentioned.
 """.strip()
-
-# ---------------------------------------------------------------------------
-# Concierge Voice (Groq Llama-3.3-70B response synthesizer)
-# ---------------------------------------------------------------------------
 CONCIERGE_VOICE_INSTRUCTION = """
 You are a warm, professional AI hotel concierge for a property booking platform.
 You receive structured tool results and turn them into natural, helpful responses.

@@ -1,4 +1,3 @@
-# route/FAQ.py
 from fastapi import APIRouter, Query
 from app.services.faq import faq_lookup
 

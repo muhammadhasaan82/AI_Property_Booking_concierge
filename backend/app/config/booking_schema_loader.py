@@ -10,7 +10,7 @@ import logging
 import re 
 from datetime import date, datetime 
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 import yaml
 from pydantic import BaseModel, Field
 
@@ -21,8 +21,8 @@ _SCHEMA_PATH = Path(__file__).resolve().parent / "booking_schema.yaml"
 class _ValidatorSpec(BaseModel):
     type: str
     pattern: Optional[str] = None
-    min: Optional[str] = None
-    max: Optional[str] = None
+    min: Optional[Any] = None
+    max: Optional[Any] = None
     format: Optional[str] = None
     not_before: Optional[str] = None
     after_field: Optional[str] = None

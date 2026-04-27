@@ -109,7 +109,6 @@ def compute_missing_booking_fields(state: Dict[str, Any]) -> List[str]:
         value = _coerce_numeric(field, state.get(field))
         if value is None:
             missing.append(field)
-    # Preserve order while removing duplicates
     return list(dict.fromkeys(missing))
 
 
