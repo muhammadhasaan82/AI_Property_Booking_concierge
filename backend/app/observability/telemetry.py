@@ -1,4 +1,3 @@
-# services/telemetry.py
 """
 DPO Telemetry Pipeline — Phase 3 Continuous Learning.
 
@@ -24,9 +23,6 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 DPO_TELEMETRY_ENABLED = os.getenv("DPO_TELEMETRY_ENABLED", "1") not in ("0", "false", "False")
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -35,9 +31,6 @@ DPO_SQLITE_PATH = os.getenv(
     str(_REPO_ROOT / "backend" / "dpo_telemetry.db"),
 )
 
-# ---------------------------------------------------------------------------
-# SQLite setup (thread-safe, lazy-init)
-# ---------------------------------------------------------------------------
 _DB_LOCK = threading.Lock()
 _DB_INITIALIZED = False
 
@@ -81,7 +74,6 @@ def init_db() -> None:
             conn = sqlite3.connect(str(db_path))
             conn.executescript(_SCHEMA_SQL)
 
-            # Migration path for existing DBs created before cognitive_context existed.
             cursor = conn.cursor()
             try:
                 cursor.execute("ALTER TABLE dpo_trajectories ADD COLUMN cognitive_context TEXT")
@@ -193,10 +185,6 @@ async def _mirror_supabase(
         logger.debug("[Telemetry] Supabase mirror skipped: %s", e)
         return False
 
-
-# ---------------------------------------------------------------------------
-# Trajectory classification
-# ---------------------------------------------------------------------------
 _BOOKING_ID_RE = re.compile(
     r"(?:Booking\s*ID[:\s]*)?([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9a-fA-F]{6,8})",
     re.IGNORECASE,
@@ -250,10 +238,6 @@ def extract_booking_id(text: str) -> Optional[str]:
     m = _BOOKING_ID_RE.search(text)
     return m.group(1) if m else None
 
-
-# ---------------------------------------------------------------------------
-# Public API — fire-and-forget
-# ---------------------------------------------------------------------------
 async def log_trajectory(
     session_id: str,
     user_id: Optional[str],
