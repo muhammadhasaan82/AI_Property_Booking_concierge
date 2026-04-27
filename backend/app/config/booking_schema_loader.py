@@ -21,8 +21,8 @@ _SCHEMA_PATH = Path(__file__).resolve().parent / "booking_schema.yaml"
 class _ValidatorSpec(BaseModel):
     type: str
     pattern: Optional[str] = None
-    min: Optional[str] = None
-    max: Optional[str] = None
+    min: Optional[Any] = None
+    max: Optional[Any] = None
     format: Optional[str] = None
     not_before: Optional[str] = None
     after_field: Optional[str] = None
