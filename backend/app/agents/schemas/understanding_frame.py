@@ -9,11 +9,11 @@ user means. The frame is consumed by:
   - telemetry      : DPO training signal (was the frame correct?)
 """
 from __future__ import annotations
-from ssl import enum_certificates
+from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-ALLOWED_INTENTS = (
+ALLOWED_PRIMARY_INTENTS = (
     "search_property",
     "select_property",
     "faq",
