@@ -10,7 +10,7 @@ import logging
 import re 
 from datetime import date, datetime 
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 import yaml
 from pydantic import BaseModel, Field
 
