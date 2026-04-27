@@ -191,7 +191,7 @@ class _AgentConfig:
             "UNDERSTANDING_FRAME_ENABLED",
             "1" if ft.get("understanding_frame_enabled", True) else "0",
         ).lower() in {"1", "true", "yes"}
-        self.features_policy_router_mode: str = _env_str(
+        self.feature_policy_router_mode: str = _env_str(
             "POLICY_ROUTER_MODE",str(ft.get("policy_router_mode", "off")).lower()
         )
         self.feature_response_policies: bool = _env_str(
