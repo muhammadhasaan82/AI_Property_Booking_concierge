@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS dpo_trajectories (
     turn_count INTEGER DEFAULT 1,
     latency_ms REAL,
     cognitive_context TEXT,
+    understanding_frame_json TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -75,14 +76,18 @@ def init_db() -> None:
             conn.executescript(_SCHEMA_SQL)
 
             cursor = conn.cursor()
-            try:
-                cursor.execute("ALTER TABLE dpo_trajectories ADD COLUMN cognitive_context TEXT")
-            except sqlite3.OperationalError as alter_error:
-                if "duplicate column name" not in str(alter_error).lower():
-                    logger.warning(
-                        "[Telemetry] SQLite migration failed for cognitive_context: %s",
-                        alter_error,
-                    )
+            for migration_col, col_sql in (
+                ("cognitive_context", "ALTER TABLE dpo_trajectories ADD COLUMN cognitive_context TEXT"),
+                ("understanding_frame_json", "ALTER TABLE dpo_trajectories ADD COLUMN understanding_frame_json TEXT"),
+            ):
+                try:
+                    cursor.execute(col_sql)
+                except sqlite3.OperationalError as alter_error:
+                    if "duplicate column name" not in str(alter_error).lower():
+                        logger.warning(
+                            "[Telemetry] SQLite migration failed for %s: %s",
+                            alter_error,
+                        )
 
             conn.commit()
             _DB_INITIALIZED = True
@@ -110,6 +115,7 @@ def _write_sqlite(
     turn_count: int,
     latency_ms: Optional[float],
     cognitive_context: Optional[str] = None,
+    understanding_frame_json: Optional[str] = None,
 ) -> bool:
     """Synchronous SQLite insert (runs in thread pool)."""
     try:
@@ -120,8 +126,8 @@ def _write_sqlite(
             INSERT INTO dpo_trajectories
                 (session_id, user_id, trajectory_tag, user_message,
                  tool_calls, final_reply, booking_id, turn_count, latency_ms,
-                 cognitive_context)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 cognitive_context, understanding_frame_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -134,6 +140,7 @@ def _write_sqlite(
                 turn_count,
                 latency_ms,
                 cognitive_context,
+                understanding_frame_json,
             ),
         )
         conn.commit()
@@ -155,6 +162,7 @@ async def _mirror_supabase(
     turn_count: int,
     latency_ms: Optional[float],
     cognitive_context: Optional[str] = None,
+    understanding_frame_json: Optional[str] = None,
 ) -> bool:
     """Best-effort mirror to Supabase via db_client."""
     try:
@@ -164,8 +172,8 @@ async def _mirror_supabase(
             INSERT INTO public.dpo_trajectories
                 (session_id, user_id, trajectory_tag, user_message,
                  tool_calls, final_reply, booking_id, turn_count, latency_ms,
-                 cognitive_context)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 cognitive_context, understanding_frame_json)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 session_id,
@@ -178,6 +186,7 @@ async def _mirror_supabase(
                 turn_count,
                 latency_ms,
                 cognitive_context,
+                understanding_frame_json,
             ),
         )
         return True
@@ -248,6 +257,7 @@ async def log_trajectory(
     turn_count: int = 1,
     latency_ms: Optional[float] = None,
     cognitive_context: Optional[str] = None,
+    understanding_frame_json: Optional[str] = None,
 ) -> None:
     """Log a full trajectory turn. Fire-and-forget — never blocks the caller.
 
@@ -261,6 +271,7 @@ async def log_trajectory(
         turn_count: Turn number in the session.
         latency_ms: Pipeline execution time in milliseconds.
         cognitive_context: Mem0 user preference context active during this turn.
+        understanding_frame_json: Phase-2 UnderstandingFrame as compact JSON.
     """
     if not DPO_TELEMETRY_ENABLED:
         return
@@ -285,6 +296,7 @@ async def log_trajectory(
         turn_count,
         latency_ms,
         cognitive_context,
+        understanding_frame_json,
     )
 
     asyncio.create_task(
@@ -299,11 +311,13 @@ async def log_trajectory(
             turn_count,
             latency_ms,
             cognitive_context,
+            understanding_frame_json,
         )
     )
 
     logger.debug(
-        "[Telemetry] Logged [%s] session=%s tools=%d booking=%s mem0=%s",
+        "[Telemetry] Logged [%s] session=%s tools=%d booking=%s mem0=%s frame=%s",
         tag, session_id, len(tool_calls), booking_id or "none",
         "yes" if cognitive_context else "no",
+        "yes" if understanding_frame_json else "no",
     )
