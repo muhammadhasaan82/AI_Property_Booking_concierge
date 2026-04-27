@@ -1,7 +1,3 @@
-# route/stripe_webhook.py
-# Stripe webhook listener for payment event processing.
-# Replaces mock payment URL logic with real webhook-driven status updates.
-
 from __future__ import annotations
 import logging
 import os
@@ -27,7 +23,6 @@ async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
-    # Verify signature if secret is configured
     if STRIPE_WEBHOOK_SECRET:
         try:
             import stripe
@@ -41,7 +36,6 @@ async def stripe_webhook(request: Request):
             logger.error("Webhook construction error: %s", e)
             raise HTTPException(status_code=400, detail=str(e))
     elif ENVIRONMENT == "development":
-        # No secret configured — parse raw JSON (dev mode only)
         import json
         try:
             event = json.loads(payload)
@@ -49,7 +43,6 @@ async def stripe_webhook(request: Request):
             raise HTTPException(status_code=400, detail="Invalid JSON payload")
         logger.warning("Running in dev mode — no signature verification.")
     else:
-        # Production/staging without a webhook secret → reject all requests
         logger.critical("STRIPE_WEBHOOK_SECRET not set in non-dev environment. Rejecting webhook.")
         raise HTTPException(
             status_code=500,
@@ -78,7 +71,6 @@ async def stripe_webhook(request: Request):
         booking_id = data.get("metadata", {}).get("booking_id")
         failure_message = data.get("last_payment_error", {}).get("message", "Unknown error")
         logger.warning("Payment failed for booking %s: %s", booking_id, failure_message)
-        # Keep status as 'pending' — do not auto-cancel
 
     elif event_type == "charge.refunded":
         booking_id = data.get("metadata", {}).get("booking_id")

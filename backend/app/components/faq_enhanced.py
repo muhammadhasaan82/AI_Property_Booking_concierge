@@ -122,10 +122,6 @@ class _SentenceTransformerEmbeddings:
 
     def __init__(self, model_name: str, *, device: str = "cpu", normalize_embeddings: bool = True):
         try: 
-            # load_dotenv()
-            # login(token=os.getenv("HF_TOKEN"))
-            # print(whoami())
-            
             from sentence_transformers import SentenceTransformer
         except Exception as exc:
             raise ImportError("sentence-transformers is unavailable") from exc
@@ -753,6 +749,4 @@ def extract_key_sentences(context: str, question: str, max_lines: int = 10) -> s
     
     return _clean_pdf_artifacts(result)
 
-
-# initialize_faq_system()
 

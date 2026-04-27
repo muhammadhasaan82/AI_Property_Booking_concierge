@@ -17,7 +17,6 @@ from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 load_dotenv()
-# login(token=os.getenv("HF_TOKEN"))
 
 from app.services.dynamic_config import get_intent_catalog as _get_catalog
 from app.services.dynamic_config import get_retrieval_config as _get_retrieval_config
@@ -156,7 +155,6 @@ def _get_st_model():
 
             with _local_model_load(RAG_LOCAL_MODELS_ONLY):
                 hf_token = os.getenv("HF_TOKEN")
-                # print(whoami())
                 if hf_token:
                     login(token=hf_token)
                 cache_folder = os.getenv("cache_folder")
