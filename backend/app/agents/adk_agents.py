@@ -125,11 +125,13 @@ concierge_voice = LlmAgent(
 if cfg.feature_understanding_frame:
     _sub_agents = [understanding_agent, triage_router, concierge_voice]
     _pipeline_mode = "3-node (understanding → triage → voice)"
-
+else:
+    _sub_agents = [triage_router, concierge_voice]
+    _pipeline_mode = "2-node (triage → voice)"
 logger.info("[adk_agents] pipeline assembled: %s", _pipeline_mode)
 
 root_agent = SequentialAgent(
     name="concierge_pipeline",
-    sub_agents=[triage_router, concierge_voice],
+    sub_agents=_sub_agents,
     description="AI Property Booking Concierge — routes user intent and generates responses.",
 )
