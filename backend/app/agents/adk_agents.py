@@ -50,7 +50,7 @@ DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
 VOICE_CONFIG = genai_types.GenerateContentConfig(
     temperature=cfg.voice_temperature,
 )
-UNDERSTAANDING_CONFIG = genai_types.GenerateContentConfig(
+UNDERSTANDING_CONFIG = genai_types.GenerateContentConfig(
     temperature=0.1
 )
 TRIAGE_INSTRUCTION: str = load_prompt("triage_instruction.md")
@@ -99,9 +99,9 @@ understanding_agent = LlmAgent(
         "(intent, entities, confidence, mood). Does not call tools."
     ),
     instruction=UNDERSTANDING_INSTRUCTION,
-    output_schema=UnderstandingFrame,
+    # output_schema=UnderstandingFrame,
     output_key="understanding",
-    generate_content_config=UNDERSTAANDING_CONFIG,
+    generate_content_config=UNDERSTANDING_CONFIG,
 )
 
 triage_router = LlmAgent(
