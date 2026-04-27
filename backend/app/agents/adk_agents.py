@@ -32,6 +32,7 @@ from app.config.tool_registry_loader import registry as _tool_registry
 from app.agents.schemas.understanding_frame import UnderstandingFrame
 
 litellm.telemetry = False
+litellm.drop_params = True
 os.environ["LITELLM_TELEMETRY"] = "False"
 os.environ["LITELLM_LOG"] = "ERROR"
 
