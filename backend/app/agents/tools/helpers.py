@@ -1,6 +1,4 @@
 """
-app/agents/tools/helpers.py
-----------------------------
 Shared utility helpers used across all tool modules.
 
 Contains:
@@ -23,23 +21,10 @@ from google.adk.tools import ToolContext
 
 from ..status_codes import Status, BOOKING_REQUIRED_FIELDS
 from app.config.agent_config_loader import cfg
-
-# ---------------------------------------------------------------------------
-# Module-level constants — all driven from agent_config.yaml via cfg
-# ---------------------------------------------------------------------------
-
-# Scalar overridable via env (cfg already applies env > yaml precedence)
 DATE_FORMAT: str = cfg.date_format
 SOFT_SESSION_TTL_SECONDS: int = cfg.session_ttl
-
-# Intent routing sets — no magic strings in Python
 HISTORY_ACTION_INTENTS: frozenset = cfg.history_action_intents
 NEW_SEARCH_ACTION_INTENTS: frozenset = cfg.new_search_action_intents
-
-# ---------------------------------------------------------------------------
-# Type coercers
-# ---------------------------------------------------------------------------
-
 def _coerce_int(value: Any) -> Optional[int]:
     if value is None:
         return None
@@ -66,23 +51,12 @@ def _coerce_bool(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return False
-
-
-# ---------------------------------------------------------------------------
-# Blank check
-# ---------------------------------------------------------------------------
-
 def _is_blank(value: Any) -> bool:
     if value is None:
         return True
     if isinstance(value, str):
         return not value.strip()
     return False
-
-
-# ---------------------------------------------------------------------------
-# Soft-state accessors
-# ---------------------------------------------------------------------------
 
 def _get_soft_state(tool_context: Optional[ToolContext]) -> Optional[Dict[str, Any]]:
     """Return per-session soft state from ADK ToolContext, or None when unavailable."""
@@ -113,12 +87,6 @@ def _set_unresolved_turns(soft_state: Optional[Dict[str, Any]], value: int) -> i
     if isinstance(soft_state, dict):
         soft_state["unresolved_turns"] = resolved
     return resolved
-
-
-# ---------------------------------------------------------------------------
-# Search cache helpers
-# ---------------------------------------------------------------------------
-
 def _get_cached_last_search(store: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(store, dict):
         return None
@@ -137,12 +105,6 @@ def _set_cached_last_search(store: Optional[Dict[str, Any]], payload: Dict[str, 
         return
     store["last_search"] = payload
     store["last_search_at"] = time.time()
-
-
-# ---------------------------------------------------------------------------
-# Payload helpers
-# ---------------------------------------------------------------------------
-
 def _missing_critical_data(
     missing: List[str],
     context: str,
@@ -176,11 +138,6 @@ def _finalize_payload(
     if context_flag:
         payload["context_flag"] = context_flag
     return payload
-
-
-# ---------------------------------------------------------------------------
-# Data normalization utilities
-# ---------------------------------------------------------------------------
 
 def _normalize_action_intent(action_intent: Optional[str], context_flag: Optional[str]) -> str:
     raw = (action_intent or context_flag or "").strip()
@@ -275,11 +232,6 @@ def _extract_json_dict(raw_text: Any) -> Optional[Dict[str, Any]]:
             return parsed
     return None
 
-
-# ---------------------------------------------------------------------------
-# Booking field validation
-# ---------------------------------------------------------------------------
-
 def _classify_engagement_state(unresolved_turns: int) -> str:
     """
     Config-driven engagement state classifier.
@@ -327,7 +279,6 @@ def _validate_booking_fields(
         for field_name, _ in BOOKING_REQUIRED_FIELDS
         if _is_blank(field_map.get(field_name))
     ]
-    # numeric fields validated via cfg — no hardcoded field names
     numeric_values = {"guests": guests_value, "price_per_night": price_value}
     for nf in cfg.booking_required_numeric_fields:
         if numeric_values.get(nf) is None:

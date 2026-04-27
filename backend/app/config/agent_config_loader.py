@@ -42,8 +42,6 @@ class _Namespace:
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
 
-        # return f"<Config {self.__dict__}>"  
-
 def _env_int(key: str, default: int) -> int:
     raw = os.getenv(key, "").strip()
     try:
@@ -191,7 +189,7 @@ class _AgentConfig:
             "UNDERSTANDING_FRAME_ENABLED",
             "1" if ft.get("understanding_frame_enabled", True) else "0",
         ).lower() in {"1", "true", "yes"}
-        self.features_policy_router_mode: str = _env_str(
+        self.feature_policy_router_mode: str = _env_str(
             "POLICY_ROUTER_MODE",str(ft.get("policy_router_mode", "off")).lower()
         )
         self.feature_response_policies: bool = _env_str(

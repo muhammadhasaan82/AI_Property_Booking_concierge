@@ -11,10 +11,10 @@ try:
     from psycopg.rows import dict_row
     from psycopg_pool import AsyncConnectionPool
     _DB_DRIVER_AVAILABLE = True
-except Exception:  # pragma: no cover - optional dependency at import time
-    psycopg = None  # type: ignore[assignment]
-    dict_row = None  # type: ignore[assignment]
-    AsyncConnectionPool = Any  # type: ignore[assignment]
+except Exception: 
+    psycopg = None  
+    dict_row = None 
+    AsyncConnectionPool = Any  
     _DB_DRIVER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ async def _run_with_retry(op):
     for attempt in range(_MAX_RETRIES):
         try:
             return await op()
-        except retryable_errors as exc:  # type: ignore[arg-type]
+        except retryable_errors as exc: 
             last_error = exc
             if attempt >= _MAX_RETRIES - 1:
                 break

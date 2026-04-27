@@ -1,4 +1,3 @@
-# services/dynamic_config.py
 """
 Dynamic configuration loader — typed, validated, hot-reloadable.
 
@@ -24,10 +23,6 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 _INTENT_CATALOG_PATH = _CONFIG_DIR / "intent_catalog.yaml"
 _VOCABULARY_PATH = _CONFIG_DIR / "vocabulary.yaml"
@@ -35,16 +30,7 @@ _GUARDRAILS_PATH = _CONFIG_DIR / "guardrails.yaml"
 _ROUTING_POLICIES_PATH = _CONFIG_DIR / "routing_policies.yaml"
 _THRESHOLDS_PATH = _CONFIG_DIR / "thresholds.yaml"
 _RETRIEVAL_PATH = _CONFIG_DIR / "retrieval.yaml"
-
-# ---------------------------------------------------------------------------
-# Legacy mode flag
-# ---------------------------------------------------------------------------
 LEGACY_RULES: bool = os.getenv("LEGACY_RULES", "false").lower() in ("1", "true", "yes")
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Pydantic Models
-# ═══════════════════════════════════════════════════════════════════════
 
 class IntentConfig(BaseModel):
     """Single intent entry with threshold and prototype sentences."""
@@ -166,7 +152,6 @@ class VocabularyConfig(BaseModel):
     amenity_synonyms: Dict[str, List[str]] = Field(default_factory=dict)
     nlp_fallback: NlpFallbackConfig = Field(default_factory=NlpFallbackConfig)
 
-    # Convenience properties
     @property
     def fallback_cities_set(self) -> Set[str]:
         return set(self.fallback_cities)
@@ -337,11 +322,6 @@ class RetrievalConfig(BaseModel):
     ranking: RetrievalRankingConfig = Field(default_factory=RetrievalRankingConfig)
     llm: RetrievalLlmConfig = Field(default_factory=RetrievalLlmConfig)
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# Cache + Thread-safe loading
-# ═══════════════════════════════════════════════════════════════════════
-
 _lock = threading.Lock()
 _cache: Dict[str, Any] = {}
 
@@ -379,11 +359,6 @@ def _get_or_load(key: str, path: Path, model_cls: type) -> Any:
             _cache[key] = obj
             return obj
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# Public API
-# ═══════════════════════════════════════════════════════════════════════
-
 def get_intent_catalog() -> IntentCatalogConfig:
     """Get the intent catalog configuration."""
     return _get_or_load("intent_catalog", _INTENT_CATALOG_PATH, IntentCatalogConfig)
@@ -419,7 +394,6 @@ def reload_all() -> None:
     with _lock:
         _cache.clear()
     clear_compiled_guardrails()
-    # Touch each to force re-load
     get_intent_catalog()
     get_vocabulary()
     get_guardrails()
@@ -474,11 +448,6 @@ def get_config_summary() -> Dict[str, Any]:
         },
         "legacy_rules": LEGACY_RULES,
     }
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Compiled guardrail regex cache
-# ═══════════════════════════════════════════════════════════════════════
 
 _compiled_guardrails: Dict[str, list] = {}
 

@@ -58,11 +58,6 @@ def _resolve_property_id_from_state(
         return str(last_selected)
     return None
 
-
-# ---------------------------------------------------------------------------
-# Tool: request_booking_details
-# ---------------------------------------------------------------------------
-
 async def request_booking_details(
     missing_info: Optional[str] = None,
     missing_fields: Optional[List[str]] = None,
@@ -128,10 +123,8 @@ async def request_booking_details(
     computed_missing = compute_missing_booking_fields(booking_state) if booking_state else []
     has_updates = bool(updates)
 
-    # Check if this is an amendment to an existing pending booking (review_pending state)
     is_amendment = isinstance(soft_state, dict) and soft_state.get("pending_booking") is not None
 
-    # Backend authority: once we have concrete field updates, ignore LLM "missing" guesses.
     if booking_state:
         if has_updates:
             resolved_fields = computed_missing
@@ -142,21 +135,12 @@ async def request_booking_details(
                 resolved_fields = computed_missing
         else:
             resolved_fields = computed_missing
-
-    # AMENDMENT FLOW: If user updated field(s) on an existing pending booking,
-    # acknowledge the update and ask if they want to change anything else,
-    # rather than asking for all missing fields again.
     if is_amendment and has_updates:
-        # Build update context showing what changed
         previous_summary = soft_state.get("pending_booking", {})
         update_context = _diff_booking_summary(previous_summary, booking_state)
-
-        # Merge the update into pending_booking so it persists
         for key, value in updates.items():
             if value is not None:
                 soft_state["pending_booking"][key] = value
-
-        # Return amendment_acknowledged status - voice layer will ask "anything else?"
         return _finalize_payload(
             {
                 "status": Status.AMENDMENT_ACKNOWLEDGED,
@@ -167,8 +151,6 @@ async def request_booking_details(
             },
             action_intent, context_flag,
         )
-
-    # If user supplied an update and the state is now complete, jump directly to review.
     if booking_state and has_updates and not resolved_fields:
         return await review_booking_details(
             property_id=booking_state.get("property_id"),
@@ -199,11 +181,6 @@ async def request_booking_details(
         {"status": Status.GATHERING_INFO, "missing_fields": resolved_fields},
         action_intent, context_flag,
     )
-
-
-# ---------------------------------------------------------------------------
-# Tool: review_booking_details
-# ---------------------------------------------------------------------------
 
 async def review_booking_details(
     property_id: Optional[str] = None,
@@ -291,11 +268,6 @@ async def review_booking_details(
     if update_context and update_context.get("was_update"):
         payload["update_context"] = update_context
     return _finalize_payload(payload, action_intent, context_flag)
-
-
-# ---------------------------------------------------------------------------
-# Tool: process_v2_booking
-# ---------------------------------------------------------------------------
 
 async def process_v2_booking(
     property_id: Optional[str] = None,

@@ -9,7 +9,6 @@ Phase 3: DPO telemetry capture + tool-loop anomaly detection.
 Phase 4 (V2): Removed V1 LangGraph fallback - pure ADK pipeline.
 """
 from __future__ import annotations
-
 import asyncio
 import hashlib
 import json
@@ -18,7 +17,6 @@ import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
-
 from google.adk.runners import Runner
 from google.adk.sessions.base_session_service import (
     BaseSessionService,
@@ -42,6 +40,7 @@ from .redis_store import (
     get_session_snapshot,
     save_session_snapshot,
 )
+from app.agents.schemas.understanding_frame import UnderstandingFrame
 from app.config.response_policies_loader import render_policy_snippet
 from app.config.agent_config_loader import cfg as _cfg
 
@@ -543,6 +542,7 @@ async def _build_invocation_state_delta(user_id: str, current_query: str, sessio
 async def _render_voice_from_router_output(
     router_output: str,
     user_cognitive_context: str,
+    understanding_frame_json: str = "",
 ) -> str:
     """Force Node-2 voice synthesis when only router JSON is available."""
     if not router_output or not router_output.strip():
@@ -555,13 +555,14 @@ async def _render_voice_from_router_output(
         if isinstance(router_output, dict):
             status = router_output.get("status")
         response_policy_snippet = ""
-        if _cfg.feature_response and status:
+        if _cfg.feature_response_policies and status:
             response_policy_snippet = render_policy_snippet(status)
 
         system_prompt = (
             VOICE_INSTRUCTION
             .replace("{router_output}", router_output)
             .replace("{user_cognitive_context}", _normalize_cognitive_context(user_cognitive_context))
+            .replace("{understanding}", understanding_frame_json or "{}")
         )
         temperature = getattr(VOICE_CONFIG, "temperature", 0.6)
 
@@ -737,6 +738,30 @@ async def run_adk_turn(
             user_cognitive_context = _normalize_cognitive_context(
                 updated_session.state.get("user_cognitive_context", user_cognitive_context)
             )
+            understanding_frame_json = ""
+            if updated_session and updated_session.state and _cfg.features_understanding_frame:
+                raw_frame = upadated_session.state.get("understanding")
+                if raw_frame is not None:
+                    try:
+                        if isintance(raw_frame, dict):
+                            frame_obj = UnderstandingFrame(**raw_frame)
+                        elif isinstance(raw_frame, UnderstandingFrame):
+                            frame_obj = raw_frame
+                        elif isinstance(raw_frame, str):
+                            import json as _json
+                            frame_obj = UnderstandingFrame(**_json.loads(raw_frame))
+                        else:
+                            frame_obj = None
+
+                        if frame_obj is not None:
+                            understanding_frame_json = frame_obj.to_compact_json()
+                            logger.debug(
+                                "[ADK] Understanding frame captured: intent=%s confidence=%.2f mood=%s",
+                                frame_obj.primary_intent, frame_obj.confidence, frame_obj.user_mood,
+                            )
+                    except Exception as _frame_exc:
+                        logger.warning("[ADK] Failed to parso UnderstandingFrame: %s", _frame_exc)
+
     except Exception:
         pass
 
@@ -760,6 +785,7 @@ async def run_adk_turn(
             voice_reply = await _render_voice_from_router_output(
                 router_output=router_output,
                 user_cognitive_context=user_cognitive_context,
+                understanding_frame_json=understanding_frame_json,
             )
             if voice_reply:
                 final_reply = voice_reply
@@ -786,6 +812,7 @@ async def run_adk_turn(
                 final_reply=logged_reply,
                 latency_ms=latency_ms,
                 cognitive_context=user_cognitive_context or None,
+                understanding_frame_json=understanding_frame_json or None,
             )
         )
     except Exception:

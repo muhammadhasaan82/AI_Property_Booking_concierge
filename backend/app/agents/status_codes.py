@@ -9,9 +9,6 @@ To change any string, threshold, or set — edit agent_config.yaml only.
 """
 from app.config.agent_config_loader import cfg
 
-# ---------------------------------------------------------------------------
-# Status strings — read from cfg.status
-# ---------------------------------------------------------------------------
 
 class Status:
     MISSING_CRITICAL_DATA      = cfg.status.missing_critical_data
@@ -33,11 +30,6 @@ class Status:
     BOOKING_NOT_FOUND          = cfg.status.booking_not_found
     HANDOFF_REQUIRED           = cfg.status.handoff_required
 
-
-# ---------------------------------------------------------------------------
-# Source provenance tags — read from cfg.source
-# ---------------------------------------------------------------------------
-
 class Source:
     MEMORY     = cfg.source.memory
     POLICY_DB  = cfg.source.policy_db
@@ -45,16 +37,10 @@ class Source:
     BASIC_FAQ  = cfg.source.basic_faq
     V2_ADK     = cfg.source.v2_adk
 
-
-# ---------------------------------------------------------------------------
-# Valid value sets — all driven from YAML
-# ---------------------------------------------------------------------------
-
 ENGAGEMENT_STATES: frozenset = cfg.engagement_valid_states
 INTENT_CLASSES: frozenset    = cfg.resolution_valid_intents
 SMALL_TALK_TYPES: frozenset  = cfg.small_talk_valid_types
 
-# Booking required fields — loaded from YAML, not hardcoded
 BOOKING_REQUIRED_FIELDS: tuple = tuple(
     (field, field) for field in cfg.booking_required_fields
 )
