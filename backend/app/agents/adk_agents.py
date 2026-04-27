@@ -54,7 +54,7 @@ TRIAGE_INSTRUCTION: str = load_prompt("triage_instruction.md")
 VOICE_INSTRUCTION: str = load_prompt("voice_instruction.md")
 
 if cfg.feature_tool_registry and _tool_registry.tools:
-        _resolved_tools = list(_tool_registry.resolve_callables().values())
+    _resolved_tools = list(_tool_registry.resolve_callables().values())
 else:
     from .tools.support import handle_small_talk, check_faq, check_booking_status, escalate_to_human
     from .tools.search import (

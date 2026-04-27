@@ -555,7 +555,7 @@ async def _render_voice_from_router_output(
         if isinstance(router_output, dict):
             status = router_output.get("status")
         response_policy_snippet = ""
-        if _cfg.feature_response and status:
+        if _cfg.feature_response_policies and status:
             response_policy_snippet = render_policy_snippet(status)
 
         system_prompt = (
