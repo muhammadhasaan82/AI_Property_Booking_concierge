@@ -21,7 +21,6 @@ from doctest import OutputChecker
 import logging
 import os
 from app.agents.tools.search import get_all_available_cities, search_properties
-from backend.app.agents.schemas import understanding_frame
 import litellm
 from google.adk.agents import LlmAgent
 from google.adk.agents.sequential_agent import SequentialAgent
