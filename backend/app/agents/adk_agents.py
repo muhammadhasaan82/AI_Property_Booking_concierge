@@ -97,7 +97,7 @@ understanding_agent = LlmAgent(
         "Analyzes the user's message and emits a structured UnderstandingFrame "
         "(intent, entities, confidence, mood). Does not call tools."
     ),
-    instruction=UNDERSTAANDING_INSTRUCTION,
+    instruction=UNDERSTANDING_INSTRUCTION,
     output_schema=UnderstandingFrame,
     output_key="understanding",
     generate_content_config=UNDERSTAANDING_CONFIG,
