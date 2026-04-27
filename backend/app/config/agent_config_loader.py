@@ -42,8 +42,6 @@ class _Namespace:
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
 
-        # return f"<Config {self.__dict__}>"  
-
 def _env_int(key: str, default: int) -> int:
     raw = os.getenv(key, "").strip()
     try:

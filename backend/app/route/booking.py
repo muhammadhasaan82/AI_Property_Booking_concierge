@@ -1,4 +1,3 @@
-# route/booking.py
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
@@ -22,7 +21,7 @@ async def booking_create(body: CreateBookingIn):
 class UpdateStatusIn(BaseModel):
     booking_id: str
     current_status: str
-    new_status: str  # confirmed | checked_in | checked_out
+    new_status: str
 
 @router.post("/booking/update-status")
 async def booking_update_status(body: UpdateStatusIn):

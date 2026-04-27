@@ -1,6 +1,3 @@
-# services/dataset_loader.py
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Hard-coded dataset loader for property listings → Chroma (via services.retrieval.bulk_upsert).
 
@@ -12,15 +9,12 @@ Hard-coded dataset loader for property listings → Chroma (via services.retriev
 from __future__ import annotations
 import os
 from typing import Dict, List
-
-# IMPORTANT: keep this import; embeddings + Chroma config live in retrieval.py
 try:
     from .retrieval import bulk_upsert
 except ImportError:
-    # Fallback for when running directly (not as a module)
+
     from retrieval import bulk_upsert
 
-# If pandas isn't installed yet: uv add pandas
 import pandas as pd
 from pathlib import Path
 
@@ -35,22 +29,20 @@ def _resolve_dataset_path() -> str:
     p = Path(_CFG_DATASET_PATH)
     if p.is_absolute() and p.exists():
         return str(p)
-    # Resolve relative to repo root (monorepo layout)
+
     root = Path(__file__).resolve().parents[3]
     candidate = root / _CFG_DATASET_PATH
     if candidate.exists():
         return str(candidate)
-    # Final fallback: next to this file
+
     local = Path(__file__).parent / "dataset.csv"
     if local.exists():
         return str(local)
-    return _CFG_DATASET_PATH  # Return as-is; will fail at runtime with FileNotFoundError
+    return _CFG_DATASET_PATH 
 
 
 DATASET_PATH = _resolve_dataset_path()
 
-
-# ------------ helpers: row → property mapping ------------
 def _to_int(x, default=0) -> int:
     try:
         return int(float(x))
@@ -63,13 +55,13 @@ def _parse_amenities(val: str) -> List[str]:
     sep = ";" if ";" in val else ","
     return [a.strip().lower() for a in val.split(sep) if a.strip()]
 
-# In dataset_loader.py, add debugging and fix the mapping:
+
 
 def _map_row(row: Dict[str, str]) -> Dict:
     """
     Map CSV row → property dict your retrieval layer expects.
     """
-    # Add some debugging
+ 
     property_id = row.get("id") or row.get("property_id") or row.get("uuid")
     if not property_id:
         print(f"WARNING: Skipping row with no ID: {row}")
@@ -78,10 +70,10 @@ def _map_row(row: Dict[str, str]) -> Dict:
     return {
         "id": str(property_id),
         "title": (row.get("title") or "Untitled Property").strip(),
-        "city": (row.get("city") or row.get("location") or "").strip().lower(),  # Normalize to lowercase
+        "city": (row.get("city") or row.get("location") or "").strip().lower(),
         "country": (row.get("country") or "USA").strip(),
-        "price_per_night": _to_int(row.get("price_per_night", 100)),  # Default to 100 if missing
-        "bedrooms": _to_int(row.get("bedrooms", 1)),  # Default to 1 if missing
+        "price_per_night": _to_int(row.get("price_per_night", 100)),
+        "bedrooms": _to_int(row.get("bedrooms", 1)),
         "amenities": _parse_amenities(row.get("amenities", "")),
         "description": (row.get("description") or "").strip(),
     }
@@ -89,7 +81,7 @@ def _map_row(row: Dict[str, str]) -> Dict:
 def run_ingestion(
     csv_path: str = DATASET_PATH,
     read_chunk_rows: int = 5000,
-    upsert_batch_size: int = 500,  # Reduced batch size for stability
+    upsert_batch_size: int = 500, 
 ) -> None:
     """
     Stream the CSV in chunks and load to vector store.
@@ -110,7 +102,7 @@ def run_ingestion(
             if prop is None:
                 skipped += 1
                 continue
-            # More robust validation
+
             if not prop["id"] or not prop["title"]:
                 skipped += 1
                 continue

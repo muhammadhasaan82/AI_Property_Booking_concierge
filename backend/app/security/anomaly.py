@@ -1,4 +1,3 @@
-# services/anomaly.py
 """
 Real-Time Anomaly Detection — Phase 3 OODA Loop Protection.
 
@@ -22,27 +21,17 @@ from ..services.redis_store import get_redis_client
 from app.config.agent_config_loader import cfg
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Configuration — loaded from YAML with env override support
-# ---------------------------------------------------------------------------
 TOOL_LOOP_THRESHOLD = int(getattr(cfg, "anomaly_tool_loop_threshold", 5))
 TIME_WINDOW_SECONDS = int(getattr(cfg, "anomaly_time_window_seconds", 30))
 SESSION_TTL_MINUTES = int(getattr(cfg, "anomaly_session_ttl_minutes", 30))
 _SESSION_TTL_SECONDS = SESSION_TTL_MINUTES * 60
 EXEMPT_TOOLS = set(getattr(cfg, "anomaly_exempt_tools", []) or [])
 
-# Graceful fallback message — soft-coded from YAML
 GRACEFUL_FALLBACK_REPLY = getattr(
     cfg, "anomaly_fallback_message",
     "I seem to be having a bit of trouble processing that request. "
     "Could you try rephrasing or providing a few more details?"
 )
-
-# ---------------------------------------------------------------------------
-# In-memory storage
-# ---------------------------------------------------------------------------
-# {session_id: [(tool_name, param_hash, timestamp), ...]}
 _session_tool_history: Dict[str, List[Tuple[str, str, float]]] = {}
 _lock = threading.Lock()
 _last_eviction = time.monotonic()
@@ -133,12 +122,6 @@ async def _load_history(session_id: str) -> List[Tuple[str, str, float]]:
     except Exception as exc:
         logger.error("[Anomaly] Failed to read Redis history for session %s: %s", session_id, exc)
         return _load_local_history(session_id)
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
 async def record_tool_call(
     session_id: str,
     tool_name: str,
@@ -189,7 +172,6 @@ async def check_tool_loop(
 
     history = await _load_history(session_id)
 
-    # Only count calls within the time window (not entire session lifetime)
     identical_count = sum(
         1 for (tn, p, ts) in history
         if tn == tool_name and p == ph and ts >= window_cutoff

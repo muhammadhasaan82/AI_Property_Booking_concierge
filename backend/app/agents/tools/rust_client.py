@@ -1,7 +1,3 @@
-# services/rust_client.py
-# Async HTTP client for the Rust autonomous gateway.
-# Provides transparent fallback when the Rust service is unavailable.
-
 from __future__ import annotations
 import os
 import hashlib
@@ -13,7 +9,7 @@ import httpx
 RUST_GATEWAY_URL = os.getenv("RUST_GATEWAY_URL", "http://localhost:3001")
 RUST_TIMEOUT = float(os.getenv("RUST_TIMEOUT", "5.0"))
 
-_rust_available: Optional[bool] = None  # Cached health status
+_rust_available: Optional[bool] = None
 
 
 async def _check_health() -> bool:

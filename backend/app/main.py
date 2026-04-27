@@ -1,4 +1,3 @@
-# main.py
 import asyncio
 import sys
 
@@ -17,7 +16,7 @@ app = FastAPI(title="AI Concierge & Calling Agent")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # tighten to your frontend origin(s) in production
+    allow_origins=["*"],       
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,7 +54,6 @@ async def debug_config():
         "vocabulary": get_vocabulary().model_dump()
     }
 
-# POST example: echoes JSON payload
 @app.post("/echo")
 async def post_echo(payload: dict):
     return {
@@ -64,7 +62,6 @@ async def post_echo(payload: dict):
         "data": payload
     }
 
-# PUT example: full update semantics
 @app.put("/echo")
 async def put_echo(payload: dict):
     return {
@@ -73,7 +70,6 @@ async def put_echo(payload: dict):
         "data": payload
     }
 
-# PATCH example: partial update semantics
 @app.patch("/echo")
 async def patch_echo(payload: dict):
     return {
@@ -82,7 +78,6 @@ async def patch_echo(payload: dict):
         "data": payload
     }
 
-# DELETE example: delete a resource by id
 @app.delete("/resource/{item_id}")
 async def delete_resource(item_id: str):
     return {
@@ -93,12 +88,10 @@ async def delete_resource(item_id: str):
         "item_id": item_id
     }
 
-# HEAD example: lightweight liveness header-only
 @app.head("/ping")
 async def head_ping():
     return Response(headers={"X-App": "AI-Concierge", "X-Ping": "pong"})
 
-# OPTIONS example: advertise allowed methods for /echo
 @app.options("/echo")
 async def options_echo(request: Request):
     return Response(
@@ -109,14 +102,7 @@ async def options_echo(request: Request):
     )
 
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
-# app.include_router(properties.router, prefix="/api/v1", tags=["properties"])
-# app.include_router(booking.router, prefix="/api/v1", tags=["booking"])
-# app.include_router(faq.router, prefix="/api/v1", tags=["faq"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
 app.include_router(stripe_webhook.router, prefix="/api/v1", tags=["webhooks"])
-# app.include_router(test_router.router, prefix="/api/v1", tags=["test"])
-
-# Mobile API endpoints
-# app.include_router(mobile.router, prefix="/api/v1", tags=["mobile"])
 
 

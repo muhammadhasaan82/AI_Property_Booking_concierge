@@ -26,10 +26,8 @@ from app.agents.prompts.loader import load_prompt
 
 logger = logging.getLogger(__name__)
 
-# Load prompt template once at import time
 _RESOLUTION_PROMPT_TEMPLATE: str = load_prompt("resolution_prompt.md")
 
-# Fallback copy — loaded from agent_config.yaml, not hardcoded
 _FALLBACK_AGENT_RESPONSE_DEFAULT: str = cfg.msg_resolution_default
 _FALLBACK_AGENT_RESPONSE_FRUSTRATED: str = cfg.msg_resolution_frustrated
 

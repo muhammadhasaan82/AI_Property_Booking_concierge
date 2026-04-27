@@ -1,6 +1,4 @@
-# services/tracing.py
 from __future__ import annotations
-
 import logging
 import os
 import threading
@@ -17,12 +15,12 @@ try:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
     _OTEL_AVAILABLE = True
-except Exception:  # pragma: no cover - optional dependency at import time
-    trace = None  # type: ignore[assignment]
-    OTLPSpanExporter = None  # type: ignore[assignment]
-    TracerProvider = None  # type: ignore[assignment]
-    BatchSpanProcessor = None  # type: ignore[assignment]
-    Resource = None  # type: ignore[assignment]
+except Exception:
+    trace = None  
+    OTLPSpanExporter = None  
+    TracerProvider = None  
+    BatchSpanProcessor = None 
+    Resource = None
     _OTEL_AVAILABLE = False
 
 _TRACER = None
@@ -58,7 +56,7 @@ def _init_tracer() -> None:
             try:
                 exporter = OTLPSpanExporter(endpoint=endpoint, insecure=endpoint.startswith("http://"))
                 provider.add_span_processor(BatchSpanProcessor(exporter))
-            except Exception as exc:  # pragma: no cover - exporter setup failures are runtime-specific
+            except Exception as exc:
                 logger.warning("Failed to configure OTLP exporter (%s); spans will stay local", exc)
 
         trace.set_tracer_provider(provider)
