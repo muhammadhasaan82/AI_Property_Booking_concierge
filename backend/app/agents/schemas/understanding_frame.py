@@ -101,4 +101,4 @@ class UnderstandingFrame(BaseModel):
     def to_compact_json(self) -> str:
         """Serialize to single-line JSON suitable for prompt injection."""
         import json
-        return json.dump(self.model_dump(mode='json'), ensure_ascii=False)
+        return json.dumps(self.model_dump(mode='json'), ensure_ascii=False)
