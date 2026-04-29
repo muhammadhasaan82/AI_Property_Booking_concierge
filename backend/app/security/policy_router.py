@@ -355,4 +355,84 @@ def compute_override(
     decision: RouterDecision,
     actual_tool_called: Optional[str],
 ) -> Optional[Dict[str, Any]]:
-    """Return an override summary dict if decision and actual disagree, else None."""
+        """Return an override summary dict if decision and actual disagree, else None."""
+        policy_action = decision.action("action")
+        policy_tool = decision.get("tool_name")
+
+        if policy_action != "execute_tool":
+            if actual_tool_called:
+                return{
+                    "actual_tool": actual_tool_called,
+                    "policy_action": policy_action,
+                    "policy_tool": None,
+                    "effective_intent": decision.get("effective_intent"),
+                    "matched_priority_id": decision.get("matched_priority_id"),
+                    "confidence": decision.get("confidence"),
+                    "reasoning": decision.get("reasoning"),
+                }
+            return None
+
+        if actual_tool_called:
+            return{
+                    "actual_tool": actual_tool_called,
+                    "policy_action": policy_action,
+                    "policy_tool": None,
+                    "effective_intent": decision.get("effective_intent"),
+                    "matched_priority_id": decision.get("matched_priority_id"),
+                    "confidence": decision.get("confidence"),
+                    "reasoning": decision.get("reasoning"),
+                }
+            return None
+
+            if actual_tool_called == policy_tool:
+                return None
+
+            return {
+                "actual_tool": actual_tool_called,
+                "policy_action": "execute_tool",
+                "policy_tool": policy_tool,
+                "effective_intent": decision.get("effective_intent"),
+                "matched_priority_id": decision.get("matched_priority_id"),
+                "confidence": decision.get("confidence"),
+                "reasoning": decision.get("reasoning"),
+            }
+
+def synthesize_router_output(decision: RouterDecision) -> Dict[str, Any]:
+    """Build a router_output dict from a non-execute_tool decision.
+    
+    Used in enforce mode for ask_clarification / escalate / block / fallback.
+    The result is consumed by concierge_voice (via _render_voice_from_router_output)
+    and rendered as a normal reply.
+    """
+    action = decision.get("action")
+    base = {
+        "policy_overridden": True,
+        "effective_intent": decision.get("effective_intent"),
+        "response_policy": decision.get("response_policy"),
+    }
+    if action == "ask_clarification":
+        base.update({
+            "status": "missing_critical_date",
+            "context_message": decision.get("clarification_message") or "Could you tell me more so I can help?",
+
+        })
+    elif action == "escalate":
+        base.update({
+            "status": "handoff_required",
+            "context_message": "Connecting you with a human agent,",
+        })
+    elif action == "block":
+        base.update({
+            "status": "blocked",
+            "context_message":"I can't help with that request.",
+        })
+    else:
+        base.update({
+            "status": "cascual_interaction",
+            "context_message": "I'm here to help - could you share a bit more?.",
+        })
+
+    if not base.get("response_policy"):
+        base["response_policy"] = base["status"]
+    
+    return base
