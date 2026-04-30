@@ -89,7 +89,7 @@ def _conditional_matches(
         if cond.selection_number_present != has_sel:
             return False
 
-    if cond.explicit_status_keywords is True:
+    if cond.explicit_status_present is True:
         if frame.primary_intent != "booking_status":
             return False
 
