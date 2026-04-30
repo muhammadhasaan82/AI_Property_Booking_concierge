@@ -354,47 +354,38 @@ def compute_override(
     decision: RouterDecision,
     actual_tool_called: Optional[str],
 ) -> Optional[Dict[str, Any]]:
-        """Return an override summary dict if decision and actual disagree, else None."""
-        policy_action = decision.action("action")
-        policy_tool = decision.get("tool_name")
+    """Return an override summary dict if decision and actual disagree, else None."""
+    policy_action = decision.get("action")
+    policy_tool = decision.get("tool_name")
 
-        if policy_action != "execute_tool":
-            if actual_tool_called:
-                return{
-                    "actual_tool": actual_tool_called,
-                    "policy_action": policy_action,
-                    "policy_tool": None,
-                    "effective_intent": decision.get("effective_intent"),
-                    "matched_priority_id": decision.get("matched_priority_id"),
-                    "confidence": decision.get("confidence"),
-                    "reasoning": decision.get("reasoning"),
-                }
-            return None
-
+    if policy_action != "execute_tool":
         if actual_tool_called:
-            return{
-                    "actual_tool": actual_tool_called,
-                    "policy_action": policy_action,
-                    "policy_tool": None,
-                    "effective_intent": decision.get("effective_intent"),
-                    "matched_priority_id": decision.get("matched_priority_id"),
-                    "confidence": decision.get("confidence"),
-                    "reasoning": decision.get("reasoning"),
-                }
-            return None
-
-            if actual_tool_called == policy_tool:
-                return None
-
             return {
                 "actual_tool": actual_tool_called,
-                "policy_action": "execute_tool",
-                "policy_tool": policy_tool,
+                "policy_action": policy_action,
+                "policy_tool": None,
                 "effective_intent": decision.get("effective_intent"),
                 "matched_priority_id": decision.get("matched_priority_id"),
                 "confidence": decision.get("confidence"),
                 "reasoning": decision.get("reasoning"),
             }
+        return None
+
+    if not actual_tool_called:
+        return None
+
+    if actual_tool_called == policy_tool:
+        return None
+
+    return {
+        "actual_tool": actual_tool_called,
+        "policy_action": "execute_tool",
+        "policy_tool": policy_tool,
+        "effective_intent": decision.get("effective_intent"),
+        "matched_priority_id": decision.get("matched_priority_id"),
+        "confidence": decision.get("confidence"),
+        "reasoning": decision.get("reasoning"),
+    }
 
 def synthesize_router_output(decision: RouterDecision) -> Dict[str, Any]:
     """Build a router_output dict from a non-execute_tool decision.
