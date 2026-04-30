@@ -315,7 +315,7 @@ def decide(
             tool_args=dict(booking_state),
             response_policy="review_pending",
         )
-    missing_fields = _check_required_context(intent_rule, frame, soft_state)
+    missing_fields = _check_required_context(intent_rule, soft_state)
     if missing_fields:
         msg=intent.clarify_message or f"I need: {', '.join(missing_fields)}."
         return _make_decision(
