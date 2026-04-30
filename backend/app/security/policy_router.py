@@ -250,7 +250,7 @@ def decide(
             matched_priority_id=matched_priority_id,
             confidence=frame.confidence,
             reasoning="human_handoff blocks other intents",
-            tool_name="escalate_to_human" if "escalate_to_human" in intent_rule.tools else None,
+            tool_name="escalate_to_human" if "escalate_to_human" in intent_rule.allowed_tools else None,
             response_policy="cascual_required",
         )
     if frame.confidence < policy.confidence.medium:
