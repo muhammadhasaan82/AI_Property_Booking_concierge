@@ -243,7 +243,7 @@ def decide(
             response_policy="cascual_interaction",
         )
 
-    if intent_rule.block_other_intent and effective_intent == "human_handoff":
+    if intent_rule.block_other_intents and effective_intent == "human_handoff":
         return _make_decision(
             action="escalate",
             intent=effective_intent,
