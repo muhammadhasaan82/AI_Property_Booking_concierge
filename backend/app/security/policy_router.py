@@ -224,7 +224,7 @@ def _make_decision(
         "reasoning": reasoning,
     }
 def decide(
-    frame: UnderstingFrame,
+    frame: UnderstandingFrame,
     soft_state: Optional[Dict[str, Any]] = None,
 ) -> RouterDecision:
     """Compute a deterministic RouterDecision from the LLM frame + soft state."""
@@ -317,7 +317,7 @@ def decide(
         )
     missing_fields = _check_required_context(intent_rule, soft_state)
     if missing_fields:
-        msg=intent.clarify_message or f"I need: {', '.join(missing_fields)}."
+        msg=intent_rule.clarify_message or f"I need: {', '.join(missing_fields)}."
         return _make_decision(
             action="ask_clarification",
             intent=effective_intent,
