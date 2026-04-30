@@ -254,7 +254,7 @@ def decide(
             response_policy="cascual_required",
         )
     if frame.confidence < policy.confidence.medium:
-        msg = intent_rule.fallback_message or "could you share a bit more about what you need?"
+        msg = intent_rule.clarify_message or "could you share a bit more about what you need?"
         return _make_decision(
             action="ask_clarification",
             intent=effective_intent,
