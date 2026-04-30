@@ -29,7 +29,7 @@ from google.genai.types import Content, Part
 from ..observability import telemetry
 from ..security import anomaly
 from ..security.guardrails import sanitize_input, sanitize_output
-from ..services import policy_router
+from ..security import policy_router
 from .config import (
     ADK_MAX_COGNITIVE_CONTEXT_CHARS,
     ADK_SESSION_MAX_CONTEXT_CHARS,
