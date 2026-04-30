@@ -29,6 +29,7 @@ from google.genai.types import Content, Part
 from ..observability import telemetry
 from ..security import anomaly
 from ..security.guardrails import sanitize_input, sanitize_output
+from ..services import policy_router
 from .config import (
     ADK_MAX_COGNITIVE_CONTEXT_CHARS,
     ADK_SESSION_MAX_CONTEXT_CHARS,
@@ -752,6 +753,11 @@ async def run_adk_turn(
                             frame_obj = UnderstandingFrame(**_json.loads(raw_frame))
                         else:
                             frame_obj = None
+
+                        policy_override_json = None
+                        policy_override_applied = None
+
+                        if _cfg.feature_policy_router_mode in ("shadow",):
 
                         if frame_obj is not None:
                             understanding_frame_json = frame_obj.to_compact_json()
