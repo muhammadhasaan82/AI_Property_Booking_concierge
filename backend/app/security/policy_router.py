@@ -62,7 +62,7 @@ def _has_pending_booking(soft_state: Dict[str, Any]) -> bool:
 def _has_awaiting_field(soft_state: Dict[str, Any]) -> bool:
     return bool(soft_state.get("awaiting_field"))
 
-def _condition_matches(
+def _conditional_matches(
     frame: UnderstandingFrame,
     soft_state: Dict[str, Any],
     cond: PriorityCondition
