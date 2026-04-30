@@ -33,7 +33,7 @@ from app.config.booking_schema_loader import (
 )
 from app.agents.schemas.understanding_frame import UnderstandingFrame
 
-logger = logging.getlogger(__name__)
+logger = logging.getLogger(__name__)
 
 PolicyAction = Literal["execute_tool", "ask_clarification", "fallback", "escalate", "block"]
 
