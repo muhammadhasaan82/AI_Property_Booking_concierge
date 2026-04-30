@@ -402,7 +402,7 @@ def synthesize_router_output(decision: RouterDecision) -> Dict[str, Any]:
     }
     if action == "ask_clarification":
         base.update({
-            "status": "missing_critical_date",
+            "status": "missing_critical_data",
             "context_message": decision.get("clarification_message") or "Could you tell me more so I can help?",
 
         })
