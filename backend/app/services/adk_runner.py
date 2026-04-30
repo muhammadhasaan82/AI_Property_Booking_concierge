@@ -25,7 +25,6 @@ from google.adk.sessions.base_session_service import (
 )
 from google.adk.sessions.session import Session
 from google.genai.types import Content, Part
-
 from ..observability import telemetry
 from ..security import anomaly
 from ..security.guardrails import sanitize_input, sanitize_output
