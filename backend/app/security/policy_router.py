@@ -338,7 +338,7 @@ def decide(
             response_policy="casual_interaction",
         )
     primary_tool = intent_rule.allowed_tools[0]
-    tool_args = _build_tool_args(primary_tool, intent_rule, frame, soft_state)
+    tool_args = _build_tool_args(primary_tool, frame, soft_state)
     return _make_decision(
         action="execute_tool",
         intent=effective_intent,
