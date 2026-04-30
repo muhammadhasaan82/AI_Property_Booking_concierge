@@ -109,7 +109,7 @@ def _resolve_effective_intent(
             return rule.prefer_intent, rule.id
         return frame.primary_intent, None
 
-def _value_required(value: Any) -> bool:
+def _value_present(value: Any) -> bool:
     if value is None:
         return False
     if isinstance(value, str) and not value.strip():
