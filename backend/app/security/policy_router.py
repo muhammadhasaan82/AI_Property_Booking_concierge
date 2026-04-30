@@ -142,7 +142,7 @@ def _check_required_context(
 ) -> List[str]:
     """Return the list of required context keys not satisfied by soft_state."""
     missing: List[str] = []
-    for ctx in intent_rule.required_context:
+    for ctx in intent_rule.requires_context:
         if ctx == "active_shortlist" and not _has_active_shortlist(soft_state):
             missing.append(ctx)
         elif ctx == "pending_booking" and not _has_pending_booking(soft_state):
