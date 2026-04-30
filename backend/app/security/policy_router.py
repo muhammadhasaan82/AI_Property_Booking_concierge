@@ -17,9 +17,8 @@ Operating modes (cfg.feature_policy_router_mode):
 """
 from __future__ import annotations
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
-
-from torch._dynamo.utils import V
+from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict, Union
+# from torch._dynamo.utils import V
 from app.config.agent_policy_loader import (
     policy,
     sorted_priorities,
