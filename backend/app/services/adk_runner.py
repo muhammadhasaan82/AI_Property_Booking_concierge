@@ -754,11 +754,6 @@ async def run_adk_turn(
                         else:
                             frame_obj = None
 
-                        policy_override_json = None
-                        policy_override_applied = None
-
-                        if _cfg.feature_policy_router_mode in ("shadow",):
-
                         if frame_obj is not None:
                             understanding_frame_json = frame_obj.to_compact_json()
                             logger.debug(
@@ -771,7 +766,56 @@ async def run_adk_turn(
     except Exception:
         pass
 
+    policy_override_json = None
+    policy_override_applied = False
+    _mode = (_cfg.feature_policy_router_mode or "off").lower()
 
+    if _mode in ("shodow", "enforce") and frame_obj is not None:
+        try:
+            soft_state_for_policy = (
+                updated_session.state.get("soft_state", {})
+                if updated_session and updated_session.state else {}
+            )
+            decision = policy_route.decide(frame_obj, soft_state_for_policy)
+            actual_tool = tool_calls_log[-1]["tool"] if tool_calls_log else None
+            override = policy_router.compute_override(decision, actual_tool)
+
+            if override:
+                override_record = {
+                    "mode": _mode,
+                    "applied": False,
+                    "decision":{
+                        "action": decision.get("action"),
+                        "tool_name": decision.get("tool_name"),
+                        "effective_intent": decision.get("effective_intent"),
+                        "matched_priority_id": decision.get("matched_priority_id"),
+                        "reasoning": decision.get("reasoning"),
+                    },
+                    "actual_tool": override.get("actual_tool"),
+                }
+                logger.info(
+                    "[POLICY_OVERRIDE] mode=%s actual=%s policy=%s action=%s reason=%s",
+                    _mode,
+                    override.get("actual_tool"),
+                    override.get("tool_name"),
+                    override.get("action"),
+                    override.get("reasoning"),
+                )
+
+                if _mode == "enforce" and decision.get("action") != "execute_tool":
+                    synthetic = policy_route.synthetic_router_output(decsion)
+                    router_output = json.dumps(synthetic, ensure_ascii=False)
+                    final_reply = ""
+                    policy_override_applied = True
+                    override_record["applied"] = True
+                    logger.info(
+                        "[POLICY_OVERRIDE] enforced action=%s status=%s",
+                        decision.get("action"), synthetic.get("status"),
+                    )
+                policy_override_json = json.dumps(override_record, ensure_ascii=False)
+        except Exception as _policy_exc:
+            logger.warning("[ADK] policy_router failed: %s", _policy_exc)
+            
     if anomaly_triggered:
         final_reply = anomaly.GRACEFUL_FALLBACK_REPLY
         yield final_reply
@@ -819,6 +863,8 @@ async def run_adk_turn(
                 latency_ms=latency_ms,
                 cognitive_context=user_cognitive_context or None,
                 understanding_frame_json=understanding_frame_json or None,
+                policy_override_json=policy_override_json,
+                turn_count=turn_count,
             )
         )
     except Exception:
