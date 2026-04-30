@@ -239,7 +239,7 @@ def decide(
             intent=effective_intent,
             matched_priority_id=matched_priority_id,
             confidence=frame.confidence,
-            reason=f"No rule defined for intent={effective_intent}.",
+            reasoning=f"No rule defined for intent={effective_intent}.",
             response_policy="cascual_interaction",
         )
 
@@ -260,7 +260,7 @@ def decide(
             intent=effective_intent,
             matched_priority_id=matched_priority_id,
             confidence=frame.confidence,
-            reason=f"confidence {frame.confidence:.2f} < medium={policy.confidence.medium}",
+            reasoning=f"confidence {frame.confidence:.2f} < medium={policy.confidence.medium}",
             clarification_message=msg,
             response_policy="missing_critical_data",
         )
@@ -272,7 +272,7 @@ def decide(
             intent=effective_intent,
             matched_priority_id=matched_priority_id,
             confidence=frame.confidence,
-            reason=f"missing context: {missing_ctx}",
+            reasoning=f"missing context: {missing_ctx}",
             clarification_message=msg,
             response_policy="missing_critical_data",
         )
@@ -286,7 +286,7 @@ def decide(
                 intent=effective_intent,
                 matched_priority_id=matched_priority_id,
                 confidence=frame.confidence,
-                reason=f"booking missing: {booking_missing}",
+                reasoning=f"booking missing: {booking_missing}",
                 tool_name="request_booking_details",
                 tool_args={
                     k: v for k, v in frame.entities.items()
@@ -300,7 +300,7 @@ def decide(
                 intent=effective_intent,
                 matched_priority_id=matched_priority_id,
                 confidence=frame.confidence,
-                reason="All booking fields present + explicit user confirmation.",
+                reasoning="All booking fields present + explicit user confirmation.",
                 tool_name="process_v2_booking",
                 tool_args=dict(booking_state),
                 response_policy="booking_confirmed",
@@ -310,7 +310,7 @@ def decide(
             intent=effective_intent,
             matched_priority_id=matched_priority_id,
             confidence=frame.confidence,
-            reason="All booking fields present, ready for review",
+            reasoning="All booking fields present, ready for review",
             tool_name="review_booking_details",
             tool_args=dict(booking_state),
             response_policy="review_pending",
@@ -323,7 +323,7 @@ def decide(
             intent=effective_intent,
                 matched_priority_id=matched_priority_id,
                 confidence=frame.confidence,
-                reason=f"Missing required fields: {missing_fields}",
+                reasoning=f"Missing required fields: {missing_fields}",
                 clarification_message=msg,
                 response_policy="missing_critical_data",
             )
@@ -334,7 +334,7 @@ def decide(
             intent=effective_intent,
             matched_priority_id=matched_priority_id,
             confidence=frame.confidence,
-            reason=f"No allowed tools for intent '{effective_intent}'",
+            reasoning=f"No allowed tools for intent '{effective_intent}'",
             response_policy="casual_interaction",
         )
     primary_tool = intent_rule.allowed_tools[0]
@@ -344,7 +344,7 @@ def decide(
         intent=effective_intent,
         matched_priority_id=matched_priority_id,
         confidence=frame.confidence,
-        reason=f"confidence {frame.confidence:.2f}' ≥ medium → {primary_tool}",
+        reasoning=f"confidence {frame.confidence:.2f}' ≥ medium → {primary_tool}",
         tool_name=primary_tool,
         tool_args=tool_args,
         response_policy=intent_rule.response_policy or "found",
