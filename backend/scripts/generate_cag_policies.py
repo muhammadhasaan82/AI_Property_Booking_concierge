@@ -188,7 +188,7 @@ def main() -> int:
         shutil.copy2(args.target, backup_path)
         logger.info("Backed Saved: %s", backup_path)
 
-    args.target.parent.mkdir(parent=True, exists_ok=True)
+    args.target.parent.mkdir(parents=True, exist_ok=True)
     with open(args.target, "w", encoding="utf-8") as f:
         f.write(new_toml)
     logger.info("Wrote %s (%d policies)", args.target, len(data.get("policies") or []))
