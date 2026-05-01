@@ -18,6 +18,7 @@ import difflib
 import keyword
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -184,7 +185,7 @@ def main() -> int:
 
     if args.backup and args.target.exists():
         backup_path = args.target.with_suffix(args.target.suffix + ".bak")
-        shufil.copy2(args.target, backup_path)
+        shutil.copy2(args.target, backup_path)
         logger.info("Backed Saved: %s", backup_path)
 
     args.target.parent.mkdir(parent=True, exists_ok=True)
