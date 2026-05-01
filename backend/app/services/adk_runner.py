@@ -769,7 +769,7 @@ async def run_adk_turn(
     policy_override_applied = False
     _mode = (_cfg.feature_policy_router_mode or "off").lower()
 
-    if _mode in ("shodow", "enforce") and frame_obj is not None:
+    if _mode in ("shadow", "enforce") and frame_obj is not None:
         try:
             soft_state_for_policy = (
                 updated_session.state.get("soft_state", {})

@@ -1,0 +1,86 @@
+version: "1.0"
+
+settings:
+  keyword_threshold: 0.6
+  fuzzy_threshold: 0.82
+  ttl_seconds: 3600
+
+policies:
+  - id: check_in_time
+    canonical_question: "What time is check-in?"
+    answer: >-
+      Check-in is from 3:00 PM onwards. Early check-in may be available upon
+      request, subject to availability. Please contact the property directly
+      for arrangements.
+    paraphrases:
+      - "When can I check in"
+      - "Check-in time"
+      - "What is the check-in time"
+      - "When is check in"
+    keywords: [check-in, check, time, arrive, arrival, early, when]
+
+  - id: check_out_time
+    canonical_question: "What time is check-out?"
+    answer: >-
+      Check-out is by 11:00 AM. Late check-out may be available for an
+      additional fee — please ask the property at least 24 hours in advance.
+    paraphrases:
+      - "When do I check out"
+      - "Checkout time"
+      - "When is check out"
+      - "What is the check-out time"
+    keywords: [check-out, checkout, leave, departure, late, out]
+
+  - id: pet_policy
+    canonical_question: "Do you allow pets?"
+    answer: >-
+      Pet policies vary by property. Some properties allow pets with a
+      refundable deposit, while others do not permit animals. Check the
+      specific property listing for details, or ask us to filter for
+      pet-friendly options.
+    paraphrases:
+      - "Are pets allowed"
+      - "Can I bring my dog"
+      - "Pet policy"
+      - "Is it pet friendly"
+    keywords: [pet, pets, dog, cat, animal, animals, allow]
+
+  - id: cancellation_policy
+    canonical_question: "What is the cancellation policy?"
+    answer: >-
+      Free cancellation is available up to 48 hours before your check-in date
+      for a full refund. Cancellations within 48 hours may incur a charge equal
+      to the first night's stay. Non-refundable rates, where offered, are
+      clearly marked at booking.
+    paraphrases:
+      - "Can I cancel my booking"
+      - "How do I cancel"
+      - "Cancellation rules"
+      - "Is there free cancellation"
+    keywords: [cancel, cancellation, cancelling, free, policy, "48"]
+
+  - id: refund_policy
+    canonical_question: "What is the refund policy?"
+    answer: >-
+      Refunds for eligible cancellations are processed within 5–10 business
+      days to your original payment method. If you paid via credit card, the
+      refund timeline depends on your bank. For non-refundable bookings, no
+      refund is issued.
+    paraphrases:
+      - "How do I get a refund"
+      - "When will I get my money back"
+      - "Refund process"
+      - "Can I get a refund"
+    keywords: [refund, money, back, return, reimburse, reimbursement]
+
+  - id: wifi_info
+    canonical_question: "Is Wi-Fi available?"
+    answer: >-
+      Complimentary Wi-Fi is available at all listed properties. Connection
+      details (network name and password) are provided upon check-in or in
+      your booking confirmation email.
+    paraphrases:
+      - "Do you have wifi"
+      - "Is internet included"
+      - "Wifi password"
+    keywords: [wifi, wi-fi, internet, network, password]
