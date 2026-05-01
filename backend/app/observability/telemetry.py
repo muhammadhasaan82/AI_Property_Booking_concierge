@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS dpo_trajectories (
     latency_ms REAL,
     cognitive_context TEXT,
     understanding_frame_json TEXT,
+    policy_override_json TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -79,6 +80,7 @@ def init_db() -> None:
             for migration_col, col_sql in (
                 ("cognitive_context", "ALTER TABLE dpo_trajectories ADD COLUMN cognitive_context TEXT"),
                 ("understanding_frame_json", "ALTER TABLE dpo_trajectories ADD COLUMN understanding_frame_json TEXT"),
+                ("policy_override_json", "ALTER TABLE dpo_trajectories ADD COLUMN policy_override_json TEXT"),
             ):
                 try:
                     cursor.execute(col_sql)
@@ -86,7 +88,7 @@ def init_db() -> None:
                     if "duplicate column name" not in str(alter_error).lower():
                         logger.warning(
                             "[Telemetry] SQLite migration failed for %s: %s",
-                            alter_error,
+                            migration_col, alter_error,
                         )
 
             conn.commit()
@@ -116,6 +118,7 @@ def _write_sqlite(
     latency_ms: Optional[float],
     cognitive_context: Optional[str] = None,
     understanding_frame_json: Optional[str] = None,
+    policy_override_json: Optional[str] = None,
 ) -> bool:
     """Synchronous SQLite insert (runs in thread pool)."""
     try:
@@ -126,8 +129,8 @@ def _write_sqlite(
             INSERT INTO dpo_trajectories
                 (session_id, user_id, trajectory_tag, user_message,
                  tool_calls, final_reply, booking_id, turn_count, latency_ms,
-                 cognitive_context, understanding_frame_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 cognitive_context, understanding_frame_json, policy_override_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -141,6 +144,7 @@ def _write_sqlite(
                 latency_ms,
                 cognitive_context,
                 understanding_frame_json,
+                policy_override_json,
             ),
         )
         conn.commit()
@@ -163,6 +167,7 @@ async def _mirror_supabase(
     latency_ms: Optional[float],
     cognitive_context: Optional[str] = None,
     understanding_frame_json: Optional[str] = None,
+    policy_override_json: Optional[str] = None,
 ) -> bool:
     """Best-effort mirror to Supabase via db_client."""
     try:
@@ -172,8 +177,8 @@ async def _mirror_supabase(
             INSERT INTO public.dpo_trajectories
                 (session_id, user_id, trajectory_tag, user_message,
                  tool_calls, final_reply, booking_id, turn_count, latency_ms,
-                 cognitive_context, understanding_frame_json)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 cognitive_context, understanding_frame_json, policy_override_json)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 session_id,
@@ -187,6 +192,7 @@ async def _mirror_supabase(
                 latency_ms,
                 cognitive_context,
                 understanding_frame_json,
+                policy_override_json,
             ),
         )
         return True
@@ -258,20 +264,21 @@ async def log_trajectory(
     latency_ms: Optional[float] = None,
     cognitive_context: Optional[str] = None,
     understanding_frame_json: Optional[str] = None,
+    policy_override_json: Optional[str] = None,
 ) -> None:
     """Log a full trajectory turn. Fire-and-forget — never blocks the caller.
 
-    Args:
-        session_id: Conversation thread ID.
-        user_id: User identifier.
-        user_message: The user's input text.
-        tool_calls: List of dicts [{tool, params_hash, result_status}, ...].
-        final_reply: The agent's final response.
-        booking_id: Extracted booking ID if any.
-        turn_count: Turn number in the session.
-        latency_ms: Pipeline execution time in milliseconds.
-        cognitive_context: Mem0 user preference context active during this turn.
-        understanding_frame_json: Phase-2 UnderstandingFrame as compact JSON.
+    # Args:
+    #     session_id: Conversation thread ID.
+    #     user_id: User identifier.
+    #     user_message: The user's input text.
+    #     tool_calls: List of dicts [{tool, params_hash, result_status}, ...].
+    #     final_reply: The agent's final response.
+    #     booking_id: Extracted booking ID if any.
+    #     turn_count: Turn number in the session.
+    #     latency_ms: Pipeline execution time in milliseconds.
+    #     cognitive_context: Mem0 user preference context active during this turn.
+    #     understanding_frame_json: Phase-2 UnderstandingFrame as compact JSON.
     """
     if not DPO_TELEMETRY_ENABLED:
         return
@@ -297,6 +304,7 @@ async def log_trajectory(
         latency_ms,
         cognitive_context,
         understanding_frame_json,
+        policy_override_json,
     )
 
     asyncio.create_task(
@@ -312,12 +320,12 @@ async def log_trajectory(
             latency_ms,
             cognitive_context,
             understanding_frame_json,
+            policy_override_json,
         )
     )
-
     logger.debug(
-        "[Telemetry] Logged [%s] session=%s tools=%d booking=%s mem0=%s frame=%s",
+        "[Telemetry] Logged [%s] session=%s tools=%d booking=%s frame=%s override=%s",
         tag, session_id, len(tool_calls), booking_id or "none",
-        "yes" if cognitive_context else "no",
         "yes" if understanding_frame_json else "no",
+        "yes" if policy_override_json else "no",
     )
