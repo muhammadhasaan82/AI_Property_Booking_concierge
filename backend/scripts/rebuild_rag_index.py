@@ -38,7 +38,7 @@ def main() -> int:
         logger.error("PDF not found: %s", args.pdf)
         return 2
     
-    from app.compenents.faq_enhanced import process_policy_document, _faq_service
+    from app.components.faq_enhanced import process_policy_document, _faq_service
 
     force = not args.no_force
     logger.info("Rebuilding RAG index from %s (force=%s)", args.pdf, force)
