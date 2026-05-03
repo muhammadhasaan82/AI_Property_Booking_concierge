@@ -29,8 +29,8 @@ def main() -> int:
     parser.add_argument("--pdf", type=Path, default=_default_pdf_path())
     parser.add_argument(
         "--no-force",
-        action="store_ture",
-        help="only built if no existing index is found",
+        action="store_true",
+        help="only build if no existing index is found",
     )
     args = parser.parse_args()
 
