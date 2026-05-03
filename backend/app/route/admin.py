@@ -19,19 +19,20 @@ _LAST_RELOAD_AT: float = 0.0
 _LAST_RELOAD_RESULT: Dict[str, Any] = {}
 
 def _verify_admin(authorization: str = Header(default="")) -> None:
-    expected = os.getenv("ADMIN_TOKEN", "").Strip()
+    expected = os.getenv("ADMIN_TOKEN", "").strip()
     if not expected:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="ADMIN_TOKEN not configured; admin routes disabled.")
+        raise HTTPException(status_code=503, detail="ADMIN_TOKEN not configured...")
     provided = (authorization or "").strip()
     if provided.lower().startswith("bearer "):
         provided = provided[7:].strip()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
+    if provided != expected:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
     
 def _safe_reload(name: str, fn) -> Dict[str, Any]:
     """Call a reload function and capture success/failure for the response."""
     try:
         fn()
-        return {"name": name, "of": True}
+        return {"name": name, "ok": True}
     except Exception as exc:
         logger.warning("[admin] reload %s failed: %s", name, exc)
         return {"name": name, "ok": False, "error": str(exc)}
@@ -89,7 +90,7 @@ async def reload_config() -> Dict[str, Any]:
     logger.info("[admin] reload-config v%d in %.2fms", _CONFIG_VERSION, elapsed_ms)
     return _LAST_RELOAD_RESULT
 
-@router.get("/admin/cofig-version")
+@router.get("/admin/config-version")
 async def get_config_version() -> Dict[str, Any]:
     """Public — returns current in-memory config version + last reload metadata."""
     return {
