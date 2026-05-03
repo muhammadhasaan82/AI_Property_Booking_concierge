@@ -1,0 +1,212 @@
+version: "1.0"
+
+defaults:
+  expected_args: {}
+  soft_state: {}
+  tags: []
+
+samples:
+  - id: search_01
+    prompt: "Find apartments in New York under $150"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: new york, property_type: apartment}
+    tags: [search, alias]
+
+  - id: search_02
+    prompt: "Show me villas in Dubai with a pool"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: dubai, property_type: villa}
+    tags: [search]
+
+  - id: search_03
+    prompt: "I need an apt in NYC with wifi"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: new york, property_type: apartment}
+    tags: [search, alias, abbreviation]
+
+  - id: search_04
+    prompt: "Any 2 bedroom places in London for under 200 dollars?"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: london, beds: 2}
+    tags: [search, beds]
+
+  - id: search_05
+    prompt: "luk for appartments in new york with pool max $200"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: new york, property_type: apartment}
+    tags: [search, typo, robustness]
+
+  - id: search_06
+    prompt: "I want a condo in Chicago, parking included"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: chicago, property_type: condo}
+    tags: [search]
+
+  - id: search_07
+    prompt: "what cities do you have"
+    expected_tool: get_all_available_cities
+    expected_intent: city_list
+    tags: [search, city_list]
+
+  - id: search_vibe_01
+    prompt: "I want a romantic getaway with ocean view"
+    expected_tool: search_properties
+    expected_intent: search_property
+    tags: [search, vibe, free_text]
+
+  - id: faq_01
+    prompt: "What is your cancellation policy?"
+    expected_tool: check_faq
+    expected_intent: faq
+    tags: [faq]
+
+  - id: faq_02
+    prompt: "Do you allow pets?"
+    expected_tool: check_faq
+    expected_intent: faq
+    tags: [faq]
+
+  - id: faq_03
+    prompt: "What time is check-in?"
+    expected_tool: check_faq
+    expected_intent: faq
+    tags: [faq]
+
+  - id: faq_04
+    prompt: "How do I pay? Do you take credit cards?"
+    expected_tool: check_faq
+    expected_intent: faq
+    tags: [faq, payment]
+
+  - id: faq_05
+    prompt: "what's the wifi situation"
+    expected_tool: check_faq
+    expected_intent: faq
+    tags: [faq, casual]
+
+
+  - id: select_01
+    prompt: "option 2"
+    expected_tool: select_property
+    expected_intent: select_property
+    expected_args: {option_number: 2}
+    soft_state:
+      last_search:
+        properties: [{id: a1}, {id: a2}, {id: a3}]
+    tags: [selection, numeric]
+
+  - id: select_02
+    prompt: "I'll go with the first one"
+    expected_tool: select_property
+    expected_intent: select_property
+    soft_state:
+      last_search:
+        properties: [{id: a1}, {id: a2}]
+    tags: [selection, ordinal]
+
+  - id: select_03
+    prompt: "the $92 apartment"
+    expected_tool: select_property
+    expected_intent: select_property
+    soft_state:
+      last_search:
+        properties:
+          - {id: a1, price: 92, type: apartment}
+          - {id: a2, price: 120}
+    tags: [selection, descriptive]
+
+  - id: booking_off_01
+    prompt: "I want to book option 3. My name is John."
+    expected_tool: request_booking_details
+    expected_intent: booking_continuation
+    soft_state:
+      last_search:
+        properties: [{id: a1}, {id: a2}, {id: a3}]
+    tags: [booking, off_switch, missing_data]
+
+  - id: booking_off_02
+    prompt: "Book the first listing. Email: alex@test.com."
+    expected_tool: request_booking_details
+    expected_intent: booking_continuation
+    soft_state:
+      last_search:
+        properties: [{id: a1}, {id: a2}]
+    tags: [booking, off_switch, missing_data]
+
+  - id: booking_off_03
+    prompt: "Reserve option 2 for me please"
+    expected_tool: request_booking_details
+    expected_intent: booking_continuation
+    soft_state:
+      last_search:
+        properties: [{id: a1}, {id: a2}, {id: a3}]
+    tags: [booking, off_switch]
+
+  - id: booking_off_04
+    prompt: "my email is alice@example.com"
+    expected_tool: request_booking_details
+    expected_intent: booking_continuation
+    soft_state:
+      booking_state: {guest_name: Alice}
+      awaiting_field: guest_email
+    tags: [booking, mid_flow, slot_fill]
+
+  
+    prompt: "what's the status of my booking abc12345"
+    expected_tool: check_booking_status
+    expected_intent: booking_status
+    expected_args: {booking_id: abc12345}
+    tags: [booking_status]
+
+
+  - id: small_talk_01
+    prompt: "hello!"
+    expected_tool: handle_small_talk
+    expected_intent: small_talk
+    tags: [small_talk]
+
+  - id: small_talk_02
+    prompt: "thanks!"
+    expected_tool: handle_small_talk
+    expected_intent: small_talk
+    tags: [small_talk]
+
+  
+  - id: handoff_01
+    prompt: "I want to talk to a human agent"
+    expected_tool: escalate_to_human
+    expected_intent: human_handoff
+    tags: [escalation]
+
+  - id: handoff_02
+    prompt: "this is ridiculous, just connect me to a real person"
+    expected_tool: escalate_to_human
+    expected_intent: human_handoff
+    tags: [escalation, frustrated]
+
+  
+  - id: unclear_01
+    prompt: "uhh sure I guess"
+    expected_intent: unclear
+    min_confidence: 0.0
+    max_confidence: 0.55
+    tags: [unclear, low_confidence]
+
+  - id: unclear_02
+    prompt: "do something"
+    expected_intent: unclear
+    max_confidence: 0.55
+    tags: [unclear]
+
+  
+  - id: multi_01
+    prompt: "what's your cancellation policy and I want to book a place in dubai"
+    expected_tool: check_faq
+    expected_intent: faq
+    tags: [multi_intent, faq_priority]
