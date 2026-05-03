@@ -50,13 +50,13 @@ def main() -> int:
         return 1
 
     elapsed = time.time() - t0
-    persist_dir  = getatte(_faq_service, "_chroma_path", "<unknown>")
+    persist_dir  = getattr(_faq_service, "_chroma_path", "<unknown>")
     chunk_count = len(getattr(_faq_service, "_documents",[]) or [])
 
     logger.info(
         "Rebuild complete: chunks=%d persist_dir=%s elapsed=%.2fs healthy=%s",
         chunk_count, persist_dir, elapsed,
-        bool(getattr(_faq_srvices, "_healthy", False)),
+        bool(getattr(_faq_service, "_healthy", False)),
     )
     return 0 if store is not None or chunk_count > 0 else 1
 
