@@ -68,7 +68,7 @@ def main() -> int:
     a_payload = run_suite_with_model(args.baseline, args.golden, a_path)
     b_payload = run_suite_with_model(args.candidate, args.golden, b_path)
 
-    delta = diff_metrics(a_payload, b_payload)
+    delta = diff_matrics(a_payload, b_payload)
 
     summary = {
         "baseline_model": args.baseline,
