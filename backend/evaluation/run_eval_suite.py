@@ -54,7 +54,7 @@ class GoldenSample:
     prompt: str
     expected_tool: Optional[str] = None
     expected_intent: Optional[str] = None
-    soft_state: Dict[str, Any] = field(defualt_factory=dict)
+    soft_state: Dict[str, Any] = field(default_factory=dict)
     min_confidence: Optional[float] = None
     max_confidence: Optional[float] = None
     tags: List[str] = field(default_factory=list)
