@@ -313,7 +313,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "timestamp": time.time(),
         }
         if args.out:
-            Path(args.out).parent.mkdir(parent=True, exists_ok=True)
+            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
             with open(args.out, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
             print(f"Wrote {args.out}")
