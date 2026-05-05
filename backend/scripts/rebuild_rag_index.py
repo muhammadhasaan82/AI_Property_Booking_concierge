@@ -29,8 +29,8 @@ def main() -> int:
     parser.add_argument("--pdf", type=Path, default=_default_pdf_path())
     parser.add_argument(
         "--no-force",
-        action="store_ture",
-        help="only built if no existing index is found",
+        action="store_true",
+        help="only build if no existing index is found",
     )
     args = parser.parse_args()
 
@@ -38,7 +38,7 @@ def main() -> int:
         logger.error("PDF not found: %s", args.pdf)
         return 2
     
-    from app.compenents.faq_enhanced import process_policy_document, _faq_service
+    from app.components.faq_enhanced import process_policy_document, _faq_service
 
     force = not args.no_force
     logger.info("Rebuilding RAG index from %s (force=%s)", args.pdf, force)
@@ -50,13 +50,13 @@ def main() -> int:
         return 1
 
     elapsed = time.time() - t0
-    persist_dir  = getatte(_faq_service, "_chroma_path", "<unknown>")
+    persist_dir  = getattr(_faq_service, "_chroma_path", "<unknown>")
     chunk_count = len(getattr(_faq_service, "_documents",[]) or [])
 
     logger.info(
         "Rebuild complete: chunks=%d persist_dir=%s elapsed=%.2fs healthy=%s",
         chunk_count, persist_dir, elapsed,
-        bool(getattr(_faq_srvices, "_healthy", False)),
+        bool(getattr(_faq_service, "_healthy", False)),
     )
     return 0 if store is not None or chunk_count > 0 else 1
 
