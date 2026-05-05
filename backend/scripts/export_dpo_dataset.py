@@ -178,8 +178,9 @@ _MIN_REPLY_LEN = 12
 def is_low_quality(reply: str) -> bool:
     if not reply or len(reply.strip()) < _MIN_REPLY_LEN:
         return True
+    low = reply.lower()
     return any(phrase in low for phrase in _LOW_QUALITY_PHRASES)
-
+    
 def deduplicate_by_message(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:    
     seen: set = set()
     out: List[Dict[str,Any]] = []
