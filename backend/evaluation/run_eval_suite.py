@@ -137,8 +137,10 @@ async def run_sample(sample: GoldenSample) -> SampleResult:
             session_id=session.id,
             new_message=message,
         ):
+            print(f"    [DEBUG] event.author={event.author}, content={event.content is not None}, error={getattr(event, 'error', None)}")
             if event.content and event.content.parts:
-                for part in event.content.parts:
+                for i, part in enumerate(event.content.parts):
+                    print(f"    [DEBUG] part [{i}] text={getattr(part, 'text', None)}, fc={getattr(part, 'function_call', None)}")
                     fc = getattr(part, "function_call", None)
                     if fc and getattr(fc, "name", None):
                         actual_tool = fc.name
