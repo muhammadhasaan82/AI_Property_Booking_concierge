@@ -90,18 +90,49 @@ def cmd_watch(args: argparse.Namespace) -> int:
             return 0 if job.status == "succeeded" else 1
         time.sleep(args.poll_seconds)
     return 0
+def cmd_list_models(args: argparse.Namespace) -> int:
+    """List base models available to this account for fine-tuning."""
+    client = _client()
+    all_models = client.models.list()
+    FT_PREFIXES = (
+        "gpt-4.1-nano", "gpt-4.1-mini", "gpt-4.1",
+        "gpt-4o-mini", "gpt-4o",
+        "gpt-3.5-turbo",
+        "babbage-002", "davinci-002",
+    )
+    candidates = sorted(
+        m.id for m in all_models.data
+        if any(m.id.startswith(p) for p in FT_PREFIXES)
+        and "audio" not in m.id
+        and "realtime" not in m.id
+    )
+    print("Fine-tuneable base models visible to this account:")
+    for mid in candidates:
+        print(f"  {mid}")
+    if not candidates:
+        print("  (none — check your account tier / API key)")
+    return 0
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="OpenAI fine-tune helper.")
     sub = parser.add_subparsers(dest="cmd", required=True)
-
+    p_lm = sub.add_parser("list-models", help="list fine-tuneable base models")
+    p_lm.set_defaults(func=cmd_list_models)
     p_up = sub.add_parser("upload", help="upload a JSONL training file")
     p_up.add_argument("file", help="path to .jsonl")
     p_up.set_defaults(func=cmd_upload)
 
     p_cr = sub.add_parser("create", help="create a fine-tune job")
     p_cr.add_argument("file_id", help="OpenAI file id from `upload`")
-    p_cr.add_argument("--model", default="gpt-5-nano")
+    p_cr.add_argument(
+    "--model",
+    default="gpt-4.1-nano-2025-04-14",
+    help=(
+        "Base model to fine-tune. Must be on OpenAI's fine-tuning allowlist. "
+        "Run `python scripts/finetune_openai.py list-models` to see what's "
+        "available on your account right now."
+    ),
+    )
     p_cr.add_argument("--suffix", default="concierge-router")
     p_cr.add_argument("--epochs", type=int, default=None)
     p_cr.set_defaults(func=cmd_create)
