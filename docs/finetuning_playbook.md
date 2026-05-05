@@ -26,16 +26,16 @@ Record the metrics — this is your "before" measurement.
 Pick one target. For the dispatcher (most useful):
 
 ```bash
-python scripts/export_dpo_dataset.py --mode sft-router \
-    --output evaluation/eval_results/sft_router.jsonl \
+python scripts/export_dpo_dataset.py --mode stfu-router \
+    --output evaluation/eval_results/stfu_router.jsonl \
     --cap-per-intent 200
 ```
 
 For the understanding agent:
 
 ```bash
-python scripts/export_dpo_dataset.py --mode sft-understanding \
-    --output evaluation/eval_results/sft_understanding.jsonl
+python scripts/export_dpo_dataset.py --mode stfu-understanding \
+    --output evaluation/eval_results/stfu_understanding.jsonl
 ```
 
 For the voice agent (DPO):
@@ -48,14 +48,14 @@ python scripts/export_dpo_dataset.py --mode dpo-voice \
 Inspect a few examples:
 
 ```bash
-head -3 evaluation/eval_results/sft_router.jsonl | python -m json.tool
+head -3 evaluation/eval_results/stfu_router.jsonl | python -m json.tool
 ```
 
 ## 3. Train
 
 ```bash
 # Upload
-python scripts/finetune_openai.py upload evaluation/eval_results/sft_router.jsonl
+python scripts/finetune_openai.py upload evaluation/eval_results/stfu_router.jsonl
 # → records FILE_ID
 
 # Kick off
@@ -94,7 +94,7 @@ Look for positive deltas on `tool_selection_accuracy`, `arg_extraction_accuracy`
 ## Alternatives
 
 - **Together AI**: same JSONL format works. Endpoint is `https://api.together.xyz/v1/fine-tunes`. See their docs.
-- **Local TRL (HuggingFace)**: convert JSONL with `trl.SFTTrainer`. Useful for offline labs but slower.
+- **Local TRL (HuggingFace)**: convert JSONL with `trl.stfuTrainer`. Useful for offline labs but slower.
 
 ## Tips
 

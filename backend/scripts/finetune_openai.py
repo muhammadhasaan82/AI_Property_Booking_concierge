@@ -2,8 +2,8 @@
 OpenAI fine-tuning wrapper.
 
 Workflow:
-    1. python scripts/export_dpo_dataset.py --mode sft-router -o sft_router.jsonl
-    2. python scripts/finetune_openai.py upload   sft_router.jsonl
+    1. python scripts/export_dpo_dataset.py --mode stfu-router -o stfu_router.jsonl
+    2. python scripts/finetune_openai.py upload   stfu_router.jsonl
     3. python scripts/finetune_openai.py create   <FILE_ID> --model gpt-5-nano
     4. python scripts/finetune_openai.py status   <JOB_ID>
     5. ADK_DISPATCHER_MODEL=ft:openai:gpt-5-nano:org:tag:abcd1234 (in .env)
