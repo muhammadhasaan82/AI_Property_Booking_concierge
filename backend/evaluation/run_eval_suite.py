@@ -129,7 +129,7 @@ async def run_sample(sample: GoldenSample) -> SampleResult:
         runner = Runner(
             app_name="eval",
             agent=root_agent,
-            session_services=sess_svc,
+            session_service=sess_svc,
         )
         message  = Content(role="user", parts=[Part(text=sample.prompt)])
         async for event in runner.run_async(
