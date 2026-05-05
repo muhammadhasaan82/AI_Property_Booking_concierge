@@ -314,25 +314,82 @@ def export_jsonl(pairs: List[Dict[str, str]], output_path: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Export DPO preference pairs from telemetry data."
+        description="Export DPO/STFU training data from telemetry."
     )
     parser.add_argument(
         "--output", "-o",
         default="dpo_dataset.jsonl",
-        help="Output JSONL file path (default: dpo_dataset.jsonl)",
     )
     parser.add_argument(
         "--source", "-s",
         choices=["auto", "sqlite", "supabase"],
         default="auto",
-        help="Data source (default: auto — tries SQLite then Supabase)",
     )
+    parser.add_argument(
+        "--mode", "-m",
+        choices=["dpo-voice", "stfu-router", "stfu-understanding"],
+        default="dpo-voice",
+        help=(
+            "dpo-voice: voice perference pairs (existing behaviour)\n"
+            "stfu-router: tool-call training data for the dispatcher\n"
+            "stfu-understanding: structured-frame training for understanding_agent"
+        ),
+    )
+    parser.add_argument("--cap-per-intent", type=int, default=200,
+                        help="Cap rows per primary_intent (stfu modes)")
+    parser.add_argument("--no-dedupe", action="store_true",
+                        help="skip deduplication by user message")
+    parser.add_argument("--no-quality-filter", action="store_true",
+                        help="Skip the low-quality filter")
     args = parser.parse_args()
 
-    print(f"[DPO Export] Source: {args.source}")
-    print(f"[DPO Export] SQLite path: {SQLITE_PATH}")
+    print(f"[Export] Mode = {args.mode} | source = {args.source}")
+    print(f"[Export] SQLite path: {SQLITE_PATH}")
     print()
-    print("[DPO Export] Fetching SUCCESS_PATH trajectories...")
+
+    if args.mode == "dpo-voice":
+        success_rows = fetch_trajectories("SUCCESS_PATH", args.source)
+        dropoff_rows = fetch_trajectories("DROP_OFF_PATH", args.source)
+        print(f"[Export] success={len(success_rows)}, dropoff={len(dropoff_rows)}")
+
+        if not args.no_quality_filter:
+            success_rows = [f for r in success_rows if not is_low_quality(r.get("final_reply", ""))]
+        if not args.no_dedupe:
+            success_rows = deduplicate_by_message(success_rows)
+            dropoff_rows = deduplicate_by_message(dropoff_rows)
+
+        pairs, stats = build_dpo_pairs(success_rows, dropoff_rows)
+        if not pairs:
+            print("[Export] No pairs built.")
+            sys.exit(0)
+        export_jsonl(pairs, args.output)
+        print(f"[Export] Wrote {len(pairs)} preference pairs → {args.output}")
+        print(f" natural_pairs={stats['natural_pairs']})"
+              f" synthetic_chosen={stats['synthetic_chosen']}"
+              f" synthetic_rejected={stats['synthetic_rejected']}")
+    
+    elif args.mode == "stfu-router":
+        rows = fetch_trajectories("SUCCESS_PATH", args.source)
+        print(f"[Export] success rows={len(rows)}")
+        if not args.no_dedupe:
+            rows = deduplicate_by_message(rows)
+        rows = balance_by_intent(rows, cap_per_intent=args.cap_per_intent)
+        examples = build_stfu_router_pairs(rows)
+        export_jsonl(examples, args.output)
+        print(f"[Export] wrote {len(examples)} STFU router examples → {args.output}")
+    
+    elif args.mode == "stfu-understanding":
+        rows = fetch_trajectories("SUCCESS_PATH", args.source)
+        rows += fetch_trajectories("IN_PROGRESS", args.source)
+        print(f"[Export] rows (success+in_progress)={len(rows)}")
+        if not args.no_dedupe:
+            rows = deduplicate_by_message(rows)
+        rows = balance_by_intent(rows, cap_per_intent=args.cap_per_intent)
+        examples = build_stfu_understanding_pairs(rows)
+        export_jsonl(examples, args.output)
+        print(f"[Export] wrote {len(examples)} STFU understanding examples → {args.output}")
+
+    print("[Export] done.")
     success_rows = fetch_trajectories("SUCCESS_PATH", args.source)
     print(f"  Found: {len(success_rows)}")
 
