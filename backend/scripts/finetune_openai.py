@@ -9,7 +9,7 @@ Workflow:
     5. ADK_DISPATCHER_MODEL=ft:openai:gpt-5-nano:org:tag:abcd1234 (in .env)
 
 """
-from __future__import annotations
+from __future__ import annotations
 import argparse
 import json
 import os
