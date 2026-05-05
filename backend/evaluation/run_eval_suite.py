@@ -222,9 +222,9 @@ def _args_match(expected: Dict[str, Any], actual: Dict[str, Any]) -> bool:
                 
 def aggregate(results: List[SampleResults]) -> Dict[str, Any]:
     n = len(results) or 1 
-    tool_evaluable = [1 for r in results if r.expected_tool is not None]
-    intent_evaluable = [1 for r in results if r.expected_intent is not None]
-    args_evaluable = [1 for r in results if r.expected_args is not None]
+    tool_evaluable = [r for r in results if r.expected_tool is not None]
+    intent_evaluable = [r for r in results if r.expected_intent is not None]
+    args_evaluable = [r for r in results if r.expected_args is not None]
     confidence_evaluable = [
         r for r in results
         if r.actual_confidence is not None
@@ -233,7 +233,7 @@ def aggregate(results: List[SampleResults]) -> Dict[str, Any]:
     intent_acc = _safe_div(sum(r.intent_correct for r in intent_evaluable), len(intent_evaluable))
     args_acc = _safe_div(sum(r.args_correct for r in args_evaluable), len(args_evaluable))
     conf_in_range = _safe_div(sum(r.confidence_in_range for r in results), len(results))
-    override_rate = _safe_div(sum(r.policy_overridden for r in results), n)
+    override_rate = _safe_div(sum(r.policy_overriden for r in results), n)
     error_rate = _safe_div(sum(1 for r in results if r.error), n)
     avg_latency = sum((r.latency_ms or 0) for r in results) / n
 
