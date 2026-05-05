@@ -47,7 +47,7 @@ def diff_matrics(a: dict, b: dict) -> dict:
         "tool_selection_accuracy",
         "arg_extraction_accuracy",
         "frame_intent_accuracy",
-        "policy_override_rate",
+        "policy_agreement_rate",
         "error_rate",
         "avg_latency_ms",
     )
