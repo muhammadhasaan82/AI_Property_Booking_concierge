@@ -1,0 +1,13 @@
+- name: Run eval suite
+run: |
+  cd backend
+  python evaluation/run_eval_suite.py \
+    --threshold-tool 0.80 \
+    --threshold-tool 0.70 \
+    --threshold-args 0.80 \
+    --json --out evaluation/eval_result/ci.json
+- name: Upload eval artifact
+  uses: actions/upload-artifact@v4
+  with:
+    name: eval-results
+    path: backend/evaluation/eval_result/ci.json
