@@ -178,11 +178,9 @@ _MIN_REPLY_LEN = 12
 def is_low_quality(reply: str) -> bool:
     if not reply or len(reply.strip()) < _MIN_REPLY_LEN:
         return True
-        return any(phrase in low for phrase in
-        _LOW_QUALITY_PHRASES)
+    return any(phrase in low for phrase in _LOW_QUALITY_PHRASES)
 
-def deduplicate_by_message(rows: List[Dict[str, Any]]) -> List
-[Dict[str, Any]]:
+def deduplicate_by_message(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:    
     seen: set = set()
     out: List[Dict[str,Any]] = []
     for r in rows:
@@ -198,8 +196,7 @@ def parse_frame(row: Dict[str, Any]) -> DIct[str, Any]:
     if not raw:
         return{}
     try:
-        return json.loads(raw) if isinstance(raw, str) else
-        dict(raw)
+        return json.loads(raw) if isinstance(raw, str) else dict(raw)
     except Exception:
         return {}
 
@@ -208,8 +205,7 @@ def parse_override(row: Dict[str, Any]) -> Dict[str, Any]:
     if not raw:
         return {}
     try:
-        return json.loads(raw) if isinstance(raw, str) else
-        dict(raw)
+        return json.loads(raw) if isinstance(raw, str) else dict(raw)
     except Exception:
         return{}
 
@@ -219,8 +215,7 @@ Any]]:
     if not raw:
         return[]
     try:
-        return json.loads(raw) if isinstance(raw, str) else
-        list(raw)
+        return json.loads(raw) if isinstance(raw, str) else list(raw)
     except Exception:
         return[]
 
@@ -238,11 +233,9 @@ cap_per_intent: int = 200) -> List[Dict[str, Any]]:
         out.extend(rs[:cap_per_intent])
     return out
 
-def build_stfu_understanding_pairs(rows: List[Dict[str, Any]])
--> List[Dict[str, Any]]:
+def build_stfu_understanding_pairs(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """STFU for the understanding_agent: prompt → UnderstandingFrame JSON."""
     out: List[Dict[str, Any]] = []
-    out r in rows:
     for r in rows:
         frame = parse_frame(r)
         if not frame or not frame.get("primary_intent"):
@@ -254,16 +247,15 @@ def build_stfu_understanding_pairs(rows: List[Dict[str, Any]])
             "message": [
                 {"role":"system",
                  "content": "Emit an UnderstandingFrame JSON for the user message."},
-                 {"role": "user", "content": msg}
-                 {"role": "assistant", "content": json.dumps
+                {"role": "user", "content": msg},
+                {"role": "assistant", "content": json.dumps
                  (frame, ensure_ascii=False)},
             
             ]
         })
     return out
 
-def build_stfu_router_pairs(rows: List[Dict[str, Any]]) -> List
-[Dict[str, Any]]:
+def build_stfu_router_pairs(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """STFU for the triage_router: prompt → tool call.
     
     Quality gates:
