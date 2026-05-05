@@ -51,7 +51,7 @@ def diff_matrics(a: dict, b: dict) -> dict:
         "error_rate",
         "avg_latency_ms",
     )
-    return {k: round((["metrics"][k] - a["metrics"][k]), 4) for k in keys}
+    return {k: round((b["metrics"][k] - a["metrics"][k]), 4) for k in keys}
 
 def main() -> int:
     parser = argparse.ArgumentParser()
