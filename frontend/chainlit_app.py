@@ -21,7 +21,7 @@ from sqlalchemy import text
 _backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
 if _backend_root not in sys.path:
     sys.path.insert(0, _backend_root)
-load_dotenv(dotenv_path=Path(__file__).resolve().parent[1]/"backend"/".env")
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / "backend" / ".env")
 os.environ["SUPABASE_DB_URL"] = os.getenv("SUPABASE_DB_URL", "")
 os.environ["SUPABASE_DB_USER"] = os.getenv("SUPABASE_DB_USER", "")
 os.environ["SUPABASE_DB_PASSWORD"] = os.getenv("SUPABASE_DB_PASSWORD", "")
