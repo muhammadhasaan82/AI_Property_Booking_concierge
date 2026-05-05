@@ -288,7 +288,7 @@ def _pct(x: float) -> str:
 
 async def main_async(args: argparse.Namespace) -> int:
     samples = load_golden_set(Path(args.golden))
-    if args.tags:
+    if args.tag:
         samples = [s for s in samples if args.tag in s.tags]
     if not samples:
         print(f"{RED}No samples to run.{RESET}")
