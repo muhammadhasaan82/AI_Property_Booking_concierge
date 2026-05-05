@@ -39,7 +39,7 @@ def cmd_upload(args: argparse.Namespace) -> None:
     print(f"Uploading {path} ({n_lines} examples) …")
     with path.open("rb") as f:
         result = client.files.create(file=f,
-        purpose="fine_tune")
+        purpose="fine-tune")
     print(json.dumps(result.model_dump(), indent=2,
     default=str))
     print(f"\nFILE_ID: {result.id}")
@@ -53,9 +53,9 @@ def cmd_create(args: argparse.Namespace) -> int:
         suffix=args.suffix,
         hyperparameters={"n_epochs": args.epochs} if args.epochs else None,
     )
-    print(json.dumps(job.model_dump(), indent=2,
+    print(json.dumps(result.model_dump(), indent=2,
     default=str))
-    print(f"\nJOB_ID: {job.id}")
+    print(f"\nJOB_ID: {result.id}")
     return 0
 
 def cmd_status(args: argparse.Namespace) -> int:
