@@ -36,7 +36,7 @@ def run_suite_with_model(model: str, golden: str, out_path: Path) -> dict:
         "--threshold-intent", "0.0",
     ]
     print(f"\n=== Running with model={model} ===")
-    res = subprocess.run(cmd, cwd, env=env, cwd=_BACKEND)
+    res = subprocess.run(cmd, env=env, cwd=_BACKEND)
     if res.returncode not in (0, 1):
         raise RuntimeError(f"run_eval_suite.py failed (rc={res.returncode})")
     with open(out_path, "r", encoding="utf-8") as f:
