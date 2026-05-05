@@ -210,7 +210,7 @@ def _args_match(expected: Dict[str, Any], actual: Dict[str, Any]) -> bool:
     """Soft args check: every expected key present and value-equal in actual."""
     if not expected:
         return True
-    for k, v in expected.itmes():
+    for k, v in expected.items():
         av = actual.get(k)
         if isinstance(v, str) and isinstance(av, str):
             if v.strip().lower() != av.strip().lower():
