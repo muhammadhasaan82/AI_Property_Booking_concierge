@@ -12,8 +12,8 @@ Usage (from backend/):
     python evaluation/run_eval_suite.py
     python evaluation/run_eval_suite.py --golden evaluation/golden_set.yaml
     python evaluation/run_eval_suite.py --json --out evaluation/eval_results/run.json
-    python evaluation/run_eval_suite.py --tag search        # filter cohort
-    python evaluation/run_eval_suite.py --threshold-tool 0.85  # CI gate
+    python evaluation/run_eval_suite.py --tag searcht
+    python evaluation/run_eval_suite.py --threshold-tool 0.85
 """
 from __future__ import annotations
 import argparse
@@ -104,7 +104,7 @@ def load_golden_set(path: Path) -> List[GoldenSample]:
 
 async def run_sample(sample: GoldenSample) -> SampleResult:
     """Run one sample through the live ADK pipeline and collect metrics."""
-    from app.agents.adk_agents import root_agent  # noqa: WPS433
+    from app.agents.adk_agents import root_agent
     from app.agents.schemas.understanding_frame import UnderstandingFrame
     from google.adk.runners import Runner
     from google.adk.sessions.in_memory_session_service import InMemorySessionService
@@ -148,7 +148,7 @@ async def run_sample(sample: GoldenSample) -> SampleResult:
                             actual_args = {}
                     
             sess = await sess_svc.get_session(
-                app_name="eval", user_id="eval_user", session_id=sample.id
+                app_name="eval", user_id="eval_user", session_id=f"eval_{sample.id}"
             )
             if sess and sess.state:
                 raw_frame = sess.state.get("understanding")
