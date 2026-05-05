@@ -180,7 +180,7 @@ def is_low_quality(reply: str) -> bool:
         return True
     low = reply.lower()
     return any(phrase in low for phrase in _LOW_QUALITY_PHRASES)
-    
+
 def deduplicate_by_message(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:    
     seen: set = set()
     out: List[Dict[str,Any]] = []
@@ -346,8 +346,8 @@ def main() -> None:
         print(f"[Export] success={len(success_rows)}, dropoff={len(dropoff_rows)}")
 
         if not args.no_quality_filter:
-            success_rows = [f for r in success_rows if not is_low_quality(r.get("final_reply", ""))]
-        if not args.no_dedupe:
+            success_rows = [r for r in success_rows if not is_low_quality(r.get("final_reply", ""))]
+        if not args.no_dedupe:  
             success_rows = deduplicate_by_message(success_rows)
             dropoff_rows = deduplicate_by_message(dropoff_rows)
 
