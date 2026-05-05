@@ -26,7 +26,7 @@ import time
 from typing_extensions import override
 
 from transformers.utils.hub import SESSION_ID
-from dataclass import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
