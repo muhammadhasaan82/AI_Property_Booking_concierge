@@ -33,11 +33,11 @@ def cmd_upload(args: argparse.Namespace) -> None:
     client = _client()
     path = Path(args.file)
     if not path.exists():
-        print(f"File not found: {p}")
+        print(f"File not found: {path}")
         return 2
-    n_lines = sum(1 for _ in p.open("r", encoding="utf-8"))
-    print(f"Uploading {p} ({n_lines} examples) …")
-    with p.open("rb") as f:
+    n_lines = sum(1 for _ in path.open("r", encoding="utf-8"))
+    print(f"Uploading {path} ({n_lines} examples) …")
+    with path.open("rb") as f:
         result = client.files.create(file=f,
         purpose="fine_tune")
     print(json.dumps(result.model_dump(), indent=2,
