@@ -194,7 +194,7 @@ async def run_sample(sample: GoldenSample) -> SampleResult:
         tool_correct=tool_correct,
         expected_intent=sample.expected_intent,
         actual_intent=actual_intent,
-        intent_carrot=intent_correct,
+        intent_correct=intent_correct,
         actual_confidence=actual_confidence,
         confidence_in_range=confidence_in_range,
         args_correct=args_correct,
