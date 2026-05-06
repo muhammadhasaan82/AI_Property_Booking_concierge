@@ -193,7 +193,7 @@ sources:
 
 #───Feature Flags───────────────────────────────────────────────────────────────────────────
 features:
-  understanding_frame_enabled: true
+  understanding_frame_enabled: false
   policy_router_mode: "off"
   response_policies_enabled: true
   tool_registry_enabled: true
