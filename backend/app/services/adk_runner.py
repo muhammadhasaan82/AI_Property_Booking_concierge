@@ -539,14 +539,14 @@ async def _build_invocation_state_delta(user_id: str, current_query: str, sessio
         "soft_state": soft_state,
     }
 
-async def _render_voice_from_router_output(
-    router_output: str,
-    user_cognitive_context: str,
-    understanding_frame_json: str = "",
-) -> str:
-    """Force Node-2 voice synthesis when only router JSON is available."""
-    if not router_output or not router_output.strip():
-        return ""
+# async def _render_voice_from_router_output(
+#     router_output: str,
+#     user_cognitive_context: str,
+#     understanding_frame_json: str = "",
+# ) -> str:
+#     """Force Node-2 voice synthesis when only router JSON is available."""
+#     if not router_output or not router_output.strip():
+#         return ""
 
     try:
         import litellm
