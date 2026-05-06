@@ -5,6 +5,13 @@ from pathlib import Path
 import os
 import sys
 from uuid import uuid4
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / "backend" / ".env")
+
+os.environ["SUPABASE_DB_URL"] = os.getenv("SUPABASE_DB_URL", "")
+os.environ["SUPABASE_DB_USER"] = os.getenv("SUPABASE_DB_USER", "")
+os.environ["SUPABASE_DB_PASSWORD"] = os.getenv("SUPABASE_DB_PASSWORD", "")
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -14,17 +21,27 @@ os.environ.setdefault("CHAINLIT_APP_ROOT", str(_frontend_root))
 import chainlit as cl
 import chainlit.data as cl_data
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
-from dotenv import load_dotenv
 from sqlalchemy.engine import make_url
 from sqlalchemy import text
+
+class AutoCreateUsersSQLAlchemyDataLayer(SQLAlchemyDataLayer):
+    async def get_user(self, identifier: str):
+        user = await super().get_user(identifier)
+        if user:
+            return user
+        metadata = {"role": "admin" if identifier == "admin" else "user"}
+        try:
+            return await super().create_user(
+                cl.User(identifier=identifier, metadata=metadata)
+            )
+        except Exception:
+            return await super().get_user(identifier)
 
 _backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
 if _backend_root not in sys.path:
     sys.path.insert(0, _backend_root)
-load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / "backend" / ".env")
-os.environ["SUPABASE_DB_URL"] = os.getenv("SUPABASE_DB_URL", "")
-os.environ["SUPABASE_DB_USER"] = os.getenv("SUPABASE_DB_USER", "")
-os.environ["SUPABASE_DB_PASSWORD"] = os.getenv("SUPABASE_DB_PASSWORD", "")
+
+
 
 
 from app.services.adk_runner import run_adk_turn
@@ -247,7 +264,7 @@ def _schema_statements_for(conninfo: str):
 @cl.data_layer
 def get_data_layer():
     conninfo = _resolve_history_conninfo()
-    return SQLAlchemyDataLayer(conninfo=conninfo)
+    return AutoCreateUsersSQLAlchemyDataLayer(conninfo=conninfo)
 
 def _get_data_layer():
     try:
@@ -307,6 +324,16 @@ async def on_chat_start():
             print("Schema automatically created by Chainlit.")
         except Exception as e:
             print(f"Schema Error: {e}")
+
+    try:
+        user_obj = cl.user_session.get("user")
+        data_layer = cl_data.get_data_layer()
+        if user_obj and data_layer:
+            existing = await data_layer.get_user(user_obj.identifier)
+            if not existing:
+                await data_layer.create_user(user_obj)
+    except Exception as e:
+        print(f"User bootstrap warning: {e}")
 
     await cl.Message(content=WELCOME_MESSAGE).send()
 
