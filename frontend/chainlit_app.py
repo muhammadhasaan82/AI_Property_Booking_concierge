@@ -5,6 +5,13 @@ from pathlib import Path
 import os
 import sys
 from uuid import uuid4
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / "backend" / ".env")
+
+os.environ["SUPABASE_DB_URL"] = os.getenv("SUPABASE_DB_URL", "")
+os.environ["SUPABASE_DB_USER"] = os.getenv("SUPABASE_DB_USER", "")
+os.environ["SUPABASE_DB_PASSWORD"] = os.getenv("SUPABASE_DB_PASSWORD", "")
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -14,24 +21,21 @@ os.environ.setdefault("CHAINLIT_APP_ROOT", str(_frontend_root))
 import chainlit as cl
 import chainlit.data as cl_data
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
-from dotenv import load_dotenv
 from sqlalchemy.engine import make_url
 from sqlalchemy import text
 
 _backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
 if _backend_root not in sys.path:
     sys.path.insert(0, _backend_root)
-load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / "backend" / ".env")
-os.environ["SUPABASE_DB_URL"] = os.getenv("SUPABASE_DB_URL", "")
-os.environ["SUPABASE_DB_USER"] = os.getenv("SUPABASE_DB_USER", "")
-os.environ["SUPABASE_DB_PASSWORD"] = os.getenv("SUPABASE_DB_PASSWORD", "")
+
+
 
 
 from app.services.adk_runner import run_adk_turn
 
 @cl.password_auth_callback
 def auth_callback(username: str, password: str):
-    if username == "login_username" and password == "login_password":
+    if username == "admin" and password == "123":
         return cl.User(identifier=username, metadata={"role": "admin"})
     return None
 LOCAL_HISTORY_DB = Path(__file__).resolve().parents[1] / "local_chat_history.db"
@@ -206,23 +210,17 @@ def _normalize_conninfo(conninfo: str) -> str:
             return f"{url_text}{separator}prepare_threshold=None"
 
     if conninfo.startswith("postgres://"):
-        conninfo = "postgresql+psycopg://" + conninfo[len("postgres://") :]
-        return _with_pgbouncer_safe_psycopg_options(conninfo)
+        return "postgresql+psycopg://" + conninfo[len("postgres://") :]
     if conninfo.startswith("postgresql+asyncpg://"):
-        conninfo = "postgresql+psycopg://" + conninfo[len("postgresql+asyncpg://") :]
-        return _with_pgbouncer_safe_psycopg_options(conninfo)
+        return "postgresql+psycopg://" + conninfo[len("postgresql+asyncpg://") :]
     if conninfo.startswith("postgresql://"):
-        conninfo = "postgresql+psycopg://" + conninfo[len("postgresql://") :]
-        return _with_pgbouncer_safe_psycopg_options(conninfo)
-    if conninfo.startswith("postgresql+psycopg://"):
-        return _with_pgbouncer_safe_psycopg_options(conninfo)
+        return "postgresql+psycopg://" + conninfo[len("postgresql://") :]
     if conninfo.startswith("sqlite:///"):
         return "sqlite+aiosqlite:///" + conninfo[len("sqlite:///") :]
     return conninfo
 
-
 def _resolve_history_conninfo() -> str:
-    for env_name in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_URL", "SUPABASE_DB_URL"):
+    for env_name in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_DB_URL"):
         raw_value = (os.getenv(env_name) or "").strip()
         if raw_value.startswith(
             (
@@ -307,6 +305,16 @@ async def on_chat_start():
             print("Schema automatically created by Chainlit.")
         except Exception as e:
             print(f"Schema Error: {e}")
+
+    try:
+        user_obj = cl.user_session.get("user")
+        data_layer = cl_data.get_data_layer()
+        if user_obj and data_layer:
+            existing = await data_layer.get_user(user_obj.identifier)
+            if not existing:
+                await data_layer.create_user(user_obj)
+    except Exception as e:
+        print(f"User bootstrap warning: {e}")
 
     await cl.Message(content=WELCOME_MESSAGE).send()
 
