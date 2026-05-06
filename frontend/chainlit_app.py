@@ -31,7 +31,7 @@ from app.services.adk_runner import run_adk_turn
 
 @cl.password_auth_callback
 def auth_callback(username: str, password: str):
-    if username == "login_username" and password == "login_password":
+    if username == "admin" and password == "123":
         return cl.User(identifier=username, metadata={"role": "admin"})
     return None
 LOCAL_HISTORY_DB = Path(__file__).resolve().parents[1] / "local_chat_history.db"
