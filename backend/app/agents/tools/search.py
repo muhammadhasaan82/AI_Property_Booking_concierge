@@ -411,6 +411,8 @@ async def search_properties(
 
     formatted: List[Dict[str, Any]] = []
     for i, r in enumerate(shown_results, 1):
+        raw_amenities = r.get("amenities") or []
+        top_amenities = raw_amenities[:3] if isinstance(raw_amenities, list) else []
         item = {
             "number": i,
             "id": r.get("id"),
@@ -421,10 +423,8 @@ async def search_properties(
             "bathrooms": r.get("bathrooms"),
             "property_type": r.get("property_type", ""),
             "rating": r.get("rating"),
+            "amenities": top_amenities,
         }
-        if not summary_mode:
-            item["amenities"] = r.get("amenities")
-            item["description"] = r.get("description")
         formatted.append(item)
 
     shown_count = len(formatted)
