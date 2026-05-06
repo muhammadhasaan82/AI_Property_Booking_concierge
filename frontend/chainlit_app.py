@@ -210,23 +210,17 @@ def _normalize_conninfo(conninfo: str) -> str:
             return f"{url_text}{separator}prepare_threshold=None"
 
     if conninfo.startswith("postgres://"):
-        conninfo = "postgresql+psycopg://" + conninfo[len("postgres://") :]
-        return _with_pgbouncer_safe_psycopg_options(conninfo)
+        return "postgresql+psycopg://" + conninfo[len("postgres://") :]
     if conninfo.startswith("postgresql+asyncpg://"):
-        conninfo = "postgresql+psycopg://" + conninfo[len("postgresql+asyncpg://") :]
-        return _with_pgbouncer_safe_psycopg_options(conninfo)
+        return "postgresql+psycopg://" + conninfo[len("postgresql+asyncpg://") :]
     if conninfo.startswith("postgresql://"):
-        conninfo = "postgresql+psycopg://" + conninfo[len("postgresql://") :]
-        return _with_pgbouncer_safe_psycopg_options(conninfo)
-    if conninfo.startswith("postgresql+psycopg://"):
-        return _with_pgbouncer_safe_psycopg_options(conninfo)
+        return "postgresql+psycopg://" + conninfo[len("postgresql://") :]
     if conninfo.startswith("sqlite:///"):
         return "sqlite+aiosqlite:///" + conninfo[len("sqlite:///") :]
     return conninfo
 
-
 def _resolve_history_conninfo() -> str:
-    for env_name in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_URL", "SUPABASE_DB_URL"):
+    for env_name in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_DB_URL"):
         raw_value = (os.getenv(env_name) or "").strip()
         if raw_value.startswith(
             (
