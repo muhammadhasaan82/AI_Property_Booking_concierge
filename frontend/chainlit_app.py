@@ -24,19 +24,6 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from sqlalchemy.engine import make_url
 from sqlalchemy import text
 
-class AutoCreateUsersSQLAlchemyDataLayer(SQLAlchemyDataLayer):
-    async def get_user(self, identifier: str):
-        user = await super().get_user(identifier)
-        if user:
-            return user
-        metadata = {"role": "admin" if identifier == "admin" else "user"}
-        try:
-            return await super().create_user(
-                cl.User(identifier=identifier, metadata=metadata)
-            )
-        except Exception:
-            return await super().get_user(identifier)
-
 _backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
 if _backend_root not in sys.path:
     sys.path.insert(0, _backend_root)
@@ -264,7 +251,7 @@ def _schema_statements_for(conninfo: str):
 @cl.data_layer
 def get_data_layer():
     conninfo = _resolve_history_conninfo()
-    return AutoCreateUsersSQLAlchemyDataLayer(conninfo=conninfo)
+    return SQLAlchemyDataLayer(conninfo=conninfo)
 
 def _get_data_layer():
     try:
