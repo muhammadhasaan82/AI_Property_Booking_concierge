@@ -830,17 +830,6 @@ async def run_adk_turn(
         if updated_session and updated_session.state:
             final_reply = str(updated_session.state.get("final_reply", "") or "")
 
-        if not final_reply:
-            voice_reply = await _render_voice_from_router_output(
-                router_output=router_output,
-                user_cognitive_context=user_cognitive_context,
-                understanding_frame_json=understanding_frame_json,
-            )
-            if voice_reply:
-                final_reply = voice_reply
-                if not streamed_parts and not anomaly_triggered:
-                    yield final_reply
-
 
     if not final_reply and pipeline_failed_reply:
         final_reply = pipeline_failed_reply
