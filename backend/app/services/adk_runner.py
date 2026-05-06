@@ -731,7 +731,7 @@ async def run_adk_turn(
                 logger.debug("[ADK] soft state presisted explicity for session %s", session_id)
     except Exception as exc:
         logger.warning("[ADK] Could not persist soft_state to Redis: %s", exc)
-
+    frame_obj = None
     try:
         if updated_session and updated_session.state:
             router_output = router_output or str(updated_session.state.get("router_output", "") or "")
@@ -740,10 +740,10 @@ async def run_adk_turn(
             )
             understanding_frame_json = ""
             if updated_session and updated_session.state and _cfg.features_understanding_frame:
-                raw_frame = upadated_session.state.get("understanding")
+                raw_frame = updated_session.state.get("understanding")
                 if raw_frame is not None:
                     try:
-                        if isintance(raw_frame, dict):
+                        if isinstance(raw_frame, dict):
                             frame_obj = UnderstandingFrame(**raw_frame)
                         elif isinstance(raw_frame, UnderstandingFrame):
                             frame_obj = raw_frame
@@ -760,7 +760,7 @@ async def run_adk_turn(
                                 frame_obj.primary_intent, frame_obj.confidence, frame_obj.user_mood,
                             )
                     except Exception as _frame_exc:
-                        logger.warning("[ADK] Failed to parso UnderstandingFrame: %s", _frame_exc)
+                        logger.warning("[ADK] Failed to parse UnderstandingFrame: %s", _frame_exc)
 
     except Exception:
         pass
@@ -775,7 +775,7 @@ async def run_adk_turn(
                 updated_session.state.get("soft_state", {})
                 if updated_session and updated_session.state else {}
             )
-            decision = policy_route.decide(frame_obj, soft_state_for_policy)
+            decision = policy_router.decide(frame_obj, soft_state_for_policy)
             actual_tool = tool_calls_log[-1]["tool"] if tool_calls_log else None
             override = policy_router.compute_override(decision, actual_tool)
 
@@ -802,7 +802,7 @@ async def run_adk_turn(
                 )
 
                 if _mode == "enforce" and decision.get("action") != "execute_tool":
-                    synthetic = policy_route.synthetic_router_output(decsion)
+                    synthetic = policy_router.synthetic_router_output(decision)
                     router_output = json.dumps(synthetic, ensure_ascii=False)
                     final_reply = ""
                     policy_override_applied = True
