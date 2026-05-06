@@ -19,7 +19,7 @@ version: "2.0"
 # to the same tool with identical parameters within a short time window.
 anomaly:
   # Number of identical (tool, params_hash) calls before triggering anomaly
-  tool_loop_threshold: 10                          # env: ANOMALY_TOOL_LOOP_THRESHOLD
+  tool_loop_threshold: 3                         # env: ANOMALY_TOOL_LOOP_THRESHOLD
   # Time window in seconds — only count calls within this window
   time_window_seconds: 30                         # env: ANOMALY_TIME_WINDOW_SECONDS
   # Session TTL for anomaly tracking history
@@ -41,7 +41,7 @@ models:
   dispatcher:
     env_key: ADK_DISPATCHER_MODEL
     default: "openai/gpt-5-nano"
-    temperature: 1
+    temperature: 0.3
 
   voice:
     env_key: ADK_VOICE_MODEL
