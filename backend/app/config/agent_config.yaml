@@ -119,7 +119,7 @@ pre_router:
 
     affirmation:
       match:
-        normalized_exact: [ok, okay, sure, yes, yep, yeah, alright, got it, sounds good]
+        normalized_exact: ["ok", okay, sure, "yes", yep, yeah, alright, got it, sounds good]
       role: |
         The user gave a short acknowledgement with no new content.
         Reply in ONE short sentence asking what they'd like to do next
