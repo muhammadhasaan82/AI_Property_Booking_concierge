@@ -13,10 +13,10 @@ from app.config.agent_config_loader import cfg
 logger = logging.getLogger(__name__)
 
 def handle_small_talk(
-    message_type: Optional[str] = None,
-    user_message: Optional[str] = "",
-    action_intent: Optional[str] = None,
-    context_flag: Optional[str] = None,
+    message_type: str = "",
+    user_message: str = "",
+    action_intent: str = "",
+    context_flag: str = "",
 ) -> dict:
     """Handle greetings, thanks, casual conversation, and acknowledgements.
 
