@@ -26,7 +26,6 @@ anomaly:
   session_ttl_minutes: 30                         # env: ANOMALY_SESSION_TTL_MINUTES
   # Tools that are safe to repeat without triggering loop protection
   exempt_tools:
-    - handle_small_talk
     - get_all_available_cities
     - escalate_to_human
   # Graceful fallback message when anomaly is triggered
@@ -62,7 +61,7 @@ search:
 
   result_limit_max: 50             # env: PROPERTY_SEARCH_RESULT_LIMIT_MAX
   summary_mode_threshold: 8        # env: PROPERTY_SEARCH_SUMMARY_THRESHOLD
-
+  full_specific_search_when_city_and_property_type: true
 
 # ── Dataset ─────────────────────────────────────────────────────────────────
 dataset:
@@ -75,6 +74,83 @@ dataset:
 # These are the action_intent values that the triage_router LLM emits.
 # The triage_instruction.md prompt describes these values to the LLM.
 # If you add a new intent to the prompt, add it here too.
+
+pre_router:
+  enabled: true
+  max_reply_latency_ms: 3000
+
+  # Fast LLM used to *generate* replies for obvious intents.
+  # Detection is deterministic; generation is probabilistic.
+  generator:
+    model_env_key: PRE_ROUTER_FAST_MODEL
+    model_default: "groq/llama-3.1-8b-instant"
+    temperature: 0.7
+    max_tokens: 80
+    timeout_seconds: 4
+
+  # Each intent declares:
+  #   match    — deterministic detection rules
+  #   role     — what the LLM should *be* (not what it should *say*)
+  intents:
+    greeting:
+      match:
+        normalized_exact: [hi, hello, hey, hola, yo, greetings, salam, salaam]
+        normalized_starts_with:
+          - hi
+          - hello
+          - hey
+          - hola
+          - yo
+          - good morning
+          - good afternoon
+          - good evening
+          - hi there
+          - hello there
+      role: |
+        You are a warm, concise hotel booking concierge.
+        The user just greeted you.
+        Acknowledge them naturally in ONE short sentence and gently invite
+        them to share a city, dates, or budget.
+        Vary your wording every turn. No lists. No markdown. No emojis unless they used one.
+
+    thanks:
+      match:
+        normalized_exact: [thanks, thank you, thx, ty, appreciate it, cheers]
+      role: |
+        The user thanked you. Reply warmly in ONE short sentence and
+        optionally offer further help. Vary your wording.
+
+    goodbye:
+      match:
+        normalized_exact: [bye, goodbye, see you, ttyl, take care, later]
+      role: |
+        The user is leaving. Say goodbye warmly in ONE short sentence
+        and remind them you're available whenever they want help with a stay.
+
+    affirmation:
+      match:
+        normalized_exact: ["ok", okay, sure, "yes", yep, yeah, alright, got it, sounds good]
+      role: |
+        The user gave a short acknowledgement with no new content.
+        Reply in ONE short sentence asking what they'd like to do next
+        (search a city, see policies, check a booking).
+      
+    search:
+      defer_to_adk: true
+      role: |
+        You are a hotel booking concierge. Property search results are provided below.
+        Present them as a clean numbered list with city, price, beds, and rating.
+        If no results, suggest broadening filters. Be warm and concise.
+
+    empty_or_unclear:
+      role: |
+        The user's message is empty or unintelligible.
+        Politely ask them in ONE short sentence to share what they need:
+        a city, dates, budget, a policy question, or a booking ID.
+
+  # Final safety net — used only if the fast LLM call fails or times out.
+  emergency_fallback: "I'm here — could you share what you need (city, dates, budget, or a booking question)?"
+
 intent_routing:
   history_action_intents:
     - re_evaluate_history
@@ -193,7 +269,15 @@ sources:
 
 #───Feature Flags───────────────────────────────────────────────────────────────────────────
 features:
-  understanding_frame_enabled: false
+  understanding_frame_enabled: true
   policy_router_mode: "off"
   response_policies_enabled: true
   tool_registry_enabled: true
+
+
+#───Runtime Limits────────────────────────────────────────────────────────────────
+runtime_limits:
+  max_adk_events_per_turn: 8
+  routing_limit_fallback: >-
+    I'm having trouble routing that quickly. Could you rephrase with the city,
+    dates, or booking question?

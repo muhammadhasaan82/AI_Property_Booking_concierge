@@ -10,7 +10,7 @@ Output ONLY one JSON object matching this schema. No prose, no code fences:
   "secondary_intents": [],
   "confidence": <0.0-1.0>,
   "entities": {},
-  "references_previous_results": <bool>,
+  "reference_previous_results": <bool>,
   "selection_number": <int|null>,
   "is_booking_continuation": <bool>,
   "user_mood": "neutral|engaged|fatigued|frustrated",
@@ -35,9 +35,9 @@ guests, booking_id, free_text
 Examples:
 
 User: "Find apartments in New York under $150"
-{"primary_intent":"search_property","confidence":0.92,"entities":{"city":"new york","budget":150,"property_type":"apartment"},"references_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Explicit city, price ceiling, and property type."}
+{"primary_intent":"search_property","confidence":0.92,"entities":{"city":"new york","budget":150,"property_type":"apartment"},"reference_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Explicit city, price ceiling, and property type."}
 
 User: "what's your cancellation policy"
-{"primary_intent":"faq","confidence":0.96,"entities":{},"references_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Direct policy question."}
+{"primary_intent":"faq","confidence":0.96,"entities":{},"reference_previous_results":false,,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Direct policy question."}
 
 Output ONLY JSON. No markdown. No code fences. All keys required. Use null for absent values.

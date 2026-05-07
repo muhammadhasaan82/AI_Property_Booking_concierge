@@ -77,7 +77,7 @@ def _conditional_matches(
             return False
     
     if cond.has_pending_booking is not None:
-        if cond.has_pending_booking != _has_awaiting_booking(soft_state):
+        if cond.has_pending_booking != _has_pending_booking(soft_state):
             return False
 
     if cond.awaiting_field_present is not None:
@@ -107,8 +107,7 @@ def _resolve_effective_intent(
     for rule in sorted_priorities():
         if _conditional_matches(frame, soft_state, rule.when):
             return rule.prefer_intent, rule.id
-        return frame.primary_intent, None
-
+    return frame.primary_intent, None
 def _value_present(value: Any) -> bool:
     if value is None:
         return False
@@ -195,10 +194,11 @@ def _build_tool_args(
             args["booking_id"] = frame.entities["booking_id"]
 
     elif tool_name in ("request_booking_details", "review_booking_details", "process_v2_details"):
-        for k in booking_required_fields() + booking_numberic_fields():
+        for k in booking_required_fields() + booking_numeric_fields():
             if k in frame.entities and _value_present(frame.entities[k]):
                 args[k] = frame.entities[k]
         return args
+    return args
 
 def _make_decision(
     *,
