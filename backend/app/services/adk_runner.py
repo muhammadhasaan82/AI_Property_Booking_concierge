@@ -34,6 +34,7 @@ from .config import (
     ADK_SESSION_MAX_CONTEXT_CHARS,
     ADK_SESSION_MAX_EVENTS,
 )
+from .pre_router import route_pre_adk
 from .redis_store import (
     clear_session_snapshot,
     get_redis_client,
@@ -539,14 +540,14 @@ async def _build_invocation_state_delta(user_id: str, current_query: str, sessio
         "soft_state": soft_state,
     }
 
-# async def _render_voice_from_router_output(
-#     router_output: str,
-#     user_cognitive_context: str,
-#     understanding_frame_json: str = "",
-# ) -> str:
-#     """Force Node-2 voice synthesis when only router JSON is available."""
-#     if not router_output or not router_output.strip():
-#         return ""
+async def _render_voice_from_router_output(
+    router_output: str,
+    user_cognitive_context: str,
+    understanding_frame_json: str = "",
+) -> str:
+    """Force Node-2 voice synthesis when only router JSON is available."""
+    if not router_output or not router_output.strip():
+        return ""
 
     try:
         import litellm
@@ -630,6 +631,15 @@ async def run_adk_turn(
 
     if not cleaned_message.strip():
         yield "I didn't catch that. Could you repeat your question?"
+        return
+
+    pre_routed = route_pre_adk(
+        message=cleaned_message,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if pre_routed and pre_routed.get("reply"):
+        yield str(pre_routed["reply"])
         return
 
     runner = _get_runner()
@@ -739,7 +749,7 @@ async def run_adk_turn(
                 updated_session.state.get("user_cognitive_context", user_cognitive_context)
             )
             understanding_frame_json = ""
-            if updated_session and updated_session.state and _cfg.features_understanding_frame:
+            if updated_session and updated_session.state and _cfg.feature_understanding_frame:
                 raw_frame = updated_session.state.get("understanding")
                 if raw_frame is not None:
                     try:

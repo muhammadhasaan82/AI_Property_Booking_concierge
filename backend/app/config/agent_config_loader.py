@@ -1,7 +1,5 @@
 """
-app/config/agent_config_loader.py
------------------------------------
-Loads app/config/agent_config.yaml once at startup and makes it available as a
+Loads agent_config.yaml once at startup and makes it available as a
 single frozen config object throughout the application.
 
 Environment variables always WIN over YAML values where both are defined.
@@ -15,7 +13,7 @@ Usage:
     cfg.booking.required_fields
     cfg.messages.resolution_unresolved_default
     cfg.status.properties_found
-    cfg.intent_routing.history_action_intents   # returns frozenset
+    cfg.intent_routing.history_action_intents
 """
 from __future__ import annotations
 
@@ -200,6 +198,8 @@ class _AgentConfig:
             "TOOL_REGISTRY_ENABLED",
             "1" if ft.get("tool_registry_enabled", True)else "0"
         ).lower() in {"1", "true","yes"}
+
+        self.pre_router = _Namespace(raw.get("pre_router", {}))
 
     def classify_engagement(self, unresolved_turns: int) -> str:
         """

@@ -26,7 +26,6 @@ anomaly:
   session_ttl_minutes: 30                         # env: ANOMALY_SESSION_TTL_MINUTES
   # Tools that are safe to repeat without triggering loop protection
   exempt_tools:
-    - handle_small_talk
     - get_all_available_cities
     - escalate_to_human
   # Graceful fallback message when anomaly is triggered
@@ -75,6 +74,51 @@ dataset:
 # These are the action_intent values that the triage_router LLM emits.
 # The triage_instruction.md prompt describes these values to the LLM.
 # If you add a new intent to the prompt, add it here too.
+
+pre_router:
+  enabled: true
+  max_reply_latency_ms: 10000
+
+  intents:
+    greeting:
+      match:
+        normalized_exact:
+          - hi
+          - hello
+          - hey
+          - good morning
+          - good afternoon
+          - good evening
+      response_policy: casual_interaction
+      replies:
+        - "Hi — I can help you find and book a stay. Which city are you interested in?"
+        - "Hello — tell me the city, dates, and budget, and I’ll help you find a good stay."
+
+    thanks:
+      match:
+        normalized_exact:
+          - thanks
+          - thank you
+          - thx
+      response_policy: casual_interaction
+      replies:
+        - "You're welcome — happy to help."
+
+    goodbye:
+      match:
+        normalized_exact:
+          - bye
+          - goodbye
+          - see you
+      response_policy: casual_interaction
+      replies:
+        - "Goodbye — I’m here whenever you need help with a stay."
+
+    empty_or_unclear:
+      response_policy: missing_critical_data
+      replies:
+        - "I didn’t catch that. Could you share the city or what kind of stay you need?"
+
 intent_routing:
   history_action_intents:
     - re_evaluate_history
