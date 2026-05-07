@@ -200,7 +200,15 @@ class _AgentConfig:
         ).lower() in {"1", "true","yes"}
 
         self.pre_router = _Namespace(raw.get("pre_router", {}))
-
+        rt = raw.get("runtime_limits", {})
+        self.runtime_max_adk_events_per_turn: int = _env_int(
+            "ADK_MAX_EVENTS_PER_TURN",
+            rt.get("max_adk_events_per_turn", 8),
+        )
+        self.runtime_routing_limit_fallback: str = rt.get(
+            "routing_limit_fallback",
+            "I'm having trouble routing that quickly. Could you rephrase with the city, dates, or booking question?",
+        )
     def classify_engagement(self, unresolved_turns: int) -> str:
         """
         Deterministic engagement classifier driven by config thresholds.

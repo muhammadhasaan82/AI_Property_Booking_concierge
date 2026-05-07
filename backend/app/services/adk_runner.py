@@ -629,10 +629,6 @@ async def run_adk_turn(
         yield "I'm sorry, I can't process that request. Could you rephrase?"
         return
 
-    if not cleaned_message.strip():
-        yield "I didn't catch that. Could you repeat your question?"
-        return
-
     pre_routed = await route_pre_adk(
         message=cleaned_message,
         user_id=user_id,
@@ -640,6 +636,10 @@ async def run_adk_turn(
     )
     if pre_routed and pre_routed.get("reply"):
         yield str(pre_routed["reply"])
+        return
+
+    if not cleaned_message.strip():
+        yield "I didn't catch that. Could you repeat your question?"
         return
 
     runner = _get_runner()
@@ -655,7 +655,8 @@ async def run_adk_turn(
     anomaly_triggered = False
     router_output = ""
     pipeline_failed_reply = ""
-
+    event_count = 0
+    max_adk_events = int(getattr(_cfg, "runtime_max_adk_events_per_turn", 8))
     try:
         async with asyncio.timeout(ADK_TURN_TIMEOUT):
             async for event in runner.run_async(
@@ -664,6 +665,11 @@ async def run_adk_turn(
                 new_message=user_content,
                 state_delta=state_delta,
             ):
+                event_count += 1
+                if event_count > max_adk_events:
+                    logger.warning("[ADK] Event limit exceeded: %s/%s", event_count, max_adk_events)
+                    pipeline_failed_reply = str(getattr(_cfg, "runtime_routing_limit_fallback", ""))
+                    break
                 tool_name, tool_params = _extract_tool_call(event)
                 if tool_name:
                     if await anomaly.check_tool_loop(session_id, tool_name, tool_params):

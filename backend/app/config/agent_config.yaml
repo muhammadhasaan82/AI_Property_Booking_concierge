@@ -92,10 +92,20 @@ pre_router:
   #   match    — deterministic detection rules
   #   role     — what the LLM should *be* (not what it should *say*)
   intents:
-    greeting:
+        greeting:
       match:
-        normalized_exact:   [hi, hello, hey, hola, yo]
-        normalized_starts_with: [good morning, good afternoon, good evening, hi there, hello there]
+        normalized_exact: [hi, hello, hey, hola, yo, greetings, salam, salaam]
+        normalized_starts_with:
+          - hi
+          - hello
+          - hey
+          - hola
+          - yo
+          - good morning
+          - good afternoon
+          - good evening
+          - hi there
+          - hello there
       role: |
         You are a warm, concise hotel booking concierge.
         The user just greeted you.
@@ -256,3 +266,11 @@ features:
   policy_router_mode: "off"
   response_policies_enabled: true
   tool_registry_enabled: true
+
+
+#───Runtime Limits────────────────────────────────────────────────────────────────
+runtime_limits:
+  max_adk_events_per_turn: 8
+  routing_limit_fallback: >-
+    I'm having trouble routing that quickly. Could you rephrase with the city,
+    dates, or booking question?

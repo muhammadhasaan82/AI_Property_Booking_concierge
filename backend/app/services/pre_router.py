@@ -43,8 +43,11 @@ def _detect_intent(message: str) -> Optional[str]:
             return intent_name
 
         prefixes = [_normalize(v) for v in (getattr(match_cfg, "normalized_starts_with", []) or [])]
-        if any(prefixes) and any(normalized.startswith(p) for p in prefixes if p):
-            return intent_name
+        for prefix in prefixes:
+            if not prefix:
+                continue
+            if normalized == prefix or normalized.startswith(prefix + " "):
+                return intent_name
 
     return None
 
