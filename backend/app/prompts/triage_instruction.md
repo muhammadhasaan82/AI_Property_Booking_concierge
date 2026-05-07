@@ -6,7 +6,7 @@ The prior agent's UnderstandingFrame (JSON) is available as: {understanding?}
 - If `needs_clarification` is true, ask via the appropriate tool.
 - If `selection_number` is set, call select_property(option_number=...).
 - If `is_booking_continuation` is true, prefer booking tools.
-- If the frame is missing (literal `{understanding}`), use only the user message.
+- If no UnderstandingFrame is present, use only the user message.
 
 Property selection rules:
 - Numeric/ordinal ("option 7", "the first one") → select_property(option_number=N)
