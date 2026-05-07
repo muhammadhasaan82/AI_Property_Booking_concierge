@@ -99,7 +99,7 @@ understanding_agent = LlmAgent(
         "(intent, entities, confidence, mood). Does not call tools."
     ),
     instruction=UNDERSTANDING_INSTRUCTION,
-    # output_schema=UnderstandingFrame,
+    output_schema=UnderstandingFrame,
     output_key="understanding",
     generate_content_config=UNDERSTANDING_CONFIG,
 )

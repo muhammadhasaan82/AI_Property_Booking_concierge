@@ -38,23 +38,32 @@ def _detect_intent(message: str) -> Optional[str]:
         if not match_cfg:
             continue
 
+        matched = False
+
         exact = {_normalize(v) for v in (getattr(match_cfg, "normalized_exact", []) or [])}
         if normalized in exact:
+            matched = True
+
+        if not matched:
+            prefixes = [_normalize(v) for v in (getattr(match_cfg, "normalized_starts_with", []) or [])]
+            for prefix in prefixes:
+                if not prefix:
+                    continue
+                if normalized == prefix or normalized.startswith(prefix + " "):
+                    matched = True
+                    break
+
+        if not matched:
+            contains_list = getattr(match_cfg, "normalized_contains_any", []) or []
+            for phrase in contains_list:
+                if _normalize(phrase) in normalized:
+                    matched = True
+                    break
+
+        if matched:
+            if getattr(intent_cfg, "defer_to_adk", False):
+                return None
             return intent_name
-
-        prefixes = [_normalize(v) for v in (getattr(match_cfg, "normalized_starts_with", []) or [])]
-        for prefix in prefixes:
-            if not prefix:
-                continue
-            if normalized == prefix or normalized.startswith(prefix + " "):
-                return intent_name
-        
-        contains_list = getattr(match_cfg, "normalized_contains_any", []) or []
-        for phrase in contains_list:
-            if _normalize(phrase) in normalized:
-                return intent_name
-
-    return None
 
 async def _generate_reply(intent_name: str, user_message: str) -> str:
     """Probabilistic reply generation via fast LLM, driven by YAML role."""

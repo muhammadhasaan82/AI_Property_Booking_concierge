@@ -61,7 +61,7 @@ search:
 
   result_limit_max: 50             # env: PROPERTY_SEARCH_RESULT_LIMIT_MAX
   summary_mode_threshold: 8        # env: PROPERTY_SEARCH_SUMMARY_THRESHOLD
-
+  full_specific_search_when_city_and_property_type: true
 
 # ── Dataset ─────────────────────────────────────────────────────────────────
 dataset:
@@ -136,8 +136,7 @@ pre_router:
         (search a city, see policies, check a booking).
       
     search:
-      match:
-        normalized_contains_any: [looking for, find me, search for, show me, i want, i need, get me]
+      defer_to_adk: true
       role: |
         You are a hotel booking concierge. Property search results are provided below.
         Present them as a clean numbered list with city, price, beds, and rating.
@@ -270,7 +269,7 @@ sources:
 
 #───Feature Flags───────────────────────────────────────────────────────────────────────────
 features:
-  understanding_frame_enabled: false
+  understanding_frame_enabled: true
   policy_router_mode: "off"
   response_policies_enabled: true
   tool_registry_enabled: true

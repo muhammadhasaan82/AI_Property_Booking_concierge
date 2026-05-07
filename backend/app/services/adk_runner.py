@@ -818,7 +818,7 @@ async def run_adk_turn(
                 )
 
                 if _mode == "enforce" and decision.get("action") != "execute_tool":
-                    synthetic = policy_router.synthetic_router_output(decision)
+                    synthetic = policy_router.synthesize_router_output(decision)
                     router_output = json.dumps(synthetic, ensure_ascii=False)
                     final_reply = ""
                     policy_override_applied = True
