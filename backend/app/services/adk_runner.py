@@ -34,6 +34,7 @@ from .config import (
     ADK_SESSION_MAX_CONTEXT_CHARS,
     ADK_SESSION_MAX_EVENTS,
 )
+from .pre_router import route_pre_adk
 from .redis_store import (
     clear_session_snapshot,
     get_redis_client,
@@ -539,14 +540,14 @@ async def _build_invocation_state_delta(user_id: str, current_query: str, sessio
         "soft_state": soft_state,
     }
 
-# async def _render_voice_from_router_output(
-#     router_output: str,
-#     user_cognitive_context: str,
-#     understanding_frame_json: str = "",
-# ) -> str:
-#     """Force Node-2 voice synthesis when only router JSON is available."""
-#     if not router_output or not router_output.strip():
-#         return ""
+async def _render_voice_from_router_output(
+    router_output: str,
+    user_cognitive_context: str,
+    understanding_frame_json: str = "",
+) -> str:
+    """Force Node-2 voice synthesis when only router JSON is available."""
+    if not router_output or not router_output.strip():
+        return ""
 
     try:
         import litellm
@@ -628,6 +629,15 @@ async def run_adk_turn(
         yield "I'm sorry, I can't process that request. Could you rephrase?"
         return
 
+    pre_routed = await route_pre_adk(
+        message=cleaned_message,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if pre_routed and pre_routed.get("reply"):
+        yield str(pre_routed["reply"])
+        return
+
     if not cleaned_message.strip():
         yield "I didn't catch that. Could you repeat your question?"
         return
@@ -645,7 +655,8 @@ async def run_adk_turn(
     anomaly_triggered = False
     router_output = ""
     pipeline_failed_reply = ""
-
+    event_count = 0
+    max_adk_events = int(getattr(_cfg, "runtime_max_adk_events_per_turn", 8))
     try:
         async with asyncio.timeout(ADK_TURN_TIMEOUT):
             async for event in runner.run_async(
@@ -654,6 +665,11 @@ async def run_adk_turn(
                 new_message=user_content,
                 state_delta=state_delta,
             ):
+                event_count += 1
+                if event_count > max_adk_events:
+                    logger.warning("[ADK] Event limit exceeded: %s/%s", event_count, max_adk_events)
+                    pipeline_failed_reply = str(getattr(_cfg, "runtime_routing_limit_fallback", ""))
+                    break
                 tool_name, tool_params = _extract_tool_call(event)
                 if tool_name:
                     if await anomaly.check_tool_loop(session_id, tool_name, tool_params):
@@ -739,7 +755,7 @@ async def run_adk_turn(
                 updated_session.state.get("user_cognitive_context", user_cognitive_context)
             )
             understanding_frame_json = ""
-            if updated_session and updated_session.state and _cfg.features_understanding_frame:
+            if updated_session and updated_session.state and _cfg.feature_understanding_frame:
                 raw_frame = updated_session.state.get("understanding")
                 if raw_frame is not None:
                     try:
@@ -802,7 +818,7 @@ async def run_adk_turn(
                 )
 
                 if _mode == "enforce" and decision.get("action") != "execute_tool":
-                    synthetic = policy_router.synthetic_router_output(decision)
+                    synthetic = policy_router.synthesize_router_output(decision)
                     router_output = json.dumps(synthetic, ensure_ascii=False)
                     final_reply = ""
                     policy_override_applied = True
