@@ -92,7 +92,7 @@ pre_router:
   #   match    — deterministic detection rules
   #   role     — what the LLM should *be* (not what it should *say*)
   intents:
-        greeting:
+    greeting:
       match:
         normalized_exact: [hi, hello, hey, hola, yo, greetings, salam, salaam]
         normalized_starts_with:
