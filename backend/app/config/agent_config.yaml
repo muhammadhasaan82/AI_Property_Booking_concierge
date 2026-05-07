@@ -77,47 +77,62 @@ dataset:
 
 pre_router:
   enabled: true
-  max_reply_latency_ms: 10000
+  max_reply_latency_ms: 3000
 
+  # Fast LLM used to *generate* replies for obvious intents.
+  # Detection is deterministic; generation is probabilistic.
+  generator:
+    model_env_key: PRE_ROUTER_FAST_MODEL
+    model_default: "groq/llama-3.1-8b-instant"
+    temperature: 0.7
+    max_tokens: 80
+    timeout_seconds: 4
+
+  # Each intent declares:
+  #   match    — deterministic detection rules
+  #   role     — what the LLM should *be* (not what it should *say*)
   intents:
     greeting:
       match:
-        normalized_exact:
-          - hi
-          - hello
-          - hey
-          - good morning
-          - good afternoon
-          - good evening
-      response_policy: casual_interaction
-      replies:
-        - "Hi — I can help you find and book a stay. Which city are you interested in?"
-        - "Hello — tell me the city, dates, and budget, and I’ll help you find a good stay."
+        normalized_exact:   [hi, hello, hey, hola, yo]
+        normalized_starts_with: [good morning, good afternoon, good evening, hi there, hello there]
+      role: |
+        You are a warm, concise hotel booking concierge.
+        The user just greeted you.
+        Acknowledge them naturally in ONE short sentence and gently invite
+        them to share a city, dates, or budget.
+        Vary your wording every turn. No lists. No markdown. No emojis unless they used one.
 
     thanks:
       match:
-        normalized_exact:
-          - thanks
-          - thank you
-          - thx
-      response_policy: casual_interaction
-      replies:
-        - "You're welcome — happy to help."
+        normalized_exact: [thanks, thank you, thx, ty, appreciate it, cheers]
+      role: |
+        The user thanked you. Reply warmly in ONE short sentence and
+        optionally offer further help. Vary your wording.
 
     goodbye:
       match:
-        normalized_exact:
-          - bye
-          - goodbye
-          - see you
-      response_policy: casual_interaction
-      replies:
-        - "Goodbye — I’m here whenever you need help with a stay."
+        normalized_exact: [bye, goodbye, see you, ttyl, take care, later]
+      role: |
+        The user is leaving. Say goodbye warmly in ONE short sentence
+        and remind them you're available whenever they want help with a stay.
+
+    affirmation:
+      match:
+        normalized_exact: [ok, okay, sure, yes, yep, yeah, alright, got it, sounds good]
+      role: |
+        The user gave a short acknowledgement with no new content.
+        Reply in ONE short sentence asking what they'd like to do next
+        (search a city, see policies, check a booking).
 
     empty_or_unclear:
-      response_policy: missing_critical_data
-      replies:
-        - "I didn’t catch that. Could you share the city or what kind of stay you need?"
+      role: |
+        The user's message is empty or unintelligible.
+        Politely ask them in ONE short sentence to share what they need:
+        a city, dates, budget, a policy question, or a booking ID.
+
+  # Final safety net — used only if the fast LLM call fails or times out.
+  emergency_fallback: "I'm here — could you share what you need (city, dates, budget, or a booking question)?"
 
 intent_routing:
   history_action_intents:
