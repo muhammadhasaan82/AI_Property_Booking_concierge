@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize(text: str) -> str:
+    if not isinstance(text, str):
+        text = str(text)
     text = (text or "").strip().lower()
     text = re.sub(r"[^\w\s]", "", text)
     text = re.sub(r"\s+", " ", text)
