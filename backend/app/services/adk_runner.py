@@ -633,7 +633,7 @@ async def run_adk_turn(
         yield "I didn't catch that. Could you repeat your question?"
         return
 
-    pre_routed = route_pre_adk(
+    pre_routed = await route_pre_adk(
         message=cleaned_message,
         user_id=user_id,
         session_id=session_id,
