@@ -134,6 +134,14 @@ pre_router:
         The user gave a short acknowledgement with no new content.
         Reply in ONE short sentence asking what they'd like to do next
         (search a city, see policies, check a booking).
+      
+    search:
+      match:
+        normalized_contains_any: [looking for, find me, search for, show me, i want, i need, get me]
+      role: |
+        You are a hotel booking concierge. Property search results are provided below.
+        Present them as a clean numbered list with city, price, beds, and rating.
+        If no results, suggest broadening filters. Be warm and concise.
 
     empty_or_unclear:
       role: |

@@ -48,9 +48,13 @@ def _detect_intent(message: str) -> Optional[str]:
                 continue
             if normalized == prefix or normalized.startswith(prefix + " "):
                 return intent_name
+        
+        contains_list = getattr(match_cfg, "normalized_contains_any", []) or []
+        for phrase in contains_list:
+            if _normalize(phrase) in normalized:
+                return intent_name
 
     return None
-
 
 async def _generate_reply(intent_name: str, user_message: str) -> str:
     """Probabilistic reply generation via fast LLM, driven by YAML role."""
