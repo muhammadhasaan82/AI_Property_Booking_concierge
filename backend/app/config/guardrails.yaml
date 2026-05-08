@@ -54,3 +54,9 @@ leak_patterns:
   - pattern: 'eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,}'
     action: redact
     description: "JWT tokens"
+  - pattern: '```(python|javascript|java|c\+\+|sql|bash|shell)'
+    action: redact
+    description: "Code block leakage (out-of-scope answer)"
+  - pattern: 'def\s+\w+\s*\('
+    action: redact
+    description: "Python function definition leakage"

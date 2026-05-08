@@ -147,6 +147,53 @@ pre_router:
         The user's message is empty or unintelligible.
         Politely ask them in ONE short sentence to share what they need:
         a city, dates, budget, a policy question, or a booking ID.
+        
+  out_of_scope:
+      match:
+        normalized_contains_any:
+          - write code
+          - write a code
+          - python code
+          - javascript
+          - sql
+          - calculate
+          - solve this
+          - what is 2
+          - 2 plus 2
+          - tell me a joke
+          - tell joke
+          - weather in
+          - whats the weather
+          - what is the weather
+          - explain quantum
+          - who is the president
+          - latest news
+          - stock price
+          - sports score
+          - translate
+          - homework
+          - my essay
+          - write an essay
+          - write me a poem
+          - recipe for
+          - how to cook
+          - medical advice
+          - legal advice
+          - investment advice
+      role: |
+        You are an AI HOTEL BOOKING CONCIERGE. The user asked something outside
+        your scope (programming, math, general knowledge, news, weather, jokes,
+        recipes, advice, etc.).
+
+        Politely decline in ONE short sentence and gently redirect them back to
+        what you CAN help with: searching properties, booking a stay, checking
+        a booking status, or answering hotel-policy questions.
+
+        - Do not solve the request.
+        - Do not write code.
+        - Do not give the answer.
+        - Be warm and varied in wording.
+        - No lists, no markdown, no code blocks.
 
   # Final safety net — used only if the fast LLM call fails or times out.
   emergency_fallback: "I'm here — could you share what you need (city, dates, budget, or a booking question)?"
@@ -194,6 +241,7 @@ small_talk:
     - thanks
     - goodbye
     - acknowledgement
+    - out_of_scope
   default_type: acknowledgement
 
 # ── Engagement states ────────────────────────────────────────────────────────
