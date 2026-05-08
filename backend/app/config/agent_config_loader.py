@@ -201,6 +201,9 @@ class _AgentConfig:
 
         self.pre_router = _Namespace(raw.get("pre_router", {}))
         rt = raw.get("runtime_limits", {})
+        self.runtime_turn_timeout_seconds: float = float(
+            _env_str("ADK_TURN_TIMEOUT", str(rt.get("turn_timeout_seconds", 45)))
+        )
         self.runtime_max_adk_events_per_turn: int = _env_int(
             "ADK_MAX_EVENTS_PER_TURN",
             rt.get("max_adk_events_per_turn", 8),

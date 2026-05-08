@@ -45,7 +45,7 @@ from app.agents.schemas.understanding_frame import UnderstandingFrame
 from app.config.response_policies_loader import render_policy_snippet
 from app.config.agent_config_loader import cfg as _cfg
 
-ADK_TURN_TIMEOUT = float(os.getenv("ADK_TURN_TIMEOUT", "45"))
+ADK_TURN_TIMEOUT = float(getattr(_cfg, "runtime_turn_timeout_seconds", 45))
 logger = logging.getLogger(__name__)
 MEM0_ENABLED = os.getenv("MEM0_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 ADK_ENABLED = True
@@ -851,7 +851,10 @@ async def run_adk_turn(
         final_reply = pipeline_failed_reply
         yield final_reply
     if not final_reply:
-        final_reply = "I'm sorry, I couldn't process your request. Could you try again?"
+        final_reply = str(
+            getattr(_cfg, "messages_pipeline_timeout_fallback", None)
+            or "I'm sorry, I couldn't process your request. Could you try again?"
+        )
         yield final_reply
 
     logged_reply = sanitize_output(final_reply)

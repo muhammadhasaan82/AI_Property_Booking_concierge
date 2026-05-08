@@ -233,7 +233,8 @@ messages:
   selection_out_of_range: >-
     That option number is outside the current shortlist. Choose one of the listed options,
     or ask me to show more results.
-
+  pipeline_timeout_fallback: >-
+    I'm taking a bit longer than usual on that. Could you try once more?
   escalation_default_reason: "User requested assistance."
 
 # ── Status string identifiers ────────────────────────────────────────────────
@@ -269,7 +270,7 @@ sources:
 
 #───Feature Flags───────────────────────────────────────────────────────────────────────────
 features:
-  understanding_frame_enabled: true
+  understanding_frame_enabled: false
   policy_router_mode: "off"
   response_policies_enabled: true
   tool_registry_enabled: true
@@ -278,6 +279,7 @@ features:
 #───Runtime Limits────────────────────────────────────────────────────────────────
 runtime_limits:
   max_adk_events_per_turn: 8
+  turn_timeout_seconds: 45
   routing_limit_fallback: >-
     I'm having trouble routing that quickly. Could you rephrase with the city,
     dates, or booking question?
