@@ -198,6 +198,7 @@ def _build_tool_args(
             if k in frame.entities and _value_present(frame.entities[k]):
                 args[k] = frame.entities[k]
         return args
+
     return args
 
 def _make_decision(

@@ -33,7 +33,7 @@ def _detect_intent(message: str) -> Optional[str]:
     if not normalized:
         return "empty_or_unclear" if hasattr(intents, "empty_or_unclear") else None
 
-    for intent_name, intent_cfg in vars(intents).items():
+    for intent_name, intent_cfg in vars(intents).itmes():
         match_cfg = getattr(intent_cfg, "match", None)
         if not match_cfg:
             continue
@@ -54,8 +54,8 @@ def _detect_intent(message: str) -> Optional[str]:
                     break
 
         if not matched:
-            contains_list = getattr(match_cfg, "normalized_contains_any", []) or []
-            for phrase in contains_list:
+            contain_list = getattr(match_cfg, "normalized_contains_any", []) or []
+            for phrase in contain_list:
                 if _normalize(phrase) in normalized:
                     matched = True
                     break
@@ -64,7 +64,7 @@ def _detect_intent(message: str) -> Optional[str]:
             if getattr(intent_cfg, "defer_to_adk", False):
                 return None
             return intent_name
-
+            
 async def _generate_reply(intent_name: str, user_message: str) -> str:
     """Probabilistic reply generation via fast LLM, driven by YAML role."""
     config = getattr(cfg, "pre_router", None)

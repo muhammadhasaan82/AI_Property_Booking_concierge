@@ -38,6 +38,6 @@ User: "Find apartments in New York under $150"
 {"primary_intent":"search_property","confidence":0.92,"entities":{"city":"new york","budget":150,"property_type":"apartment"},"reference_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Explicit city, price ceiling, and property type."}
 
 User: "what's your cancellation policy"
-{"primary_intent":"faq","confidence":0.96,"entities":{},"reference_previous_results":false,,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Direct policy question."}
+{"primary_intent":"faq","confidence":0.96,"entities":{},"reference_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Direct policy question."}
 
 Output ONLY JSON. No markdown. No code fences. All keys required. Use null for absent values.
