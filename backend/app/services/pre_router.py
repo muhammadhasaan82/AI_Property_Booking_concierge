@@ -33,7 +33,7 @@ def _detect_intent(message: str) -> Optional[str]:
     if not normalized:
         return "empty_or_unclear" if hasattr(intents, "empty_or_unclear") else None
 
-    for intent_name, intent_cfg in vars(intents).itmes():
+    for intent_name, intent_cfg in vars(intents).items():
         match_cfg = getattr(intent_cfg, "match", None)
         if not match_cfg:
             continue
