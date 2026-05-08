@@ -270,7 +270,7 @@ sources:
 
 #───Feature Flags───────────────────────────────────────────────────────────────────────────
 features:
-  understanding_frame_enabled: false
+  understanding_frame_enabled: true
   policy_router_mode: "off"
   response_policies_enabled: true
   tool_registry_enabled: true
@@ -279,7 +279,7 @@ features:
 #───Runtime Limits────────────────────────────────────────────────────────────────
 runtime_limits:
   max_adk_events_per_turn: 8
-  turn_timeout_seconds: 45
+  turn_timeout_seconds: 90
   routing_limit_fallback: >-
     I'm having trouble routing that quickly. Could you rephrase with the city,
     dates, or booking question?

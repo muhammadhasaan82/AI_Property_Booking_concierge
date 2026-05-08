@@ -39,5 +39,7 @@ User: "Find apartments in New York under $150"
 
 User: "what's your cancellation policy"
 {"primary_intent":"faq","confidence":0.96,"entities":{},"reference_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Direct policy question."}
+User: "i will choose option 4"
+{"primary_intent":"select_property","secondary_intents":["property_details_request"],"confidence":0.96,"entities":{},"reference_previous_results":true,"selection_number":4,"is_booking_continuation":false,"user_mood":"engaged","needs_clarification":false,"clarification_field":null,"rationale":"The user selected a numbered option from the previously shown property shortlist."}
 
 Output ONLY JSON. No markdown. No code fences. All keys required. Use null for absent values.
