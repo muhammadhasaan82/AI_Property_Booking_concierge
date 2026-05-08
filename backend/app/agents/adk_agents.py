@@ -41,7 +41,10 @@ logger = logging.getLogger(__name__)
 DISPATCHER_MODEL: str = cfg.dispatcher_model
 VOICE_MODEL: str = cfg.voice_model
 
-dispatcher_llm = LiteLlm(model=DISPATCHER_MODEL)
+dispatcher_llm = LiteLlm(
+    model=DISPATCHER_MODEL,
+    reasoning_effort="minimal",
+)
 voice_llm = LiteLlm(model=VOICE_MODEL)
 
 DISPATCHER_CONFIG = genai_types.GenerateContentConfig(
