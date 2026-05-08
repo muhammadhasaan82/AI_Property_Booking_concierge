@@ -1,8 +1,15 @@
+
 # AI Property Booking Concierge — V2.5
 
 ## Description
 
 AI Property Booking Concierge is a hybrid Python and Rust system for property discovery, FAQ lookup, booking capture, and reservation follow-up. V2.5 extends the V2 Google ADK pipeline with a structured understanding layer, a fast deterministic pre-router, a fully soft-coded tool registry, and a Rust zero-latency FAQ intercept.
+=======
+# AI Property Booking Concierge V2.5
+
+## Description
+
+AI Property Booking Concierge V2.5 is a hybrid Python and Rust booking system for property search, FAQ lookup, booking capture, and reservation follow-up. The V2 rewrite replaces the earlier orchestration path with a pure Google ADK 2.0 `SequentialAgent` pipeline defined in [adk_agents.py](backend/app/agents/adk_agents.py).
 
 The design splits one turn across four responsibilities. A deterministic pre-router handles greetings and out-of-scope intents. An understanding model emits a typed frame. A dispatcher model picks one tool. A voice model writes the final reply. Nothing about agent behavior is hard-coded in Python. Thresholds, intents, prompts, tool metadata, response styles, and fallback copy all live under [backend/app/config/](backend/app/config/) and [backend/app/prompts/](backend/app/prompts/).
 
