@@ -692,6 +692,8 @@ async def run_adk_turn(
                     })
                     continue
 
+                author = getattr(event, "author", None)
+                event_text = _extract_text_parts(event)
                 tool_response = _extract_tool_response(event)
                 if author == "triage_router" and tool_response is not None:
                     try:
@@ -699,9 +701,7 @@ async def run_adk_turn(
                     except Exception:
                         router_output = str(tool_response)
 
-                author = getattr(event, "author", None)
-                event_text = _extract_text_parts(event)
-
+                
                 if author == "triage_router" and event_text:
                     router_output = event_text
 
@@ -918,7 +918,7 @@ def _extract_tool_response(event: Any) -> Optional[Dict[str, Any]]:
                 fr = getattr(part, "function_response", None)
                 if fr:
                     response = getattr(fr, "response", None)
-                    if isintance(response, dict):
+                    if isinstance(response, dict):
                         return response
                     if response is not None:
                         return _jsonable(response)
