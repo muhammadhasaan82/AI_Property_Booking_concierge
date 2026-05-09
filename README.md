@@ -223,3 +223,7 @@ Hotel-booking/
 [frontend/](frontend/) contains [chainlit_app.py](frontend/chainlit_app.py) and the custom branding assets under [frontend/public/](frontend/public/).
 
 [docs/](docs/) covers [architecture.md](docs/architecture.md), [api-reference.md](docs/api-reference.md), [deployment.md](docs/deployment.md), and [finetuning_playbook.md](docs/finetuning_playbook.md).
+
+## License
+
+Released under the [MIT License](LICENSE). Copyright (c) 2026 Muhammad Hasaan.
