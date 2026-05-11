@@ -16,9 +16,7 @@ booking:
   required_fields:
     - property_id
     - property_title
-    - guest_name
     - guest_email
-    - guest_phone
     - check_in
     - check_out
 
@@ -30,18 +28,14 @@ booking:
   # Property fields (property_id, property_title, price_per_night) are typically
   # populated by select_property; the user is asked for these in order:
   ask_order:
-    - guest_name
     - guest_email
-    - guest_phone
     - check_in
     - check_out
     - guests
 
   # User-facing prompts when a field is missing. Edit copy here, not in tools/.
   field_prompts:
-    guest_name: "May I have your full name for the booking?"
     guest_email: "What email should I use for your reservation?"
-    guest_phone: "What phone number should I attach to the booking?"
     check_in: "What check-in date would you prefer?"
     check_out: "And the check-out date?"
     guests: "How many guests will be staying?"
@@ -55,17 +49,6 @@ booking:
       type: regex
       pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
       message: "That doesn't look like a valid email — could you double-check?"
-
-    guest_phone:
-      type: regex
-      pattern: '^[+]?[0-9 ()\-]{7,20}$'
-      message: "That phone number looks off — could you re-share it?"
-
-    guest_name:
-      type: length
-      min: 2
-      max: 100
-      message: "Could you share your full name?"
 
     guests:
       type: integer
