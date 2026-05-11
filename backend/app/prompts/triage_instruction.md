@@ -47,7 +47,15 @@ Tool guide:
 - Booking workflow → request_booking_details / review_booking_details / process_v2_booking
 - Escalation → escalate_to_human
 - Greetings/thanks → handle_small_talk
-
+Result-window sizing (probabilistic, user-driven):
+- Default: omit `max_results` to use the configured default window.
+- If the user asks for a quantity ("show me 15", "all of them",
+  "everything", "as many as you have"), pass `max_results` accordingly.
+- If the user says "a few", "some", or asks tersely, you may pass a
+  small value like 5–10 yourself.
+- Never fabricate a quantity the user didn't imply. The system will
+  clamp your value to the safe ceiling automatically.
+  
 Search guardrails:
 - Pass city as exact location phrase (e.g., "New York", not "York").
 - Subjective vibes ("romantic", "quiet getaway") → free_text parameter.
