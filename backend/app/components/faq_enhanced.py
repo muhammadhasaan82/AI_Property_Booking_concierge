@@ -13,7 +13,9 @@ from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 import logging
 import litellm
-
+import time
+import yaml
+from difflib import SequenceMatcher
 litellm.drop_params = True
 
 logger = logging.getLogger(__name__)
@@ -116,6 +118,97 @@ def _merge_ranked_docs(*batches: List[Tuple[Document, float]]) -> List[Tuple[Doc
 
     return merged
 
+_FAQ_CANONICAL_PATH = _BACKEND_ROOT / "data" / "faq_canonical.yaml"
+_FAQ_CANONICAL_CACHE: {"loaded_at ": 0.0, "data":None}
+
+def _load_faq_canonical() -> dict:
+    if not _FAQ_CANONICAL_PATH.exists():
+        return{"settings": {}, "policies": []}
+    cached = _FAQ_CANONICAL_CACHE.get("data")
+    loaded_at = float(_FAQ_CANONICAL_CACHE.get("loaded_at") or 0.0)
+    if cached:
+        settings = cached.get("settings") or {}
+        ttl = float(settings.get("ttl_seconds", 3600))
+        if time.time() - loaded_at <= ttl:
+            return cached
+    with _FAQ_CANONICAL_CACHE.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+        _FAQ_CANONICAL_CACHE["data"] = data
+        _FAQ_CANONICAL_CACHE["loaded_at"] = time.time()
+        return data
+    
+def _normalize_faq_text(text: str)  -> str:
+    t = (text or ""). lower().strip()
+    t = re.sub(r"[^a-z0-9\s]", " ", t)
+    t = re.sub(r"\s+", " ", t)
+    return t
+
+def _keyword_overlap_score(query: str, keywords: List[str]) -> float:
+    q_tokens = set(_normalize_faq_text(query).split())
+    k_token = { _normalize_faq_text(k) for k in (keywords or []) if k }
+    if not q_tokens or not k_token:
+        return 0.0
+    overlap = len(q_tokens & k_token)
+    return overlap / max(len(k_token), 1)
+
+def _fuzzy_ratio(a: str, b: str) -> float:
+    return SequenceMatcher(None, _normalize_faq_text(a), _normalize_faq_text(b)).ratio()
+
+def _match_canonical_faq(question: str)  -> Optional[Dict[str, Any]]:
+    cfg = _load_faq_canonical()
+    settings = cfg.get("settings") or {}
+    _fuzzy_th = float(settings.get("fuzzy_threshold", 0.82))
+    keyword_th = float(settings.get("keyword_threshold", 0.60))
+
+    best = None
+    best_score = 0.0
+
+    for policy in cfg.get("policies") or []:
+        canonical = str(policy.get("canonical_question") or "").strip()
+        answer = str(policy.get("answer") or "").strip()
+        if not canonical or not answer:
+            continue
+        candidates = [canonical] + list(policy.get("paraphrases") or [])
+        _fuzzy_score = max((_fuzzy_ratio(question, c) for c in candidates), default=0.0)
+        keyword_score = _keyword_overlap_score(question, policy.get("keywords") or [])
+        score = max(_fuzzy_score, keyword_score)
+        if score > best_score:
+            best = {
+                "id": policy.get("id"),
+                "answer":  answer,
+                "canonical_question": canonical,
+                "fuzzy_score": _fuzzy_score,
+                "keyword_score": keyword_score
+            }
+    if best and (best["fuzzy_score"] >= _fuzzy_th or best["keyword_score"] >= keyword_th):
+        return best
+    return None
+
+def _build_canonical_documents() -> List[Document]:
+    cfg = _load_faq_canonical()
+    docs = List[Document] = []
+    for idx, policy in enumerate(cfg.get("policies") or []):
+        canonical = str(policy.get("canonical_question") or "").strip()
+        answer = str(policy.get("answer") or "").strip()
+        if not canonical or not answer:
+            continue
+        paraphrases = policy.get("paraphrases") or []
+        keywords = policy.get("keywords") or []
+        text = "\n".join([
+            f"Q: {canonical}",
+            f"A: {answer}",
+            f"Paraphrases: {', '.join(paraphrases)}",
+            f"Keywords: {', '.join(keywords)}",
+        ])
+        docs.append(Document(
+            page_content=text,
+            metadata={
+                "source": "Canonical_faq",
+                "document": "faq_canonical.yaml",
+                "chunk_index": idx,
+            },
+        ))
+        return docs
 
 class _SentenceTransformerEmbeddings:
     """Minimal LangChain-compatible embeddings adapter."""
@@ -222,7 +315,10 @@ class FAQService:
             )
             documents.append(doc)
         return documents
-
+    self._documents = self._build_documents_from_text(pdf_text)
+    canonical_docs = _build_canonical_documents()
+    if canonical_docs:
+        self._documents.extend(canonical_docs)
     def _ensure_embeddings(self):
         if self._embeddings is not None:
             return self._embeddings
@@ -279,9 +375,12 @@ class FAQService:
                 ]
             except Exception as exc:
                 logger.warning("Could not load lexical FAQ corpus from Chroma: %s", exc)
-
-        if not docs:
-            return []
+        if self._vector_store is None and not self._documents:
+            pdf_path = Path(__file__).resolve().parents[2] / "data" / "Company policy.pdf"
+            if pdf_path.exists():
+                self.process_policy_document(str(pdf_path))
+            else:
+                self._documents = _build_canonical_documents()
 
         ranked: List[Tuple[int, float]] = []
         try:
@@ -499,6 +598,30 @@ def detect_faq_intent(user_text: str) -> bool:
     from . import nlp_engine
     return nlp_engine.detect_faq_intent(user_text)
 
+match = _match_canonical_faq(user_text)
+if match:
+    result = {
+        "reply": match["answer"],
+        "tool_result": {
+            "ok": True,
+            "confidence": "deterministic",
+            "source": "canonical_faq",
+            "match": {
+                "id": match["id"],
+                "canonical_question": match["canonical_question"],
+                "fuzzy_score": match["fuzzy_score"],
+                "keyword_score": match["keyword_score"],
+            },
+        },
+    }
+    if context and context.get("in_booking_flow"):
+        result["preserve_context"] = True
+        result["return_to"] = context.get("return_to", "booking")
+        result["reply"] += (
+            "\n\nWould you like to continue your booking now, or ask another FAQ? "
+            "Feel free to ask more policy questions."
+        )
+    return result
 
 def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """
