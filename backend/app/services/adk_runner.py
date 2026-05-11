@@ -694,7 +694,14 @@ async def run_adk_turn(
 
                 author = getattr(event, "author", None)
                 event_text = _extract_text_parts(event)
+                tool_response = _extract_tool_response(event)
+                if author == "triage_router" and tool_response is not None:
+                    try:
+                        router_output = json.dumps(_jsonable(tool_response), ensure_ascii=False)
+                    except Exception:
+                        router_output = str(tool_response)
 
+                
                 if author == "triage_router" and event_text:
                     router_output = event_text
 
@@ -902,3 +909,20 @@ def _extract_tool_call(event: Any) -> tuple:
     except Exception:
         pass
     return (None, None)
+
+def _extract_tool_response(event: Any) -> Optional[Dict[str, Any]]:
+    """Pull function_response payload out of an ADK event, if present."""
+    try:
+        if event.content and event.content.parts:
+            for part in event.content.parts:
+                fr = getattr(part, "function_response", None)
+                if fr:
+                    response = getattr(fr, "response", None)
+                    if isinstance(response, dict):
+                        return response
+                    if response is not None:
+                        return _jsonable(response)
+    except Exception:
+        pass
+    return None
+
