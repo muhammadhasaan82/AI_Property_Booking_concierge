@@ -220,9 +220,7 @@ booking:
   required_fields:
     - property_id
     - property_title
-    - guest_name
     - guest_email
-    - guest_phone
     - check_in
     - check_out
   # Numeric fields validated separately (coerced from LLM output):
