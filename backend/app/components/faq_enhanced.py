@@ -199,7 +199,7 @@ def _build_canonical_documents() -> List[Document]:
             f"Paraphrases: {', '.join(paraphrases)}",
             f"Keywords: {', '.join(keywords)}",
         ])
-    docs.append(Document(
+        docs.append(Document(     
             page_content=text,
             metadata={
                 "source": "Canonical_faq",
