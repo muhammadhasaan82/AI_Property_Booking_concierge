@@ -7,8 +7,10 @@ import logging
 from typing import Optional
 
 from ..status_codes import SMALL_TALK_TYPES, Source, Status
-from .helpers import _finalize_payload, _is_blank, _missing_critical_data
+from .helpers import _finalize_payload, _is_blank, _missing_critical_data, _get_soft_state
 from app.config.agent_config_loader import cfg
+from google.adk.tools import ToolContext
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,33 +47,50 @@ def handle_small_talk(
         },
         action_intent, context_flag,
     )
-
 async def check_faq(
     question: Optional[str] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
+    tool_context: Optional[ToolContext] = None,
 ) -> dict:
-    """Look up a policy or FAQ question about the booking platform.
+    """Answer any question about hotel policies, property rules, or booking terms.
 
-    Use this tool ONLY when the user asks a genuine question about rules,
-    policies, check-in/check-out times, cancellation, refunds, wifi, pets,
-    smoking, parking, payment methods, or security deposits.
+    Call this tool whenever the user asks a policy or informational question,
+    regardless of the current conversation step — including mid-booking flow.
 
-    DO NOT call this for greetings, thanks, or casual chat — use handle_small_talk.
+    Covers (but is not limited to):
+    - Check-in / check-out times
+    - Cancellation and refund policies
+    - Pet, smoking, noise, and damage-deposit policies
+    - Payment methods, parking, accessibility, amenities
+    - Booking modification rules
+
+    The tool preserves booking context automatically; the conversation will
+    resume where it left off after the FAQ is answered.
+
     Args:
-        question: The user's specific policy or FAQ question (optional).
-        action_intent: Optional context flag for routing.
-        context_flag: Optional secondary context flag.
+        question: The user's exact policy or FAQ question (required).
+        action_intent: Optional routing intent label from the understanding frame.
+        context_flag: Optional secondary context signal.
+        tool_context: ADK tool context for session-state access.
     """
+    soft_state = _get_soft_state(tool_context)
+    in_booking_flow = isinstance(soft_state, dict) and any(
+        soft_state.get(key)
+        for key in ("booking_state", "pending_booking", "awaiting_field")
+    )
+
+    faq_context_flag = "faq_answered" if in_booking_flow else context_flag
+
     if not question or len(question.strip()) < 4:
         return _missing_critical_data(
             ["question"],
             "User asked about policies but did not provide a specific question.",
-            action_intent, context_flag,
+            action_intent,
+            faq_context_flag,
         )
 
     from ..tools.rust_client import execute_tool
-
 
     try:
         result = await execute_tool(data={"intent": "faq", "question": question})
@@ -80,24 +99,30 @@ async def check_faq(
             if answer:
                 return _finalize_payload(
                     {"status": Status.ANSWERED, "answer": answer, "source": Source.POLICY_DB},
-                    action_intent, context_flag,
+                    action_intent,
+                    faq_context_flag,
                 )
     except Exception as e:
         logger.warning("Rust FAQ lookup failed: %s, using Python fallback", e)
 
-
     try:
         from ...components.faq_enhanced import enhanced_faq_agent
-        faq_result = enhanced_faq_agent(question, {})
+        faq_result = enhanced_faq_agent(
+            question,
+            {
+                "in_booking_flow": in_booking_flow,
+                "return_to": "booking",
+            },
+        )
         reply = faq_result.get("reply", "")
         if reply:
             return _finalize_payload(
                 {"status": Status.ANSWERED, "answer": reply, "source": Source.RAG},
-                action_intent, context_flag,
+                action_intent,
+                faq_context_flag,
             )
     except Exception as e:
         logger.warning("FAQ enhanced agent failed: %s", e)
-
 
     try:
         from ...services.faq import faq_lookup
@@ -105,16 +130,17 @@ async def check_faq(
         if ans:
             return _finalize_payload(
                 {"status": Status.ANSWERED, "answer": ans, "source": Source.BASIC_FAQ},
-                action_intent, context_flag,
+                action_intent,
+                faq_context_flag,
             )
     except Exception as e:
         logger.warning("Basic FAQ fallback failed: %s", e)
 
     return _finalize_payload(
         {"status": Status.FAQ_NOT_FOUND, "question": question},
-        action_intent, context_flag,
+        action_intent,
+        faq_context_flag,
     )
-
 async def check_booking_status(
     booking_id: Optional[str] = None,
     action_intent: Optional[str] = None,

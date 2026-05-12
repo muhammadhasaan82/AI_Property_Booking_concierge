@@ -115,7 +115,6 @@ pre_router:
 
     thanks:
       match:
-        normalized_exact: [thanks, thank you, thx, ty, appreciate it, cheers]
       role: |
         The user thanked you. Reply warmly in ONE short sentence and
         optionally offer further help. Vary your wording.
@@ -220,9 +219,7 @@ booking:
   required_fields:
     - property_id
     - property_title
-    - guest_name
     - guest_email
-    - guest_phone
     - check_in
     - check_out
   # Numeric fields validated separately (coerced from LLM output):
@@ -319,7 +316,7 @@ sources:
 #───Feature Flags───────────────────────────────────────────────────────────────────────────
 features:
   understanding_frame_enabled: true
-  policy_router_mode: "off"
+  policy_router_mode: "shadow"
   response_policies_enabled: true
   tool_registry_enabled: true
 

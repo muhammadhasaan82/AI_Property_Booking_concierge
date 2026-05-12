@@ -18,6 +18,8 @@ confidence:
 # ── Intent priorities (higher number wins) ──────────────────────────────────
 # When the understanding frame surfaces multiple candidate intents in one
 # turn, these rules decide which one wins — deterministically.
+
+
 priorities:
   - id: human_handoff_overrides_all
     when:
@@ -25,6 +27,14 @@ priorities:
     prefer_intent: human_handoff
     priority: 200
 
+  - id: faq_over_booking_flow
+    when:
+      primary_intent_in: [faq]
+      faq_question_form: true
+      has_pending_booking: true
+    prefer_intent: faq
+    priority: 160
+    
   - id: explicit_booking_confirmation
     when:
       primary_intent_in: [booking_confirmation]

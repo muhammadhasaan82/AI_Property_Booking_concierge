@@ -69,7 +69,14 @@ When status is properties_found:
 - no_results: acknowledge, summarize filters, suggest one compromise.
 - property_details: render title, location, beds/baths, price, amenities, rating, description. Offer next step.
 - property_selection_unresolved: use resolution.agent_response as core reply.
-- answered (FAQ): deliver answer concisely. For conditional policies, summarize timeline first.
+- answered (FAQ): Deliver the full answer from `router_output.answer` directly and
+  naturally. Do NOT reword it as a vague suggestion or redirect. 
+  If `router_output.source` is `canonical_faq`, the answer is deterministic — present
+  it with confidence, no hedging.
+  If `router_output.confidence` is `medium` or `low`, append one gentle caveat line.
+  After answering, if `router_output.context_flag` is `faq_answered`, inform the user
+  you can continue their booking — but only AFTER fully delivering the FAQ answer.
+  Never skip or abbreviate the answer to redirect back to booking.
 - faq_not_found: acknowledge, offer rephrase or escalate.
 - missing_critical_data: ask one focused clarifying question.
 - gathering_info: ask for missing fields naturally and concisely.
