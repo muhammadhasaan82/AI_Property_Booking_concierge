@@ -84,3 +84,139 @@ policies:
       - "Is internet included"
       - "Wifi password"
     keywords: [wifi, wi-fi, internet, network, password]
+
+  - id: smoking_policy
+    canonical_question: "Is smoking allowed on the property?"
+    answer: >-
+      All properties listed on our platform are strictly non-smoking indoors.
+      Designated outdoor smoking areas may be available at select properties.
+      Violations may result in a cleaning fee charged to the guest.
+    paraphrases:
+      - "Can I smoke in the room"
+      - "Smoking rules"
+      - "Is the property smoke-free"
+      - "Are there smoking areas"
+    keywords: [smoke, smoking, cigarette, tobacco, vape, non-smoking, outdoor]
+
+  - id: damage_deposit
+    canonical_question: "Is there a security deposit?"
+    answer: >-
+      A refundable security deposit may be required at check-in, depending on
+      the property. The amount varies and is displayed on the property listing.
+      Deposits are returned within 7 business days after check-out, provided
+      no damage is reported.
+    paraphrases:
+      - "Do I need to pay a deposit"
+      - "Security deposit amount"
+      - "How much is the deposit"
+      - "Will I get my deposit back"
+    keywords: [deposit, security, damage, refundable, bond, hold]
+
+  - id: extra_guests
+    canonical_question: "Can I bring extra guests?"
+    answer: >-
+      Each property has a maximum occupancy limit shown in the listing.
+      Additional guests beyond the listed capacity are not permitted without
+      prior written approval from the property. Unauthorized extra guests may
+      result in cancellation without refund.
+    paraphrases:
+      - "Can I add more people"
+      - "Extra person fee"
+      - "Occupancy limit"
+      - "How many guests are allowed"
+    keywords: [extra, guest, guests, occupancy, people, person, additional, capacity]
+
+  - id: amenities_included
+    canonical_question: "What amenities are included?"
+    answer: >-
+      Amenities vary by property and are listed on each property page. Common
+      inclusions are Wi-Fi, air conditioning, and kitchen appliances.
+      Premium amenities such as pools or gyms are marked explicitly. Always
+      check the individual listing for a full amenity list.
+    paraphrases:
+      - "What is included in the room"
+      - "Does it have a pool"
+      - "Is breakfast included"
+      - "Are utilities included"
+    keywords: [amenities, included, facilities, pool, gym, kitchen, ac, air conditioning, breakfast]
+
+  - id: payment_methods
+    canonical_question: "What payment methods are accepted?"
+    answer: >-
+      We accept all major credit and debit cards (Visa, Mastercard, American
+      Express). Some properties also accept bank transfers or digital wallets.
+      All transactions are processed securely via our encrypted payment gateway.
+    paraphrases:
+      - "How do I pay"
+      - "Do you take credit cards"
+      - "Payment options"
+      - "Can I pay by bank transfer"
+    keywords: [payment, pay, card, credit, debit, visa, mastercard, bank, transfer, wallet]
+
+  - id: booking_modification
+    canonical_question: "Can I modify my booking after confirmation?"
+    answer: >-
+      Booking modifications (dates, guest count) are allowed up to 72 hours
+      before check-in, subject to property availability. Contact our support
+      team to request a change. Modification may involve a price difference
+      based on the new dates.
+    paraphrases:
+      - "Can I change my booking dates"
+      - "How to modify a reservation"
+      - "I want to change my check-in date"
+      - "Can I update my booking"
+    keywords: [modify, change, update, edit, reschedule, amendment, reservation, dates]
+
+  - id: early_checkout
+    canonical_question: "Can I check out early?"
+    answer: >-
+      Early check-out is allowed at any time. However, unless you cancel
+      within the free-cancellation window, the nightly rate for the full
+      booked period will be charged. Please inform the property in advance
+      if you plan to check out early.
+    paraphrases:
+      - "I want to leave early"
+      - "Early departure policy"
+      - "Will I get a refund for unused nights"
+    keywords: [early, checkout, departure, leave, unused, nights]
+
+  - id: accessibility
+    canonical_question: "Are the properties accessible for people with disabilities?"
+    answer: >-
+      Accessibility features vary by property. Properties with wheelchair
+      access, elevator access, or other disability-friendly features are
+      labeled accordingly in the listing. Use the accessibility filter when
+      searching to find suitable options.
+    paraphrases:
+      - "Is it wheelchair accessible"
+      - "Disability friendly"
+      - "Do you have accessible rooms"
+      - "Elevator access"
+    keywords: [accessible, accessibility, wheelchair, disability, elevator, disabled]
+
+  - id: parking
+    canonical_question: "Is parking available?"
+    answer: >-
+      Parking availability and cost vary by property. Some properties offer
+      free on-site parking, while others provide paid parking or street
+      parking nearby. Parking details are listed on each property page.
+    paraphrases:
+      - "Do you have parking"
+      - "Where can I park"
+      - "Is there free parking"
+      - "Parking fee"
+    keywords: [parking, park, car, garage, lot, street]
+
+  - id: noise_policy
+    canonical_question: "What are the quiet hours?"
+    answer: >-
+      Quiet hours are typically from 10:00 PM to 8:00 AM. Guests are expected
+      to be mindful of neighbors and other guests during these hours. Parties
+      or loud gatherings are strictly prohibited unless specifically approved
+      by the property.
+    paraphrases:
+      - "Can I have a party"
+      - "Noise rules"
+      - "What time is quiet time"
+      - "Are events allowed"
+    keywords: [noise, quiet, party, gathering, event, loud, neighbors, hours]

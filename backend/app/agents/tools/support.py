@@ -53,6 +53,27 @@ async def check_faq(
     context_flag: Optional[str] = None,
     tool_context: Optional[ToolContext] = None,
 ) -> dict:
+    """Answer any question about hotel policies, property rules, or booking terms.
+
+    Call this tool whenever the user asks a policy or informational question,
+    regardless of the current conversation step — including mid-booking flow.
+
+    Covers (but is not limited to):
+    - Check-in / check-out times
+    - Cancellation and refund policies
+    - Pet, smoking, noise, and damage-deposit policies
+    - Payment methods, parking, accessibility, amenities
+    - Booking modification rules
+
+    The tool preserves booking context automatically; the conversation will
+    resume where it left off after the FAQ is answered.
+
+    Args:
+        question: The user's exact policy or FAQ question (required).
+        action_intent: Optional routing intent label from the understanding frame.
+        context_flag: Optional secondary context signal.
+        tool_context: ADK tool context for session-state access.
+    """
     soft_state = _get_soft_state(tool_context)
     in_booking_flow = isinstance(soft_state, dict) and any(
         soft_state.get(key)
