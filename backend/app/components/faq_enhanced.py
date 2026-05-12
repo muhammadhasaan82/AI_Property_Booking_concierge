@@ -2,7 +2,6 @@
 Enhanced FAQ Service with PDF Processing and Vector Search
 Handles company policy questions using semantic search
 """
-
 from __future__ import annotations
 from contextlib import contextmanager
 import os
@@ -119,7 +118,7 @@ def _merge_ranked_docs(*batches: List[Tuple[Document, float]]) -> List[Tuple[Doc
     return merged
 
 _FAQ_CANONICAL_PATH = _BACKEND_ROOT / "data" / "faq_canonical.yaml"
-_FAQ_CANONICAL_CACHE: {"loaded_at ": 0.0, "data":None}
+_FAQ_CANONICAL_CACHE: dict = {"loaded_at": 0.0, "data": None}
 
 def _load_faq_canonical() -> dict:
     if not _FAQ_CANONICAL_PATH.exists():
@@ -131,11 +130,11 @@ def _load_faq_canonical() -> dict:
         ttl = float(settings.get("ttl_seconds", 3600))
         if time.time() - loaded_at <= ttl:
             return cached
-    with _FAQ_CANONICAL_CACHE.open("r", encoding="utf-8") as f:
+    with _FAQ_CANONICAL_PATH.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-        _FAQ_CANONICAL_CACHE["data"] = data
-        _FAQ_CANONICAL_CACHE["loaded_at"] = time.time()
-        return data
+    _FAQ_CANONICAL_CACHE["data"] = data
+    _FAQ_CANONICAL_CACHE["loaded_at"] = time.time()
+    return data
     
 def _normalize_faq_text(text: str)  -> str:
     t = (text or ""). lower().strip()
@@ -186,7 +185,7 @@ def _match_canonical_faq(question: str)  -> Optional[Dict[str, Any]]:
 
 def _build_canonical_documents() -> List[Document]:
     cfg = _load_faq_canonical()
-    docs = List[Document] = []
+    docs: List[Document] = []
     for idx, policy in enumerate(cfg.get("policies") or []):
         canonical = str(policy.get("canonical_question") or "").strip()
         answer = str(policy.get("answer") or "").strip()
@@ -200,7 +199,7 @@ def _build_canonical_documents() -> List[Document]:
             f"Paraphrases: {', '.join(paraphrases)}",
             f"Keywords: {', '.join(keywords)}",
         ])
-        docs.append(Document(
+    docs.append(Document(
             page_content=text,
             metadata={
                 "source": "Canonical_faq",
@@ -208,7 +207,7 @@ def _build_canonical_documents() -> List[Document]:
                 "chunk_index": idx,
             },
         ))
-        return docs
+    return docs
 
 class _SentenceTransformerEmbeddings:
     """Minimal LangChain-compatible embeddings adapter."""
@@ -315,10 +314,7 @@ class FAQService:
             )
             documents.append(doc)
         return documents
-    self._documents = self._build_documents_from_text(pdf_text)
-    canonical_docs = _build_canonical_documents()
-    if canonical_docs:
-        self._documents.extend(canonical_docs)
+    
     def _ensure_embeddings(self):
         if self._embeddings is not None:
             return self._embeddings
@@ -441,7 +437,11 @@ class FAQService:
         if not pdf_text:
             raise ValueError("Could not extract text from PDF")
         self._documents = self._build_documents_from_text(pdf_text)
+        canonical_docs = _build_canonical_documents()
+        if canonical_docs:
+            self._documents.extend(canonical_docs)
         logger.info("Created %d document chunks", len(self._documents))
+
 
         if embeddings is None:
             self._vector_store = None
@@ -598,31 +598,6 @@ def detect_faq_intent(user_text: str) -> bool:
     from . import nlp_engine
     return nlp_engine.detect_faq_intent(user_text)
 
-match = _match_canonical_faq(user_text)
-if match:
-    result = {
-        "reply": match["answer"],
-        "tool_result": {
-            "ok": True,
-            "confidence": "deterministic",
-            "source": "canonical_faq",
-            "match": {
-                "id": match["id"],
-                "canonical_question": match["canonical_question"],
-                "fuzzy_score": match["fuzzy_score"],
-                "keyword_score": match["keyword_score"],
-            },
-        },
-    }
-    if context and context.get("in_booking_flow"):
-        result["preserve_context"] = True
-        result["return_to"] = context.get("return_to", "booking")
-        result["reply"] += (
-            "\n\nWould you like to continue your booking now, or ask another FAQ? "
-            "Feel free to ask more policy questions."
-        )
-    return result
-
 def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Enhanced FAQ agent that uses semantic search on policy documents
@@ -639,7 +614,31 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
             "reply": "Please ask me a specific question about our policies or services.",
             "tool_result": {"ok": False, "error": "Empty question"}
         }
-    
+    match = _match_canonical_faq(user_text)
+    if match:
+        result = {
+            "reply": match["answer"],
+            "tool_result": {
+                "ok": True,
+                "confidence": "deterministic",
+                "source": "canonical_faq",
+                "match": {
+                    "id": match["id"],
+                    "canonical_question": match["canonical_question"],
+                    "fuzzy_score": match["fuzzy_score"],
+                    "keyword_score": match["keyword_score"],
+                }
+            },
+        }
+        if context and context.get("in_booking_flow"):
+            result["preserve_context"] = True
+            result["return_to"] = context.get("return_to", "booking")
+            result["reply"] += (
+                "\n\nFeel free to ask more questions - I'll return you to your"
+                "booking as soon as you're ready."
+            )
+        return result
+
     try:
         answer, sources = semantic_faq_search(user_text)
         
