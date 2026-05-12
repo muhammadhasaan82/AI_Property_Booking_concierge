@@ -20,5 +20,5 @@ nlp:
   name_pattern_max_chars: 60
 
 faq:
-  high_confidence: 0.7
-  low_confidence: 0.4
+  high_confidence: 0.65
+  low_confidence: 0.35
