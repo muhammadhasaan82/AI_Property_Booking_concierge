@@ -210,3 +210,38 @@ samples:
     expected_tool: check_faq
     expected_intent: faq
     tags: [multi_intent, faq_priority]
+
+    - id: type_filter_01
+    prompt: "apartments in New York under $200"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: new york, property_type: apartment, budget: 200}
+    tags: [search, property_type, strict_filter]
+
+  - id: type_filter_02
+    prompt: "show me flats in London"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: london, property_type: apartment}
+    tags: [search, property_type, alias]
+
+  - id: type_filter_03
+    prompt: "villa in Dubai"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: dubai, property_type: villa}
+    tags: [search, property_type]
+
+  - id: type_filter_04
+    prompt: "duplex in New York"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: new york, property_type: duplex}
+    tags: [search, property_type]
+
+  - id: type_filter_05
+    prompt: "house in Karachi"
+    expected_tool: search_properties
+    expected_intent: search_property
+    expected_args: {city: karachi, property_type: house}
+    tags: [search, property_type]

@@ -328,3 +328,10 @@ runtime_limits:
   routing_limit_fallback: >-
     I'm having trouble routing that quickly. Could you rephrase with the city,
     dates, or booking question?
+
+# ── Property type taxonomy source ────────────────────────────────────────────
+# The taxonomy YAML is the single source of truth. This block controls
+# the loader path only.
+property_type_taxonomy:
+  config_file: "property_type_taxonomy.yaml"  # relative to app/config/
+  unknown_type_policy: pass_through             # pass_through | strict

@@ -41,5 +41,12 @@ User: "what's your cancellation policy"
 {"primary_intent":"faq","confidence":0.96,"entities":{},"reference_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"Direct policy question."}
 User: "i will choose option 4"
 {"primary_intent":"select_property","secondary_intents":["property_details_request"],"confidence":0.96,"entities":{},"reference_previous_results":true,"selection_number":4,"is_booking_continuation":false,"user_mood":"engaged","needs_clarification":false,"clarification_field":null,"rationale":"The user selected a numbered option from the previously shown property shortlist."}
+User: "apartments in New York under $200"
+{"primary_intent":"search_property","confidence":0.95,"entities":{"city":"new york","budget":200,"property_type":"apartment"},"reference_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"User explicitly requests apartments — canonical form is 'apartment' not 'apartments'."}
 
+User: "i need a villa in Dubai"
+{"primary_intent":"search_property","confidence":0.95,"entities":{"city":"dubai","property_type":"villa"},"reference_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"villa is already canonical."}
+
+User: "show me flats in London"
+{"primary_intent":"search_property","confidence":0.93,"entities":{"city":"london","property_type":"apartment"},"reference_previous_results":false,"selection_number":null,"is_booking_continuation":false,"user_mood":"neutral","needs_clarification":false,"clarification_field":null,"rationale":"'flats' is an alias for 'apartment' — emit canonical 'apartment'."}
 Output ONLY JSON. No markdown. No code fences. All keys required. Use null for absent values.
