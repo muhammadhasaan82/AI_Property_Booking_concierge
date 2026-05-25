@@ -1,0 +1,110 @@
+# specs/property_type_taxonomy.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Single source of truth for property type normalization.
+# The canonical key (e.g., "apartment") is what is stored in the dataset and
+# used in all filter comparisons. Aliases are what users and LLMs may say.
+#
+# Rules:
+#   - All comparisons are case-insensitive.
+#   - Aliases are normalized with trim + lowercase before lookup.
+#   - If no alias matches, property_type is treated as unknown (not applied).
+#   - Canonical keys must be lowercase, singular, no spaces.
+#   - To add a new property type: add a new key + aliases block here.
+#     No Python changes required.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1.0"
+
+property_types:
+  apartment:
+    aliases:
+      - apartment
+      - apartments
+      - flat
+      - flats
+      - unit
+      - units
+      - apt
+      - apts
+
+  house:
+    aliases:
+      - house
+      - houses
+      - home
+      - homes
+      - detached house
+      - single family home
+      - single-family home
+
+  duplex:
+    aliases:
+      - duplex
+      - duplexes
+      - semi-detached
+      - semi detached
+
+  townhouse:
+    aliases:
+      - townhouse
+      - townhouses
+      - town house
+      - town houses
+      - townhome
+      - townhomes
+      - town home
+      - town homes
+
+  loft:
+    aliases:
+      - loft
+      - lofts
+
+  villa:
+    aliases:
+      - villa
+      - villas
+      - resort villa
+      - private villa
+
+  studio:
+    aliases:
+      - studio
+      - studios
+      - studio apartment
+      - studio flat
+
+  condo:
+    aliases:
+      - condo
+      - condos
+      - condominium
+      - condominiums
+
+  cottage:
+    aliases:
+      - cottage
+      - cottages
+      - cabin
+      - cabins
+
+  bungalow:
+    aliases:
+      - bungalow
+      - bungalows
+
+  penthouse:
+    aliases:
+      - penthouse
+      - penthouses
+
+  guesthouse:
+    aliases:
+      - guesthouse
+      - guest house
+      - guesthouses
+
+# Normalization behavior when property_type cannot be resolved:
+unknown_type_policy: pass_through
+# pass_through = treat as if no property_type filter was set (allow all types)
+# strict       = return no_results if type is unresolvable

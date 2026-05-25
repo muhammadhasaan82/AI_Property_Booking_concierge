@@ -1,5 +1,4 @@
 """
-app/agents/tools/search.py
 ---------------------------
 Tools: search_properties, get_property_details, select_property, get_all_available_cities
 """
@@ -32,7 +31,7 @@ from .helpers import (
     HISTORY_ACTION_INTENTS,
     NEW_SEARCH_ACTION_INTENTS,
 )
-
+from app.services.property_types_normalizer import normalize_property_type as _normalize_property_type
 logger = logging.getLogger(__name__)
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -334,6 +333,7 @@ async def search_properties(
 
     budget_value = _coerce_float(budget)
     beds_value = _coerce_int(beds)
+    normalized_property_type = _normalize_property_type(property_type)
     resolved_city = _resolve_city_from_catalog(city, _DATASET or None)
     if resolved_city:
         city = resolved_city
@@ -355,7 +355,7 @@ async def search_properties(
             budget=budget_value,
             beds=beds_value,
             amenities=amenity_list or [],
-            property_type=property_type or "",
+            property_type=normalized_property_type or "",
             max_results=search_limit,
             summary_mode_threshold=summary_threshold,
             properties=_DATASET or None,
@@ -371,19 +371,19 @@ async def search_properties(
     if results is None:
         results = await asyncio.to_thread(
             property_search,
-            query_text=f"{property_type or ''} {city}".strip(),
+            query_text=f"{normalized_property_type or ''} {city}".strip(),
             budget=int(budget_value) if budget_value is not None else None,
             amenities=amenity_list,
             location=city,
             beds=beds_value,
-            property_type=property_type,
+            property_type=normalized_property_type,
         )
 
-    if results and property_type:
+    if results and normalize_property_type:
         results = [
             r for r in results
-            if r.get("property_type")
-            and property_type.lower() in str(r.get("property_type")).lower()
+            if _normalize_property_type(r.get("property_type") or "")
+            == normalize_property_type
         ]
 
     if not results:
@@ -445,7 +445,7 @@ async def search_properties(
             "city": city,
             "budget": budget_value,
             "beds": beds_value,
-            "property_type": property_type,
+            "property_type": normalized_property_type,
         },
     }
 

@@ -1,0 +1,67 @@
+# specs/filtering_policy.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Defines how structured hard-filters are applied to the property search
+# pipeline. This is the authoritative contract for filter ordering and
+# strictness.
+#
+# HARD FILTERS run before any semantic re-ranking.
+# SOFT FILTERS (semantic/vibe) run only on the already hard-filtered set.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1.0"
+
+pipeline_order:
+  # Steps run in this exact order. Semantic ranking must be after step 4.
+  1: normalize_property_type   # resolve aliases → canonical key
+  2: filter_city               # exact canonical city match (case-insensitive)
+  3: filter_property_type      # exact canonical match after normalization
+  4: filter_beds               # minimum beds (>=)
+  5: filter_budget             # maximum price (<=)
+  6: filter_amenities          # all required amenities must be present (set subset)
+  7: semantic_rerank           # ONLY on the surviving filtered set
+  8: paginate                  # page window from pagination config
+
+city_filter:
+  match_strategy: exact_normalized
+  # normalized = trim + lowercase + collapse whitespace
+  # exact = after normalization, strings must be equal
+  case_sensitive: false
+  note: "No substring matching. City 'New York' must not match 'York'."
+
+property_type_filter:
+  match_strategy: exact_canonical
+  # exact_canonical = resolve alias to canonical key first, then exact match
+  case_sensitive: false
+  allow_empty_type: false
+  # If allow_empty_type: false, rows with empty/null property_type are
+  # excluded when a type filter is active.
+  note: >-
+    Never use substring (.contains) or bidirectional match. Always resolve
+    to canonical key from property_type_taxonomy.yaml first.
+
+beds_filter:
+  match_strategy: minimum
+  # beds >= requested value
+
+budget_filter:
+  match_strategy: maximum
+  # price_per_night <= budget value
+
+amenities_filter:
+  match_strategy: set_subset
+  # all requested amenities must be present in the row's amenity list
+
+# What happens when a filter is not provided:
+default_behavior:
+  city: required
+  # city is required; missing city triggers missing_critical_data
+  property_type: optional
+  # if not provided, no type filter is applied (all types)
+  beds: optional
+  budget: optional
+  amenities: optional
+
+# Telemetry: emit a structured log whenever a filter discards results.
+telemetry:
+  log_filter_stats: true
+  # Log: {city, property_type, beds, budget, input_count, output_count}
