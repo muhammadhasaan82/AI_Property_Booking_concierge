@@ -113,12 +113,17 @@ impl Tool for PropertySearchTool {
                     }
                 }
 
-                if !property_type.is_empty() {
-                    let p_type = p.get("property_type").and_then(|v| v.as_str()).unwrap_or("");
-                    if !p_type.to_lowercase().contains(&property_type.to_lowercase()) {
-                        continue;
-                    }
-                }
+if !property_type.is_empty() {
+    let p_type = p.get("property_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    let wanted = property_type.trim().to_lowercase();
+    if p_type != wanted {
+        continue;
+    }
+}
 
                 let row_amenities: Vec<String> = p
                     .get("amenities")
