@@ -1,0 +1,33 @@
+# backend/app/config/property_type_taxonomy.yaml
+# Copy of specs/property_type_taxonomy.yaml — consumed by Python normalizer.
+# Edit specs/ version first, then keep this in sync. Or make the Python loader
+# point directly to specs/ — either is fine.
+version: "1.0"
+
+property_types:
+  apartment:
+    aliases: [apartment, apartments, flat, flats, unit, units, apt, apts]
+  house:
+    aliases: [house, houses, home, homes, detached house, single family home]
+  duplex:
+    aliases: [duplex, duplexes, semi-detached, semi detached]
+  townhouse:
+    aliases: [townhouse, townhouses, town house, town houses, townhome, townhomes]
+  loft:
+    aliases: [loft, lofts]
+  villa:
+    aliases: [villa, villas, resort villa, private villa]
+  studio:
+    aliases: [studio, studios, studio apartment, studio flat]
+  condo:
+    aliases: [condo, condos, condominium, condominiums]
+  cottage:
+    aliases: [cottage, cottages, cabin, cabins]
+  bungalow:
+    aliases: [bungalow, bungalows]
+  penthouse:
+    aliases: [penthouse, penthouses]
+  guesthouse:
+    aliases: [guesthouse, guest house, guesthouses]
+
+unknown_type_policy: pass_through
