@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from ..services.config import SEED_PROPERTY_TYPES
-
+from ..services.property_type_normalizer import normalize_property_type as _normalize_property_type
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DATASET_PATHS = [
     _REPO_ROOT / "backend" / "data" / "dataset.csv",      
@@ -89,19 +89,20 @@ def property_search(
     q = (query_text or "").lower()
     out: List[Dict[str, Any]] = []
     if not property_type:
-        property_types = sorted(SEED_PROPERTY_TYPES)
-        for pt in property_types:
+        for pt in sorted(SEED_PROPERTY_TYPES)
             if pt in q:
-                property_type = pt
+                property_type = _normalize_property_type
                 break
+    else:
+        property_type = _normalize_property_type(property_type)
     
     for r in _DATASET:
 
         if not _matches_location(r.get("city",""), location):
             continue
         if property_type:
-            row_type = (r.get("property_type") or "").lower()
-            if property_type.lower() not in row_type and row_type not in property_type.lower():
+            row_canonical = _normalize_property_type(r.get("property_type") or "")
+            if row_canonical != property_type:
                 continue
 
         if budget is not None and r.get("price_per_night") is not None and r["price_per_night"] > budget:

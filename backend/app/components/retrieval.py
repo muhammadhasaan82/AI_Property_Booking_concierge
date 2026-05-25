@@ -250,6 +250,7 @@ def query_properties(
     city: Optional[str] = None,
     beds: Optional[int] = None,
     amenities: Optional[List[str]] = None,
+    property_type: Optional[str] = None,
 ) -> List[Dict]:
     """
     Retrieve top-k properties. Uses Chroma+HF if available, otherwise JSON text search.
@@ -298,7 +299,7 @@ def query_properties(
                 items.append(row)
 
 
-            items = _apply_filters(items, budget=budget, city=city, beds=beds, amenities=amenities)
+            items = _apply_filters(items, budget=budget, city=city, beds=beds, amenities=amenities, property_type=property_type)
 
             items.sort(key=lambda x: x.get("score", 0), reverse=True)
             return items[:runtime.result_limit]
@@ -346,14 +347,17 @@ def query_properties(
 
 
     out = [p for _, p in sorted(scored, key=lambda x: x[0], reverse=True)]
-    out = _apply_filters(out, budget=budget, city=city, beds=beds, amenities=amenities)
+    out = _apply_filters(out, budget=budget, city=city, beds=beds, amenities=amenities, property_type=property_type)
     return out[:runtime.result_limit]
 
-def _apply_filters(items: List[Dict],
-                   budget: Optional[float],
-                   city: Optional[str],
-                   beds: Optional[int],
-                   amenities: Optional[List[str]]) -> List[Dict]:
+def _apply_filters(
+    items: List[Dict],
+    budget: Optional[float] = None,
+    city: Optional[str] = None,
+    beds: Optional[int] = None,
+    amenities: Optional[List[str]] = None,
+    property_type: Optional[str] = None
+) -> List[Dict]:
     res = []
     for p in items:
 
@@ -382,7 +386,12 @@ def _apply_filters(items: List[Dict],
             required_amenities = [a.lower() for a in amenities]
             if not all(a in prop_amenities for a in required_amenities):
                 continue
-        
+        if property_type:
+            from app.services.property_type_normalizer import normalize_property_type as _npt
+            row_canonical = _npt(p.get("property_type")or "")
+            if row_canonical != property_type:
+                continue
+
         res.append(p)
     return res
 

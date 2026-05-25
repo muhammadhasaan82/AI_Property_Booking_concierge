@@ -36,24 +36,21 @@ ADK_SESSION_MAX_EVENTS: int = int(os.getenv("ADK_SESSION_MAX_EVENTS", "6"))
 ADK_SESSION_MAX_CONTEXT_CHARS: int = int(os.getenv("ADK_SESSION_MAX_CONTEXT_CHARS", "3500"))
 ADK_MAX_COGNITIVE_CONTEXT_CHARS: int = int(os.getenv("ADK_MAX_COGNITIVE_CONTEXT_CHARS", "600"))
 
-_DEFAULT_SEED_PROPERTY_TYPES: Final[Set[str]] = {
-    "condo",
-    "loft",
-    "apartment",
-    "house",
-    "studio",
-    "villa",
-    "townhouse",
-    "flat",
-    "cottage",
-    "bungalow",
-    "penthouse",
-    "duplex",
-}
-SEED_PROPERTY_TYPES: Set[str] = _parse_csv_set(os.getenv("SEED_PROPERTY_TYPES", "")) or set(
-    _DEFAULT_SEED_PROPERTY_TYPES
-)
-
+def _load_seed_property_types() -> Set[str]:
+    """Load canonical property types from taxonomy YAML. Falls back to a
+    hardcoded minimal set only if the YAML is unavailable at startup."""
+    try:
+        from app.services.property_type_normalizer import get_all_canonical_types
+        types = get_all_canonical_types()
+        if types:
+            return types
+    except Exception:
+        pass
+    return {
+        "apartment", "house", "duplex", "townhouse", "loft", "villa",
+        "studio", "condo", "cottage", "bungalow", "penthouse", "guesthouse",
+    }
+SEED_PROPERTY_TYPES: Set[str] = _parse_csv_set(os.getenv("SEED_PROPERTY_TYPES", "")) or _load_seed_property_types()
 
 __all__ = [
     "DATASET_PATH",
