@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use super::Tool;
 
-/// Property search tool – filters and ranks properties from provided data.
+
 pub struct PropertySearchTool;
 
 impl PropertySearchTool {
@@ -30,7 +30,6 @@ impl Tool for PropertySearchTool {
     }
 
     fn can_handle(&self, input: &Value) -> bool {
-        // Triggers on location, city, budget, beds, amenities, property_type, or query
         input.get("location").is_some()
             || input.get("city").is_some()
             || input.get("budget").is_some()
@@ -48,7 +47,7 @@ impl Tool for PropertySearchTool {
                 score += 0.15;
             }
         }
-        // Boost if multiple search-related keys present
+
         if score > 0.3 { score += 0.1; }
         score.min(1.0)
     }
@@ -86,8 +85,8 @@ impl Tool for PropertySearchTool {
             })
             .unwrap_or_default();
 
-        // If properties are provided in the input, filter them
-        let properties = input.get("properties").and_then(|v| v.as_array());
+
+            let properties = input.get("properties").and_then(|v| v.as_array());
 
         let mut results: Vec<Value> = Vec::new();
 
@@ -131,7 +130,7 @@ impl Tool for PropertySearchTool {
                     continue;
                 }
 
-                // Text relevance check
+
                 if !query_text.is_empty() && location.is_empty() && property_type.is_empty() {
                     let hay = format!(
                         "{} {} {} {}",
@@ -153,7 +152,7 @@ impl Tool for PropertySearchTool {
                 results.push(p.clone());
             }
 
-            // Sort: price ascending, then rating descending
+
             results.sort_by(|a, b| {
                 let price_a = a.get("price_per_night").and_then(|v| v.as_f64()).unwrap_or(f64::MAX);
                 let price_b = b.get("price_per_night").and_then(|v| v.as_f64()).unwrap_or(f64::MAX);
