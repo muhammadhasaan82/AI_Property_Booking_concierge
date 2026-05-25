@@ -7,7 +7,7 @@ rag:
 
 retrieval:
   top_k: 10
-  result_limit: 5
+  result_limit: 50
   scoring_weights:
     exact_doc: 1.0
     exact_title: 2.0

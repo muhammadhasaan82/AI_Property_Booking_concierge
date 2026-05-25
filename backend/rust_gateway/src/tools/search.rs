@@ -66,7 +66,7 @@ impl Tool for PropertySearchTool {
             .get("max_results")
             .and_then(|v| v.as_u64())
             .map(|v| v as usize)
-            .unwrap_or(5)
+            .unwrap_or(50)
             .max(1);
         let summary_mode_threshold = input
             .get("summary_mode_threshold")
