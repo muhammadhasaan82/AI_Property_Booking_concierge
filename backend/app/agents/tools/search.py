@@ -406,7 +406,8 @@ async def search_properties(
         results = await _rerank_properties_by_vibe(results, vibe_query)
 
     total_found = len(results)
-    shown_results = results[:search_limit]
+    results_full = results
+    shown_results = results[start:end]
     summary_mode = total_found > summary_threshold
 
     formatted: List[Dict[str, Any]] = []

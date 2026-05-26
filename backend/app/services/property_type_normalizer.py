@@ -68,7 +68,7 @@ def normalize_property_type(raw: Optional[str]) -> Optional[str]:
     logger.debug("property_type_normalizer: unknown type '%s' (policy=pass_through → raw)", raw)
     return key
 
-def get_all_CANONICAL_KEYS() -> Set[str]:
+def get_all_canonical_types() -> Set[str]:
     """Return all known canonical property type keys."""
     return set(_CANONICAL_KEYS)
 
