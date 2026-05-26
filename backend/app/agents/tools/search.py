@@ -31,7 +31,7 @@ from .helpers import (
     HISTORY_ACTION_INTENTS,
     NEW_SEARCH_ACTION_INTENTS,
 )
-from app.services.property_types_normalizer import normalize_property_type as _normalize_property_type
+from app.config.property_type_normalizer import normalize_property_type as _normalize_property_type
 logger = logging.getLogger(__name__)
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -379,11 +379,11 @@ async def search_properties(
             property_type=normalized_property_type,
         )
 
-    if results and normalize_property_type:
+    if results and normalized_property_type:
         results = [
             r for r in results
             if _normalize_property_type(r.get("property_type") or "")
-            == normalize_property_type
+            == normalized_property_type
         ]
 
     if not results:
