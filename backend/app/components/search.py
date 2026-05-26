@@ -89,9 +89,9 @@ def property_search(
     q = (query_text or "").lower()
     out: List[Dict[str, Any]] = []
     if not property_type:
-        for pt in sorted(SEED_PROPERTY_TYPES)
+        for pt in sorted(SEED_PROPERTY_TYPES):
             if pt in q:
-                property_type = _normalize_property_type
+                property_type = _normalize_property_type(pt)
                 break
     else:
         property_type = _normalize_property_type(property_type)
