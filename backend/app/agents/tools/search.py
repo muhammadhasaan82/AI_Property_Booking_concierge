@@ -31,7 +31,7 @@ from .helpers import (
     HISTORY_ACTION_INTENTS,
     NEW_SEARCH_ACTION_INTENTS,
 )
-from app.config.property_type_normalizer import normalize_property_type as _normalize_property_type
+from app.services.property_type_normalizer import normalize_property_type as _normalize_property_type
 logger = logging.getLogger(__name__)
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
