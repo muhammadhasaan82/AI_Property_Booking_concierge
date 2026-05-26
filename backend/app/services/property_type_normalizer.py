@@ -60,9 +60,9 @@ def normalize_property_type(raw: Optional[str]) -> Optional[str]:
     canonical = _ALIAS_MAP.get(key)
     if canonical:
         return canonical
-    if key in _CANONICAL_TYPES:
+    if key in _CANONICAL_KEYS:
         return key
-    if _UNKNOWN_POLICY == "strict":
+    if _PASS_THROUGH_POLICY == "strict":
         logger.debug("property_type_normalizer: unknown type '%s' (policy=strict → None)", raw)
         return None
     logger.debug("property_type_normalizer: unknown type '%s' (policy=pass_through → raw)", raw)
@@ -70,14 +70,14 @@ def normalize_property_type(raw: Optional[str]) -> Optional[str]:
 
 def get_all_canonical_types() -> Set[str]:
     """Return all known canonical property type keys."""
-    return set(_CANONICAL_TYPES)
+    return set(_CANONICAL_KEYS)
 
 def reload() -> None:
     """Hot-reload the taxonomy without restarting the server."""
-    global _ALIAS_MAP, _UNKNOWN_POLICY, _CANONICAL_TYPES
+    global _ALIAS_MAP, _PASS_THROUGH_POLICY, _CANONICAL_KEYS
     _ALIAS_MAP = _load_alias_map()
-    _UNKNOWN_POLICY = _get_pass_through_policy()
-    _CANONICAL_TYPES = set(_ALIAS_MAP.values())
+    _PASS_THROUGH_POLICY = _get_pass_through_policy()
+    _CANONICAL_KEYS = set(_ALIAS_MAP.values())
     logger.info("property_type_normalizer: taxonomy reloaded (%d aliases)", len(_ALIAS_MAP))
 
 
