@@ -1,0 +1,60 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.2, pluggy-1.6.0 -- /root/AI_Property_Booking_concierge/backend/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /root/AI_Property_Booking_concierge/backend
+configfile: pyproject.toml
+plugins: anyio-4.13.0, langsmith-0.7.22, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 65 items / 4 errors
+
+==================================== ERRORS ====================================
+________________ ERROR collecting tests/test_debug_endpoint.py _________________
+ImportError while importing test module '/root/AI_Property_Booking_concierge/backend/tests/test_debug_endpoint.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_debug_endpoint.py:1: in <module>
+    from main import app
+E   ModuleNotFoundError: No module named 'main'
+__________________ ERROR collecting tests/tests/smoke_test.py __________________
+ImportError while importing test module '/root/AI_Property_Booking_concierge/backend/tests/tests/smoke_test.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/tests/smoke_test.py:68: in <module>
+    from app.services import nlp_engine
+E   ImportError: cannot import name 'nlp_engine' from 'app.services' (/root/AI_Property_Booking_concierge/backend/app/services/__init__.py)
+------------------------------- Captured stdout --------------------------------
+PASS: simple object round-trip
+PASS: string with colons
+PASS: string with newlines
+PASS: null, bool, empty array
+PASS: nested object
+PASS: numeric string preserved
+PASS: key with colon
+______________ ERROR collecting tests/tests/test_faq_enhanced.py _______________
+ImportError while importing test module '/root/AI_Property_Booking_concierge/backend/tests/tests/test_faq_enhanced.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/tests/test_faq_enhanced.py:6: in <module>
+    from app.services import faq_enhanced
+E   ImportError: cannot import name 'faq_enhanced' from 'app.services' (/root/AI_Property_Booking_concierge/backend/app/services/__init__.py)
+__________ ERROR collecting tests/tests/test_property_listing_flow.py __________
+tests/tests/test_property_listing_flow.py:39: in <module>
+    @pytest.mark.asyncio
+     ^^^^^^
+E   NameError: name 'pytest' is not defined
+=========================== short test summary info ============================
+ERROR tests/test_debug_endpoint.py
+ERROR tests/tests/smoke_test.py
+ERROR tests/tests/test_faq_enhanced.py
+ERROR tests/tests/test_property_listing_flow.py - NameError: name 'pytest' is...
+!!!!!!!!!!!!!!!!!!! Interrupted: 4 errors during collection !!!!!!!!!!!!!!!!!!!!
+============================== 4 errors in 6.26s ===============================
