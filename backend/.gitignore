@@ -14,3 +14,11 @@ __pycache__/
 *.pyc
 .env
 frontend/.env.bak
+
+backend/models_cache/
+models_cache/
+.cache/
+__pycache__/
+*.pyc
+.env
+frontend/.env.bak
