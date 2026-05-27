@@ -789,8 +789,9 @@ async def run_adk_turn(
                 tool_response = _extract_tool_response(event)
                 if author == "triage_router" and tool_response is not None:
                     try:
-                        router_output = json.dumps(_jsonable(tool_response), ensure_ascii=False)
-                        router_output_dict = _jsonable(tool_response) if isinstance(_jsonable(tool_response), dict) else None
+                        jsonable_response = _jsonable(tool_response)
+                        router_output = json.dumps(jsonable_response, ensure_ascii=False)
+                        router_output_dict = jsonable_response if isinstance(jsonable_response, dict) else None
                     except Exception:
                         router_output = str(tool_response)
                         router_output_dict = None
