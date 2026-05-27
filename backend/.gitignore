@@ -5,3 +5,12 @@ __pycache__/
 *.pyc
 .env
 frontend/.env.bak
+
+# Model/cache files
+backend/models_cache/
+models_cache/
+.cache/
+__pycache__/
+*.pyc
+.env
+frontend/.env.bak
