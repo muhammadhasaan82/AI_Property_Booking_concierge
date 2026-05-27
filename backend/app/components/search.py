@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 
 from ..services.config import SEED_PROPERTY_TYPES
 from ..services.property_type_normalizer import normalize_property_type as _normalize_property_type
+from ..services.property_type_normalizer import get_all_canonical_types as _get_all_canonical_types
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DATASET_PATHS = [
     _REPO_ROOT / "backend" / "data" / "dataset.csv",      
