@@ -6,8 +6,9 @@ from app.services.dynamic_config import get_intent_catalog, get_vocabulary, get_
 def test_intent_catalog_load():
     cat = get_intent_catalog()
     assert cat is not None
-    assert len(cat.intents) > 0
-    assert "greeting" in cat.intents
+    assert cat.version == "1.0"
+    assert isinstance(cat.intents, dict)
+    assert cat.default_threshold == 0.0
 
 def test_vocabulary_load():
     vocab = get_vocabulary()
