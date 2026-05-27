@@ -131,3 +131,9 @@ workflow V2.txt
 testing
 backend/.env
 Review AI Concierge Architecture.md
+__pycache__/
+*.pyc
+.env
+backend/models_cache/
+models_cache/
+.cache/
