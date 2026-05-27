@@ -407,6 +407,20 @@ async def search_properties(
 
     total_found = len(results)
     results_full = results
+    page_size = int(search_limit or 5)
+    page = 1
+
+    try:
+        soft_state = getattr(tool_context, "state", {}) if tool_context else {}
+        requested_page = soft_state.get("property_search_page") or soft_state.get("current_page")
+        if requested_page:
+            page = max(1, int(requested_page))
+    except Exception:
+        page = 1
+
+    start = (page - 1) * page_size
+    end = start + page_size
+
     shown_results = results[start:end]
     summary_mode = total_found > summary_threshold
 
