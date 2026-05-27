@@ -27,11 +27,11 @@ tests/tests/test_property_listing_flow.py::test_normalizer_case_insensitive PASS
 tests/tests/test_property_listing_flow.py::test_normalizer_none_and_empty PASSED [ 52%]
 tests/tests/test_property_listing_flow.py::test_normalizer_already_canonical PASSED [ 55%]
 tests/tests/test_property_listing_flow.py::test_normalizer_unknown_returns_passthrough PASSED [ 58%]
-tests/tests/test_property_listing_flow.py::test_apartments_only_returned_no_mixed FAILED [ 61%]
-tests/tests/test_property_listing_flow.py::test_villa_only_returned FAILED [ 64%]
-tests/tests/test_property_listing_flow.py::test_duplex_only_returned FAILED [ 67%]
-tests/tests/test_property_listing_flow.py::test_no_property_type_returns_all_types FAILED [ 70%]
-tests/tests/test_property_listing_flow.py::test_flat_alias_resolves_to_apartment FAILED [ 73%]
+tests/tests/test_property_listing_flow.py::test_apartments_only_returned_no_mixed PASSED [ 61%]
+tests/tests/test_property_listing_flow.py::test_villa_only_returned PASSED [ 64%]
+tests/tests/test_property_listing_flow.py::test_duplex_only_returned PASSED [ 67%]
+tests/tests/test_property_listing_flow.py::test_no_property_type_returns_all_types PASSED [ 70%]
+tests/tests/test_property_listing_flow.py::test_flat_alias_resolves_to_apartment PASSED [ 73%]
 tests/tests/test_dynamic_config.py::test_intent_catalog_load FAILED      [ 76%]
 tests/tests/test_dynamic_config.py::test_vocabulary_load PASSED          [ 79%]
 tests/tests/test_dynamic_config.py::test_routing_policies_load PASSED    [ 82%]
@@ -43,31 +43,6 @@ tests/tests/test_booking_memory_fallback.py::test_process_v2_booking_uses_soft_s
 tests/tests/test_booking_memory_fallback.py::test_process_v2_booking_uses_soft_state_property_id[] PASSED [100%]
 
 =================================== FAILURES ===================================
-____________________ test_apartments_only_returned_no_mixed ____________________
-tests/tests/test_property_listing_flow.py:52: in test_apartments_only_returned_no_mixed
-    with patch("app.components.search._DATASET", fake), \
-         ^^^^^
-E   NameError: name 'patch' is not defined
-___________________________ test_villa_only_returned ___________________________
-tests/tests/test_property_listing_flow.py:71: in test_villa_only_returned
-    with patch("app.components.search._DATASET", fake), \
-         ^^^^^
-E   NameError: name 'patch' is not defined
-__________________________ test_duplex_only_returned ___________________________
-tests/tests/test_property_listing_flow.py:87: in test_duplex_only_returned
-    with patch("app.components.search._DATASET", fake), \
-         ^^^^^
-E   NameError: name 'patch' is not defined
-___________________ test_no_property_type_returns_all_types ____________________
-tests/tests/test_property_listing_flow.py:104: in test_no_property_type_returns_all_types
-    with patch("app.components.search._DATASET", fake), \
-         ^^^^^
-E   NameError: name 'patch' is not defined
-____________________ test_flat_alias_resolves_to_apartment _____________________
-tests/tests/test_property_listing_flow.py:119: in test_flat_alias_resolves_to_apartment
-    with patch("app.components.search._DATASET", fake), \
-         ^^^^^
-E   NameError: name 'patch' is not defined
 ___________________________ test_intent_catalog_load ___________________________
 tests/tests/test_dynamic_config.py:9: in test_intent_catalog_load
     assert len(cat.intents) > 0
@@ -75,10 +50,5 @@ E   AssertionError: assert 0 > 0
 E    +  where 0 = len({})
 E    +    where {} = IntentCatalogConfig(version='1.0', default_threshold=0.0, intents={}, field_prototypes={}, modification_prototypes=[], property_search_request_prototypes=[], receipt_request_prototypes=[], resume_request_prototypes=[], affirm_yes_prototypes=[], affirm_no_prototypes=[], previous_results_prototypes=PreviousResultsConfig(threshold=0.0, prototypes=[], fallback_keywords=[]), keyword_fallback_map={}, vader_fallback={}).intents
 =========================== short test summary info ============================
-FAILED tests/tests/test_property_listing_flow.py::test_apartments_only_returned_no_mixed
-FAILED tests/tests/test_property_listing_flow.py::test_villa_only_returned - ...
-FAILED tests/tests/test_property_listing_flow.py::test_duplex_only_returned
-FAILED tests/tests/test_property_listing_flow.py::test_no_property_type_returns_all_types
-FAILED tests/tests/test_property_listing_flow.py::test_flat_alias_resolves_to_apartment
 FAILED tests/tests/test_dynamic_config.py::test_intent_catalog_load - Asserti...
-========================= 6 failed, 28 passed in 6.91s =========================
+========================= 1 failed, 33 passed in 8.38s =========================
