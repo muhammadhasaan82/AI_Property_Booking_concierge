@@ -102,7 +102,7 @@ async def test_booking_to_receipt_flow_preserves_context():
         assert selected_id == search_result["properties"][0]["id"]
         assert ctx.state["soft_state"]["last_selected_property_id"] == selected_id
 
-        missing_fields = ["guest_email", "check_in", "check_out", "guests", "price_per_night"]
+        missing_fields = ["property_title", "guest_email", "check_in", "check_out", "guests", "price_per_night"]
         gather = await booking.request_booking_details(
             missing_fields=missing_fields,
             tool_context=ctx,
