@@ -3,7 +3,9 @@
 # ────────────────────────────────────────────────────────────────
 
 from app.services.property_type_normalizer import normalize_property_type
-
+class _Ctx:
+    def __init__(self):
+        self.state = {}
 # ---------- Normalizer unit tests ----------
 def test_normalizer_plural_to_canonical():
     assert normalize_property_type("apartments") == "apartment"
