@@ -145,17 +145,24 @@ def _resolve_property_id_from_selection(
         return None
 
     if isinstance(soft_state, dict):
+
         option_map = soft_state.get("option_map")
+
+        option_map = soft_state.get("active_property_options_map")
+
         if isinstance(option_map, dict):
             option = option_map.get(str(selection_value))
             if isinstance(option, dict) and option.get("property_id") is not None:
                 return str(option.get("property_id"))
+
 
         legacy_map = soft_state.get("active_property_options_map")
         if isinstance(legacy_map, dict):
             option = legacy_map.get(str(selection_value))
             if isinstance(option, dict) and option.get("property_id") is not None:
                 return str(option.get("property_id"))
+
+
 
     if isinstance(last_search, dict):
         for item in last_search.get("properties", []):
@@ -185,6 +192,7 @@ def _get_active_option_window(
             total_found = _coerce_int(last_search.get("total_found")) or len(last_search.get("properties", []))
 
     return max(shown_count, 0), max(total_found, 0)
+
 
     pass
 
@@ -328,6 +336,8 @@ def paginate_stored_results(
         "state_available": True,
     }
     return payload
+
+
 
 async def _rerank_properties_by_vibe(
     results: List[Dict[str, Any]],
@@ -553,6 +563,7 @@ async def search_properties(
     if should_rerank:
         results = await _rerank_properties_by_vibe(results, vibe_query)
 
+
     filters = {
         "city": city,
         "budget": budget_value,
@@ -580,6 +591,81 @@ async def search_properties(
         soft_state["active_property_options_map"] = option_map
         soft_state["active_property_options_shown_count"] = payload["shown_count"]
         soft_state["active_property_options_total_found"] = payload["total_found"]
+
+    total_found = len(results)
+    results_full = results
+    page_size = int(search_limit or 5)
+    page = 1
+
+    try:
+        soft_state = getattr(tool_context, "state", {}) if tool_context else {}
+        requested_page = soft_state.get("property_search_page") or soft_state.get("current_page")
+        if requested_page:
+            page = max(1, int(requested_page))
+    except Exception:
+        page = 1
+
+    start = (page - 1) * page_size
+    end = start + page_size
+
+    shown_results = results[start:end]
+    summary_mode = total_found > summary_threshold
+
+    formatted: List[Dict[str, Any]] = []
+    for i, r in enumerate(shown_results, 1):
+        raw_amenities = r.get("amenities") or []
+        top_amenities = raw_amenities[:3] if isinstance(raw_amenities, list) else []
+        item = {
+            "number": i,
+            "id": r.get("id"),
+            "title": r.get("title", "Property"),
+            "city": (r.get("city") or "").title(),
+            "price_per_night": r.get("price_per_night"),
+            "bedrooms": r.get("bedrooms"),
+            "bathrooms": r.get("bathrooms"),
+            "property_type": r.get("property_type", ""),
+            "rating": r.get("rating"),
+            "amenities": top_amenities,
+        }
+        formatted.append(item)
+
+    shown_count = len(formatted)
+    has_more = total_found > shown_count
+    remaining_count = max(total_found - shown_count, 0)
+
+    payload = {
+        "status": Status.PROPERTIES_FOUND,
+        "total_found": total_found,
+        "shown_count": shown_count,
+        "has_more": has_more,
+        "remaining_count": remaining_count,
+        "max_results": search_limit,
+        "summary_mode": summary_mode,
+        "summary_mode_threshold": summary_threshold,
+        "properties": formatted,
+        "query_context": {
+            "city": city,
+            "budget": budget_value,
+            "beds": beds_value,
+            "property_type": normalized_property_type,
+        },
+    }
+
+    if isinstance(soft_state, dict):
+        soft_state["active_property_options_map"] = {
+            str(item["number"]): {
+                "property_id": item.get("id"),
+                "title": item.get("title"),
+                "city": item.get("city"),
+                "price_per_night": item.get("price_per_night"),
+                "rating": item.get("rating"),
+            }
+            for item in formatted
+            if item.get("number") is not None
+        }
+        soft_state["active_property_options_shown_count"] = shown_count
+        soft_state["active_property_options_total_found"] = total_found
+
         soft_state["active_property_options_generated_at"] = time.time()
 
     _set_unresolved_turns(soft_state, 0)
@@ -638,6 +724,7 @@ async def get_property_details(
     last_search = _get_cached_last_search(soft_state)
     selected_item = None
 
+
     if selection_value is not None and _is_blank(property_id):
         property_id = _resolve_property_id_from_selection(selection_value, soft_state, last_search)
 
@@ -649,6 +736,9 @@ async def get_property_details(
                 break
 
     if selection_value is not None and not selected_item and last_search:
+
+    if selection_value is not None and last_search:
+
         for item in last_search.get("properties", []):
             if item.get("number") == selection_value:
                 selected_item = item
