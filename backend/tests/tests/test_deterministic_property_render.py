@@ -207,15 +207,27 @@ async def test_run_adk_turn_suppresses_voice_when_properties_found(monkeypatch):
 
     fake_runner = type("FakeRunner", (), {"run_async": staticmethod(fake_run_async)})()
 
+    class FakeSessionService:
+        async def get_session(self, **_kwargs):
+            return None
+
     monkeypatch.setattr(adk_runner, "_get_runner", lambda: fake_runner)
-    monkeypatch.setattr(adk_runner, "_get_session_service", lambda: None)
-    monkeypatch.setattr(adk_runner, "route_pre_adk", lambda **_kw: None)
+    monkeypatch.setattr(adk_runner, "_get_session_service", lambda: FakeSessionService())
     monkeypatch.setattr(adk_runner, "sanitize_input", lambda m: (m, True))
     monkeypatch.setattr(adk_runner, "sanitize_output", lambda m: m)
-    monkeypatch.setattr(adk_runner, "_build_invocation_state_delta",
-                        lambda **_kw: {"user_cognitive_context": "", "soft_state": {}})
-    monkeypatch.setattr(adk_runner, "get_session_snapshot",
-                        lambda sid: {"state": {}, "history": [], "meta": {}})
+    
+    async def fake_route_pre_adk(**_kw):
+        return None
+
+    async def fake_build_invocation_state_delta(**_kw):
+        return {"user_cognitive_context": "", "soft_state": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return {"state": {}, "history": [], "meta": {}}
+
+    monkeypatch.setattr(adk_runner, "route_pre_adk", fake_route_pre_adk)
+    monkeypatch.setattr(adk_runner, "_build_invocation_state_delta", fake_build_invocation_state_delta)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
 
     chunks = []
     async for chunk in adk_runner.run_adk_turn("u1", "s1", "apartments in New York"):
