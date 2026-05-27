@@ -540,6 +540,96 @@ async def _build_invocation_state_delta(user_id: str, current_query: str, sessio
         "soft_state": soft_state,
     }
 
+def _render_property_results_from_router_output(router_output: Dict[str, Any]) -> str:
+    """Build a deterministic property-list reply directly from router_output.
+
+    Called when status == 'properties_found' and properties array is non-empty.
+    NEVER invents titles, prices, ratings, bedrooms, bathrooms, ids or counts —
+    every value comes from the tool payload.
+    """
+    props: List[Dict[str, Any]] = router_output.get("properties") or []
+    if not props:
+        return ""
+
+    total: int = int(router_output.get("total_found") or len(props))
+    shown: int = int(router_output.get("shown_count") or len(props))
+    qctx: Dict[str, Any] = router_output.get("query_context") or {}
+    city: str = (qctx.get("city") or "").strip().title()
+    prop_type: str = (qctx.get("property_type") or "").strip().lower()
+    budget = qctx.get("budget")
+    pagination: Dict[str, Any] = router_output.get("pagination") or {}
+    summary_mode: bool = bool(router_output.get("summary_mode", False))
+
+    type_label = f"{prop_type}s" if prop_type else "properties"
+    city_part = f" in {city}" if city else ""
+    budget_part = f" under ${int(budget)}" if budget else ""
+
+    total_pages: int = int(pagination.get("total_pages") or 1)
+    if total_pages > 1:
+        page = int(pagination.get("current_page") or 1)
+        page_start = int(pagination.get("page_start") or 1)
+        page_end = int(pagination.get("page_end") or shown)
+        header = (
+            f"I found {total} {type_label}{city_part}{budget_part}. "
+            f"Showing {page_start}\u2013{page_end} (page {page} of {total_pages}):"
+        )
+    else:
+        header = f"I found {shown} {type_label}{city_part}{budget_part}:"
+
+    lines: List[str] = [header, ""]
+
+    for item in props:
+        num = item.get("number", "")
+        title = (item.get("title") or "").strip()
+        if not title:
+            continue
+        price = item.get("price_per_night")
+        beds = item.get("bedrooms")
+        baths = item.get("bathrooms")
+        rating = item.get("rating")
+        ptype = (item.get("property_type") or "").strip().title()
+
+        price_str = f"${int(price)}/night" if price is not None else ""
+        beds_str = (
+            f"{beds} bed{'s' if beds != 1 else ''}" if beds is not None else ""
+        )
+        baths_str = (
+            f"{baths} bath{'s' if baths != 1 else ''}" if baths is not None else ""
+        )
+        rating_str = f"\u2605 {float(rating):.1f}" if rating is not None else ""
+
+        if summary_mode:
+            details = " | ".join(filter(None, [price_str, beds_str, rating_str]))
+        else:
+            details = " | ".join(
+                filter(None, [ptype, price_str, beds_str, baths_str, rating_str])
+            )
+        lines.append(
+            f"{num}. **{title}**" + (f" \u2014 {details}" if details else "")
+        )
+
+    lines.append("")
+
+    has_next: bool = bool(pagination.get("has_next", False))
+    has_prev: bool = bool(pagination.get("has_prev", False))
+    if has_next and has_prev:
+        lines.append(
+            "Say \u2018next\u2019 for more, \u2018previous\u2019 to go back, "
+            "or pick an option number for details."
+        )
+    elif has_next:
+        lines.append("Say \u2018next\u2019 for more results, or pick an option number for details.")
+    elif has_prev:
+        lines.append("Say \u2018previous\u2019 to go back, or pick an option number for details.")
+    else:
+        lines.append(
+            "Reply with an option number to see full details, "
+            "or tell me your preferences to refine the search."
+        )
+
+    return "\n".join(lines)
+
+
 async def _render_voice_from_router_output(
     router_output: str,
     user_cognitive_context: str,
@@ -654,6 +744,8 @@ async def run_adk_turn(
     tool_calls_log: List[Dict[str, Any]] = []
     anomaly_triggered = False
     router_output = ""
+    router_output_dict: Optional[Dict[str, Any]] = None
+    _deterministic_render: Optional[str] = None
     pipeline_failed_reply = ""
     event_count = 0
     max_adk_events = int(getattr(_cfg, "runtime_max_adk_events_per_turn", 8))
@@ -698,15 +790,39 @@ async def run_adk_turn(
                 if author == "triage_router" and tool_response is not None:
                     try:
                         router_output = json.dumps(_jsonable(tool_response), ensure_ascii=False)
+                        router_output_dict = _jsonable(tool_response) if isinstance(_jsonable(tool_response), dict) else None
                     except Exception:
                         router_output = str(tool_response)
+                        router_output_dict = None
 
-                
+                    if isinstance(router_output_dict, dict):
+                        _status = router_output_dict.get("status") or ""
+                        _props = router_output_dict.get("properties") or []
+                        logger.info(
+                            "[ADK] router_output preview: status=%s total_found=%s shown_count=%s "
+                            "first_title=%r",
+                            _status,
+                            router_output_dict.get("total_found"),
+                            router_output_dict.get("shown_count"),
+                            (_props[0].get("title") if _props else None),
+                        )
+                        if _status == "properties_found" and _props:
+                            _det = _render_property_results_from_router_output(router_output_dict)
+                            if _det:
+                                _deterministic_render = _det
+                                logger.info(
+                                    "[ADK] Deterministic property render active — "
+                                    "concierge_voice LLM output will be suppressed (%d properties)",
+                                    len(_props),
+                                )
+
                 if author == "triage_router" and event_text:
                     router_output = event_text
 
                 if author == "concierge_voice":
-                    if event.content and event.content.parts:
+                    if _deterministic_render is not None:
+                        pass
+                    elif event.content and event.content.parts:
                         for part in event.content.parts:
                             if hasattr(part, "text") and part.text:
                                 streamed_parts.append(part.text)
@@ -716,11 +832,11 @@ async def run_adk_turn(
                     if author == "triage_router":
                         continue
                     if author == "concierge_voice":
-                        if not streamed_parts and event_text:
+                        if _deterministic_render is None and not streamed_parts and event_text:
                             streamed_parts.append(event_text)
                             yield event_text
                         break
-                    if streamed_parts:
+                    if streamed_parts or _deterministic_render is not None:
                         break
 
     except asyncio.TimeoutError:
@@ -731,7 +847,17 @@ async def run_adk_turn(
         pipeline_failed_reply = "I'm sorry, something went wrong. Please try again."
 
     latency_ms = (time.monotonic() - t0) * 1000.0
-    final_reply = "".join(streamed_parts)
+
+    if _deterministic_render is not None:
+        logger.info(
+            "[ADK] Yielding deterministic property render (%d chars) — "
+            "no concierge_voice LLM text used",
+            len(_deterministic_render),
+        )
+        yield _deterministic_render
+        final_reply = _deterministic_render
+    else:
+        final_reply = "".join(streamed_parts)
 
     try:
         updated_session = await session_service.get_session(
