@@ -96,7 +96,7 @@ async def test_booking_to_receipt_flow_preserves_context():
         assert returned_titles <= expected_titles
         assert search_result["total_found"] == len(expected_titles)
 
-        selected = await select_property(option_number=1, tool_context=ctx)
+        selected = await select_property(selection="1", tool_context=ctx)
         assert selected["status"] == Status.PROPERTY_DETAILS
         selected_id = selected["property"]["id"]
         assert selected_id == search_result["properties"][0]["id"]
