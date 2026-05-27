@@ -1,0 +1,32 @@
+AI Property Booking Concierge - V2.5 Stable Test Results
+Date: Wed May 27 18:04:51 UTC 2026
+
+Command:
+uv run env PYTHONPATH=. pytest \
+  tests/tests/test_deterministic_property_render.py \
+  tests/tests/test_property_listing_flow.py \
+  tests/tests/test_dynamic_config.py \
+  tests/tests/test_booking_memory_fallback.py \
+  tests/tests/test_e2e_booking_to_receipt_flow.py \
+  tests/tests/test_v25_smoke_user_flows.py \
+  -v --tb=short
+
+Summary:
+45 passed, 1 warning in 19.24s
+
+Coverage:
+- Deterministic property rendering
+- Property listing and property-type filtering
+- Dynamic config loading
+- Booking memory fallback
+- Booking-to-receipt E2E flow
+- Booking correction/amendment flow
+- V2.5 smoke flows
+- Missing region clarification
+- Triage delegation matrix
+- FAQ during booking context preservation
+- Dynamic taxonomy/config behavior
+
+Note:
+Chaos/live LLM tests are separate because they depend on Groq/OpenAI quota.
+Rust integration tests are separate because they require live Rust integration setup.
