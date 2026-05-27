@@ -1,0 +1,1104 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.2, pluggy-1.6.0 -- /root/AI_Property_Booking_concierge/backend/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /root/AI_Property_Booking_concierge/backend
+configfile: pyproject.toml
+plugins: anyio-4.13.0, langsmith-0.7.22, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 54 items
+
+tests/test_v2_chaos.py::test_chaos_case[alias_apt_nyc_wifi] FAILED       [  1%]
+tests/test_v2_chaos.py::test_chaos_case[alias_place_to_stay] FAILED      [  3%]
+tests/test_v2_chaos.py::test_chaos_case[missing_data_partial_booking] FAILED [  5%]
+tests/test_v2_chaos.py::test_chaos_case[missing_data_email_only] FAILED  [  7%]
+tests/test_v2_chaos.py::test_chaos_case[mind_change_full_booking] FAILED [  9%]
+tests/test_v2_chaos.py::test_chaos_case[faq_cancellation_policy] FAILED  [ 11%]
+tests/test_v2_chaos.py::test_chaos_case[booking_status_lookup] FAILED    [ 12%]
+tests/test_v2_chaos.py::test_chaos_case[city_list_request] FAILED        [ 14%]
+tests/test_v2_chaos.py::test_chaos_case[escalation_frustrated_user] FAILED [ 16%]
+tests/test_v2_chaos.py::test_chaos_case[typo_alias_combo] FAILED         [ 18%]
+tests/tests/test_deterministic_property_render.py::test_header_says_i_found_n_apartments_in_new_york PASSED [ 20%]
+tests/tests/test_deterministic_property_render.py::test_all_real_titles_present PASSED [ 22%]
+tests/tests/test_deterministic_property_render.py::test_no_hallucinated_names PASSED [ 24%]
+tests/tests/test_deterministic_property_render.py::test_city_and_type_in_header PASSED [ 25%]
+tests/tests/test_deterministic_property_render.py::test_budget_in_header_when_provided PASSED [ 27%]
+tests/tests/test_deterministic_property_render.py::test_no_budget_in_header_when_not_provided PASSED [ 29%]
+tests/tests/test_deterministic_property_render.py::test_option_numbers_present PASSED [ 31%]
+tests/tests/test_deterministic_property_render.py::test_price_from_payload PASSED [ 33%]
+tests/tests/test_deterministic_property_render.py::test_rating_from_payload PASSED [ 35%]
+tests/tests/test_deterministic_property_render.py::test_empty_properties_returns_empty_string PASSED [ 37%]
+tests/tests/test_deterministic_property_render.py::test_missing_properties_key_returns_empty_string PASSED [ 38%]
+tests/tests/test_deterministic_property_render.py::test_footer_has_next_shows_next_hint PASSED [ 40%]
+tests/tests/test_deterministic_property_render.py::test_footer_no_pagination_shows_option_hint PASSED [ 42%]
+tests/tests/test_deterministic_property_render.py::test_paginated_header_shows_range PASSED [ 44%]
+tests/tests/test_deterministic_property_render.py::test_run_adk_turn_suppresses_voice_when_properties_found PASSED [ 46%]
+tests/tests/test_property_listing_flow.py::test_normalizer_plural_to_canonical PASSED [ 48%]
+tests/tests/test_property_listing_flow.py::test_normalizer_case_insensitive PASSED [ 50%]
+tests/tests/test_property_listing_flow.py::test_normalizer_none_and_empty PASSED [ 51%]
+tests/tests/test_property_listing_flow.py::test_normalizer_already_canonical PASSED [ 53%]
+tests/tests/test_property_listing_flow.py::test_normalizer_unknown_returns_passthrough PASSED [ 55%]
+tests/tests/test_property_listing_flow.py::test_apartments_only_returned_no_mixed FAILED [ 57%]
+tests/tests/test_property_listing_flow.py::test_villa_only_returned FAILED [ 59%]
+tests/tests/test_property_listing_flow.py::test_duplex_only_returned FAILED [ 61%]
+tests/tests/test_property_listing_flow.py::test_no_property_type_returns_all_types FAILED [ 62%]
+tests/tests/test_property_listing_flow.py::test_flat_alias_resolves_to_apartment FAILED [ 64%]
+tests/tests/test_dynamic_config.py::test_intent_catalog_load FAILED      [ 66%]
+tests/tests/test_dynamic_config.py::test_vocabulary_load PASSED          [ 68%]
+tests/tests/test_dynamic_config.py::test_routing_policies_load PASSED    [ 70%]
+tests/tests/test_dynamic_config.py::test_guardrails_load PASSED          [ 72%]
+tests/tests/test_dynamic_config.py::test_legacy_mode_fallback PASSED     [ 74%]
+tests/tests/test_booking_memory_fallback.py::test_review_booking_details_uses_soft_state_property_id[None] PASSED [ 75%]
+tests/tests/test_booking_memory_fallback.py::test_review_booking_details_uses_soft_state_property_id[] PASSED [ 77%]
+tests/tests/test_booking_memory_fallback.py::test_process_v2_booking_uses_soft_state_property_id[None] PASSED [ 79%]
+tests/tests/test_booking_memory_fallback.py::test_process_v2_booking_uses_soft_state_property_id[] PASSED [ 81%]
+tests/tests/test_rust_integration.py::test_health SKIPPED (Requires ...) [ 83%]
+tests/tests/test_rust_integration.py::test_list_tools SKIPPED (Requi...) [ 85%]
+tests/tests/test_rust_integration.py::test_execute_search SKIPPED (R...) [ 87%]
+tests/tests/test_rust_integration.py::test_execute_booking_validation SKIPPED [ 88%]
+tests/tests/test_rust_integration.py::test_execute_pricing SKIPPED (...) [ 90%]
+tests/tests/test_rust_integration.py::test_execute_sentiment SKIPPED     [ 92%]
+tests/tests/test_rust_integration.py::test_execute_fraud SKIPPED (Re...) [ 94%]
+tests/tests/test_rust_integration.py::test_safety_insufficient_booking_data SKIPPED [ 96%]
+tests/tests/test_rust_integration.py::test_cache SKIPPED (Requires t...) [ 98%]
+tests/tests/test_rust_integration.py::test_python_rust_client SKIPPED    [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_chaos_case[alias_apt_nyc_wifi] ______________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: alias_apt_nyc_wifi FAILED — No tool was called (LLM may have responded without tool use)  (latency=11691ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10846, Requested 5802. Please try again in 23.24s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10846, Requested 5802. Please try again in 23.24s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10846, Requested 5802. Please try again in 23.24s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+_____________________ test_chaos_case[alias_place_to_stay] _____________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: alias_place_to_stay FAILED — No tool was called (LLM may have responded without tool use)  (latency=135ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10759, Requested 1725. Please try again in 2.42s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10759, Requested 1725. Please try again in 2.42s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10759, Requested 1725. Please try again in 2.42s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+________________ test_chaos_case[missing_data_partial_booking] _________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: missing_data_partial_booking FAILED — No tool was called (LLM may have responded without tool use)  (latency=116ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10733, Requested 1615. Please try again in 1.74s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10733, Requested 1615. Please try again in 1.74s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10733, Requested 1615. Please try again in 1.74s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+___________________ test_chaos_case[missing_data_email_only] ___________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: missing_data_email_only FAILED — No tool was called (LLM may have responded without tool use)  (latency=125ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10705, Requested 1642. Please try again in 1.735s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10705, Requested 1642. Please try again in 1.735s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10705, Requested 1642. Please try again in 1.735s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+__________________ test_chaos_case[mind_change_full_booking] ___________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: mind_change_full_booking FAILED — No tool was called (LLM may have responded without tool use)  (latency=124ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10679, Requested 1681. Please try again in 1.799999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10679, Requested 1681. Please try again in 1.799999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10679, Requested 1681. Please try again in 1.799999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+___________________ test_chaos_case[faq_cancellation_policy] ___________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: faq_cancellation_policy FAILED — No tool was called (LLM may have responded without tool use)  (latency=126ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10651, Requested 1608. Please try again in 1.295s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10651, Requested 1608. Please try again in 1.295s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10651, Requested 1608. Please try again in 1.295s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+____________________ test_chaos_case[booking_status_lookup] ____________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: booking_status_lookup FAILED — No tool was called (LLM may have responded without tool use)  (latency=113ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10625, Requested 1644. Please try again in 1.345s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10625, Requested 1644. Please try again in 1.345s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10625, Requested 1644. Please try again in 1.345s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+______________________ test_chaos_case[city_list_request] ______________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: city_list_request FAILED — No tool was called (LLM may have responded without tool use)  (latency=111ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10601, Requested 1638. Please try again in 1.194999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10601, Requested 1638. Please try again in 1.194999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10601, Requested 1638. Please try again in 1.194999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+_________________ test_chaos_case[escalation_frustrated_user] __________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: escalation_frustrated_user FAILED — No tool was called (LLM may have responded without tool use)  (latency=115ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10575, Requested 1725. Please try again in 1.5s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10575, Requested 1725. Please try again in 1.5s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10575, Requested 1725. Please try again in 1.5s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+______________________ test_chaos_case[typo_alias_combo] _______________________
+tests/test_v2_chaos.py:382: in test_chaos_case
+    assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
+E   AssertionError: typo_alias_combo FAILED — No tool was called (LLM may have responded without tool use)  (latency=141ms, captured=None)
+E   assert False
+----------------------------- Captured stdout call -----------------------------
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.adk_runner:adk_runner.py:847 [ADK] Pipeline execution error: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10547, Requested 1616. Please try again in 815ms. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 175, in _make_common_async_call
+    response = await async_httpx_client.post(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/logging_utils.py", line 297, in async_wrapper
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 513, in post
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/http_handler.py", line 469, in post
+    response.raise_for_status()
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 620, in acompletion
+    response = await init_response
+               ^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 307, in async_completion
+    response = await self._make_common_async_call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 200, in _make_common_async_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+litellm.llms.openai.common_utils.OpenAIError: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10547, Requested 1616. Please try again in 815ms. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/root/AI_Property_Booking_concierge/backend/app/services/adk_runner.py", line 754, in run_adk_turn
+    async for event in runner.run_async(
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 632, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 617, in _run_with_trace
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 853, in _exec_with_plugin
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/runners.py", line 606, in execute
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/sequential_agent.py", line 78, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/base_agent.py", line 297, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/agents/llm_agent.py", line 479, in _run_async_impl
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 754, in run_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 831, in _run_one_step_async
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1188, in _call_llm_async
+    async for event in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1171, in _call_llm_with_tracing
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 1247, in _run_and_handle_error
+    async for response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 391, in _run_and_handle_error
+    raise model_error
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/flows/llm_flows/base_llm_flow.py", line 372, in _run_and_handle_error
+    async for llm_response in agen:
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 2431, in generate_content_async
+    response = await self.llm_client.acompletion(**completion_args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/google/adk/models/lite_llm.py", line 500, in acompletion
+    return await acompletion(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 2094, in wrapper_async
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/utils.py", line 1893, in wrapper_async
+    result = await original_function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/main.py", line 639, in acompletion
+    raise exception_type(
+          ^^^^^^^^^^^^^^^
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/root/AI_Property_Booking_concierge/backend/.venv/lib/python3.12/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 392, in exception_type
+    raise RateLimitError(
+litellm.exceptions.RateLimitError: litellm.RateLimitError: RateLimitError: GroqException - {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01k1xsb38zew5t5ra5p3n0xbe6` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10547, Requested 1616. Please try again in 815ms. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}
+____________________ test_apartments_only_returned_no_mixed ____________________
+tests/tests/test_property_listing_flow.py:42: in test_apartments_only_returned_no_mixed
+    ctx = _Ctx()
+          ^^^^
+E   NameError: name '_Ctx' is not defined
+___________________________ test_villa_only_returned ___________________________
+tests/tests/test_property_listing_flow.py:63: in test_villa_only_returned
+    ctx = _Ctx()
+          ^^^^
+E   NameError: name '_Ctx' is not defined
+__________________________ test_duplex_only_returned ___________________________
+tests/tests/test_property_listing_flow.py:80: in test_duplex_only_returned
+    ctx = _Ctx()
+          ^^^^
+E   NameError: name '_Ctx' is not defined
+___________________ test_no_property_type_returns_all_types ____________________
+tests/tests/test_property_listing_flow.py:96: in test_no_property_type_returns_all_types
+    ctx = _Ctx()
+          ^^^^
+E   NameError: name '_Ctx' is not defined
+____________________ test_flat_alias_resolves_to_apartment _____________________
+tests/tests/test_property_listing_flow.py:112: in test_flat_alias_resolves_to_apartment
+    ctx = _Ctx()
+          ^^^^
+E   NameError: name '_Ctx' is not defined
+___________________________ test_intent_catalog_load ___________________________
+tests/tests/test_dynamic_config.py:9: in test_intent_catalog_load
+    assert len(cat.intents) > 0
+E   AssertionError: assert 0 > 0
+E    +  where 0 = len({})
+E    +    where {} = IntentCatalogConfig(version='1.0', default_threshold=0.0, intents={}, field_prototypes={}, modification_prototypes=[], property_search_request_prototypes=[], receipt_request_prototypes=[], resume_request_prototypes=[], affirm_yes_prototypes=[], affirm_no_prototypes=[], previous_results_prototypes=PreviousResultsConfig(threshold=0.0, prototypes=[], fallback_keywords=[]), keyword_fallback_map={}, vader_fallback={}).intents
+=========================== short test summary info ============================
+FAILED tests/test_v2_chaos.py::test_chaos_case[alias_apt_nyc_wifi] - Assertio...
+FAILED tests/test_v2_chaos.py::test_chaos_case[alias_place_to_stay] - Asserti...
+FAILED tests/test_v2_chaos.py::test_chaos_case[missing_data_partial_booking]
+FAILED tests/test_v2_chaos.py::test_chaos_case[missing_data_email_only] - Ass...
+FAILED tests/test_v2_chaos.py::test_chaos_case[mind_change_full_booking] - As...
+FAILED tests/test_v2_chaos.py::test_chaos_case[faq_cancellation_policy] - Ass...
+FAILED tests/test_v2_chaos.py::test_chaos_case[booking_status_lookup] - Asser...
+FAILED tests/test_v2_chaos.py::test_chaos_case[city_list_request] - Assertion...
+FAILED tests/test_v2_chaos.py::test_chaos_case[escalation_frustrated_user] - ...
+FAILED tests/test_v2_chaos.py::test_chaos_case[typo_alias_combo] - AssertionE...
+FAILED tests/tests/test_property_listing_flow.py::test_apartments_only_returned_no_mixed
+FAILED tests/tests/test_property_listing_flow.py::test_villa_only_returned - ...
+FAILED tests/tests/test_property_listing_flow.py::test_duplex_only_returned
+FAILED tests/tests/test_property_listing_flow.py::test_no_property_type_returns_all_types
+FAILED tests/tests/test_property_listing_flow.py::test_flat_alias_resolves_to_apartment
+FAILED tests/tests/test_dynamic_config.py::test_intent_catalog_load - Asserti...
+================== 16 failed, 28 passed, 10 skipped in 19.93s ==================
