@@ -145,11 +145,24 @@ def _resolve_property_id_from_selection(
         return None
 
     if isinstance(soft_state, dict):
+
+        option_map = soft_state.get("option_map")
+
         option_map = soft_state.get("active_property_options_map")
+
         if isinstance(option_map, dict):
             option = option_map.get(str(selection_value))
             if isinstance(option, dict) and option.get("property_id") is not None:
                 return str(option.get("property_id"))
+
+
+        legacy_map = soft_state.get("active_property_options_map")
+        if isinstance(legacy_map, dict):
+            option = legacy_map.get(str(selection_value))
+            if isinstance(option, dict) and option.get("property_id") is not None:
+                return str(option.get("property_id"))
+
+
 
     if isinstance(last_search, dict):
         for item in last_search.get("properties", []):
@@ -179,6 +192,151 @@ def _get_active_option_window(
             total_found = _coerce_int(last_search.get("total_found")) or len(last_search.get("properties", []))
 
     return max(shown_count, 0), max(total_found, 0)
+
+
+    pass
+
+PROPERTY_PAGE_SIZE = 5
+
+def _build_option_map_from_formatted(
+    formatted:List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    option_map: Dict[str, Dict[str, Any]] = {}
+    for item in formatted:
+        number = item.get("number")
+        if number is None:
+            continue
+        option_map[str(number)] = {
+            "property_id": item.get("id"),
+            "title": item.get("title"),
+            "city": item.get("city"),
+            "price_per_night": item.get("price_per_night"),
+            "rating": item.get("rating"),
+            "bedrooms": item.get("bedrooms"),
+            "bathrooms": item.get("bathrooms"),
+            "property_type": item.get("property_type"),
+        }
+    return option_map
+
+def _build_search_page_payload(
+    *,
+    results: List[Dict[str, Any]],
+    filters: Dict[str, Any],
+    page: int,
+    page_size: int = PROPERTY_PAGE_SIZE,
+    search_limit: int = PROPERTY_RESULT_LIMIT_DEFAULT,
+    summary_threshold: int = PROPERTY_SUMMARY_THRESHOLD,
+) -> tuple[Dict[str, Any], list[Dict[str,Any]], Dict[str, Dict[str, Any]]]:
+    total_found = len(results)
+    safe_page_size = max(_coerce_int(page_size) or PROPERTY_PAGE_SIZE, 1)
+    safe_page = max(_coerce_int(page) or 1, 1)
+    total_pages = max((total_found + safe_page_size - 1) // safe_page_size, 1)
+    safe_page = min(safe_page, total_pages)
+
+    start = (safe_page - 1) * safe_page_size
+    end = min(start + safe_page_size, total_found)
+
+    visible_results = results[start:end]
+    formatted: List[Dict[str, Any]] = []
+    for i , r in enumerate(visible_results, 1):
+        raw_amenities = r.get("amenities") or []
+        top_amenities = raw_amenities[:3] if isinstance(raw_amenities, list) else []
+        formatted.append(
+            {
+                "number": i,
+                "id": r.get("id"),
+                "title": r.get("title", "Property"),
+                "city": (r.get("city") or "").title(),
+                "price_per_night": r.get("price_per_night"),
+                "bedrooms": r.get("bedrooms"),
+                "bathrooms": r.get("bathrooms"),
+                "property_type": r.get("property_type", ""),
+                "rating": r.get("rating"),
+                "amenities": top_amenities,
+            }
+        )
+ 
+    option_map = _build_option_map_from_formatted(formatted)
+    shown_count = len(formatted)
+    has_more = end < total_found
+    remaining_count = max(total_found - end, 0)
+ 
+    payload = {
+        "status": Status.PROPERTIES_FOUND,
+        "total_found": total_found,
+        "shown_count": shown_count,
+        "has_more": has_more,
+        "remaining_count": remaining_count,
+        "max_results": search_limit,
+        "summary_mode": total_found > max(summary_threshold, 1),
+        "summary_mode_threshold": max(summary_threshold, 1),
+        "properties": formatted,
+        "query_context": {
+            "city": filters.get("city"),
+            "budget": filters.get("budget"),
+            "beds": filters.get("beds"),
+            "property_type": filters.get("property_type"),
+        },
+        "pagination": {
+            "current_page": safe_page,
+            "page_size": safe_page_size,
+            "page_start": start + 1 if total_found else 0,
+            "page_end": end,
+            "total_pages": total_pages,
+        },
+    }
+    return payload, visible_results, option_map
+ 
+ 
+def paginate_stored_results(
+    soft_state: Optional[Dict[str, Any]],
+    *,
+    direction: str = "next",
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(soft_state, dict):
+        return None
+ 
+    all_results = soft_state.get("all_search_results") or []
+    if not isinstance(all_results, list) or not all_results:
+        return None
+ 
+    current_page = max(_coerce_int(soft_state.get("current_page")) or 1, 1)
+    page_size = max(_coerce_int(soft_state.get("page_size")) or PROPERTY_PAGE_SIZE, 1)
+    filters = soft_state.get("last_filters") or {}
+ 
+    if direction == "previous":
+        target_page = max(current_page - 1, 1)
+    else:
+        target_page = current_page + 1
+ 
+    payload, visible_results, option_map = _build_search_page_payload(
+        results=all_results,
+        filters=filters,
+        page=target_page,
+        page_size=page_size,
+        search_limit=_resolve_result_limit(None),
+        summary_threshold=PROPERTY_SUMMARY_THRESHOLD,
+    )
+ 
+    soft_state["active_flow"] = "search"
+    soft_state["current_page"] = payload["pagination"]["current_page"]
+    soft_state["page_size"] = page_size
+    soft_state["visible_results"] = visible_results
+    soft_state["option_map"] = option_map
+    soft_state["active_property_options_map"] = option_map
+    soft_state["active_property_options_shown_count"] = payload["shown_count"]
+    soft_state["active_property_options_total_found"] = payload["total_found"]
+    soft_state["active_property_options_generated_at"] = time.time()
+ 
+    _set_cached_last_search(soft_state, dict(payload))
+    payload["source"] = Source.MEMORY
+    payload["memory"] = {
+        "read_from": "soft_state.all_search_results",
+        "written_to": "soft_state.visible_results",
+        "state_available": True,
+    }
+    return payload
+
 
 
 async def _rerank_properties_by_vibe(
@@ -405,6 +563,35 @@ async def search_properties(
     if should_rerank:
         results = await _rerank_properties_by_vibe(results, vibe_query)
 
+
+    filters = {
+        "city": city,
+        "budget": budget_value,
+        "beds": beds_value,
+        "property_type": normalized_property_type,
+    }
+    payload, visible_results, option_map = _build_search_page_payload(
+        results=results,
+        filters=filters,
+        page=1,
+        page_size=PROPERTY_PAGE_SIZE,
+        search_limit=search_limit,
+        summary_limit=search_limit,
+    )
+
+    if isinstance(soft_state, dict):
+        soft_state["active_flow"] = "search"
+        soft_state["last_filters"] = filters
+        soft_state["all_search_results"] = list(results)
+        soft_state["current_page"] = payload["pagination"]["current_page"]
+        soft_state["page_size"] = PROPERTY_PAGE_SIZE
+        soft_state["visible_results"] = visible_results
+        soft_state["option_map"] = option_map
+        soft_state["selected_property_id"] = None
+        soft_state["active_property_options_map"] = option_map
+        soft_state["active_property_options_shown_count"] = payload["shown_count"]
+        soft_state["active_property_options_total_found"] = payload["total_found"]
+
     total_found = len(results)
     results_full = results
     page_size = int(search_limit or 5)
@@ -478,10 +665,12 @@ async def search_properties(
         }
         soft_state["active_property_options_shown_count"] = shown_count
         soft_state["active_property_options_total_found"] = total_found
+
         soft_state["active_property_options_generated_at"] = time.time()
 
     _set_unresolved_turns(soft_state, 0)
     _set_cached_last_search(soft_state, dict(payload))
+
     payload["memory"] = {
         "written_to": "soft_state.last_search",
         "state_available": isinstance(soft_state, dict),
@@ -535,7 +724,21 @@ async def get_property_details(
     last_search = _get_cached_last_search(soft_state)
     selected_item = None
 
+
+    if selection_value is not None and _is_blank(property_id):
+        property_id = _resolve_property_id_from_selection(selection_value, soft_state, last_search)
+
+    if isinstance(soft_state, dict) and property_id:
+        for item in soft_state.get("visible_results", []) or []:
+            if str(item.get("id")) == str(property_id):
+                selected_item = item
+                resolved_from_history = True
+                break
+
+    if selection_value is not None and not selected_item and last_search:
+
     if selection_value is not None and last_search:
+
         for item in last_search.get("properties", []):
             if item.get("number") == selection_value:
                 selected_item = item
