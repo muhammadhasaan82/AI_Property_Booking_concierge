@@ -1,4 +1,6 @@
 import pytest
+from unittest.mock import patch
+from app.agents.tools.search import search_properties
 # ────────────────────────────────────────────────────────────────
 # Additional tests for strict property type filtering
 # ────────────────────────────────────────────────────────────────
