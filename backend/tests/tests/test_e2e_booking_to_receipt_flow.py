@@ -96,7 +96,12 @@ async def test_booking_to_receipt_flow_preserves_context():
         assert returned_titles <= expected_titles
         assert search_result["total_found"] == len(expected_titles)
 
-        selected = await select_property(selection="1", tool_context=ctx)
+        ctx.state["soft_state"]["last_search"] = ctx.state.get("last_search")
+        ctx.state["soft_state"]["active_property_options_map"] = ctx.state.get("active_property_options_map")
+        ctx.state["soft_state"]["active_property_options_shown_count"] = ctx.state.get("active_property_options_shown_count")
+        ctx.state["soft_state"]["active_property_options_total_found"] = ctx.state.get("active_property_options_total_found")
+
+        selected = await select_property(option_number=1, tool_context=ctx)
         assert selected["status"] == Status.PROPERTY_DETAILS
         selected_id = selected["property"]["id"]
         assert selected_id == search_result["properties"][0]["id"]
