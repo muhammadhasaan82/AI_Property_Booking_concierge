@@ -45,6 +45,7 @@ from .redis_store import (
 )
 from app.agents.schemas.understanding_frame import UnderstandingFrame
 from app.config.response_policies_loader import render_policy_snippet
+from app.config.conversation_shortcuts_loader import match_shortcut
 from app.config.agent_config_loader import cfg as _cfg
 
 ADK_TURN_TIMEOUT = float(getattr(_cfg, "runtime_turn_timeout_seconds", 45))
@@ -711,7 +712,6 @@ def _extract_option_selection(message: str) -> str:
         if match:
             return int(match.group(1))
     return None
-
 async def _maybe_handle_search_state_shortcut(
     *,
     session_id: str,
@@ -720,30 +720,31 @@ async def _maybe_handle_search_state_shortcut(
     from app.agents.tools.search import paginate_stored_results, select_property
 
     snapshot = await get_session_snapshot(session_id)
-    state = snapshot.get("state", {}) if isinstance(snapshot, dict) else{}
+    state = snapshot.get("state", {}) if isinstance(snapshot, dict) else  {}
     soft_state = state.get("soft_state", {}) if isinstance(state, dict) else{}
-
     if not isinstance(soft_state, dict):
         return None
 
-    option_number = _extract_option_selection(message)
-    if option_number is not None and soft_state.get("option_map"):
+    short = match_shortcut(message, soft_state)
+    if not shortcut:
+        return None
+
+    payload: Optional[Dict[str, Any]] = None
+    if shortcut.action == "select_property" and shortcut.selection_number is not None:
         tool_context = SimpleNamespace(state={"soft_state": soft_state})
-        payload = await select_property(option_number=option_number, tool_context=tool_context)
+        payload = await select_property(
+            option_number=shortcut.selection_number,
+            tool_context=tool_context,
+        )
+    elif shortcut.action == "paginate_results":
+        payload = paginate_stored_results(soft_state, direction=shortcut.direction or "next")
+
+    if payload:
         state["soft_state"] = soft_state
         await save_session_snapshot(session_id=session_id, state=state)
         return payload
-
-    direction = _extract_pagination_direction(message)
-    if direction and soft_state.get("all_search_results"):
-        payload = paginate_stored_results(soft_state, direction=direction)
-        if payload:
-            state["soft_state"] = soft_state
-            await save_session_snapshot(session_id=session_id, state=state)
-            return payload
-
     return None
-
+    
 async def run_adk_turn(
     user_id: str,
     session_id: str,

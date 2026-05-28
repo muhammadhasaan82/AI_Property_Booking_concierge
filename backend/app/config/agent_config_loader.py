@@ -114,6 +114,14 @@ class _AgentConfig:
             "PROPERTY_SEARCH_SUMMARY_THRESHOLD", sr.get("summary_mode_threshold", 12)
         )
 
+        pg = raw.get("pagination", {})
+        self.page_size: int = _env_int(
+            "PROPERTY_LIST_PAGE_SIZE", pg.get("default_page_size", 5)
+        )
+        self.page_size_max: int = _env_int(
+            "PROPERTY_LIST_PAGE_SIZE_MAX", pg.get("max_page_size", 25)
+        )
+
         ds = raw["dataset"]
         self.dataset_relative_path: str = ds["relative_path"]
         self.city_column_candidates: list[str] = ds["city_column_candidates"]

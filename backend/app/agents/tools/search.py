@@ -196,7 +196,8 @@ def _get_active_option_window(
 
     pass
 
-PROPERTY_PAGE_SIZE = 5
+PROPERTY_PAGE_SIZE: int = cfg.page_size
+PROPERTY_PAGE_SIZE_MAX: int = cfg.page_size_max
 
 def _build_option_map_from_formatted(
     formatted:List[Dict[str, Any]],

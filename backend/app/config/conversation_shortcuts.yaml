@@ -1,0 +1,45 @@
+version: "1.0"
+
+# Phrase/pattern content lives ONLY here. Python is a generic matcher engine.
+# requires_state gates each shortcut: it fires only when those soft_state keys
+# are present. If nothing matches, the turn falls through to ADK/LLM.
+shortcuts:
+  pagination_next:
+    action: paginate_results
+    direction: next
+    requires_state: [all_search_results]
+    examples:
+      - show me more
+      - show more
+      - more
+      - more options
+      - more results
+      - next
+      - next page
+      - see more
+      - continue
+
+  pagination_previous:
+    action: paginate_results
+    direction: previous
+    requires_state: [all_search_results]
+    examples:
+      - previous
+      - previous page
+      - go back
+      - back page
+      - prev
+
+  resume_booking_selection:
+    action: select_property
+    requires_state: [option_map]
+    entity_schema:
+      selection_number: integer
+    patterns:
+      - "option {number}"
+      - "select {number}"
+      - "choose option {number}"
+      - "choose {number}"
+      - "book option {number}"
+      - "go with {number}"
+      - "back to booking option {number}"

@@ -62,7 +62,10 @@ search:
   result_limit_max: 50             # env: PROPERTY_SEARCH_RESULT_LIMIT_MAX
   summary_mode_threshold: 8        # env: PROPERTY_SEARCH_SUMMARY_THRESHOLD
   full_specific_search_when_city_and_property_type: true
-
+# ── Pagination (display) ────────────────────────────────────────────────────
+pagination:
+  default_page_size: 5     # env: PROPERTY_LIST_PAGE_SIZE
+  max_page_size: 25        # env: PROPERTY_LIST_PAGE_SIZE_MAX
 # ── Dataset ─────────────────────────────────────────────────────────────────
 dataset:
   relative_path: "data/dataset.csv"   # relative to backend/
