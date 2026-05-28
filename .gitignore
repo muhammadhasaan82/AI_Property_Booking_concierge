@@ -136,4 +136,26 @@ __pycache__/
 .env
 backend/models_cache/
 models_cache/
+
 .cache/
+
+.cache/
+# Runtime/cache files
+backend/models_cache/
+models_cache/
+backend/.mem0/
+backend/backend/.mem0/
+.cache/
+__pycache__/
+*.pyc
+.env
+frontend/.env.bak
+
+# Mem0 runtime DB
+.mem0/
+**/.mem0/
+backend/.mem0/
+backend/backend/.mem0/
+backend/tests/backend/.mem0/
+frontend/backend/.mem0/
+
