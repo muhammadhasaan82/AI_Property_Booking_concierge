@@ -105,13 +105,21 @@ class _AgentConfig:
             "PROPERTY_RERANK_TIMEOUT_SECONDS", sr["rerank_timeout_seconds"]
         )
         self.search_result_limit: int = _env_int(
-            "PROPERTY_SEARCH_RESULT_LIMIT", sr.get("result_limit", 5)
+            "PROPERTY_SEARCH_RESULT_LIMIT", sr.get("result_limit", 50)
         )
         self.search_result_limit_max: int = _env_int(
-            "PROPERTY_SEARCH_RESULT_LIMIT_MAX", sr.get("result_limit_max", 10)
+            "PROPERTY_SEARCH_RESULT_LIMIT_MAX", sr.get("result_limit_max", 100)
         )
         self.search_summary_mode_threshold: int = _env_int(
             "PROPERTY_SEARCH_SUMMARY_THRESHOLD", sr.get("summary_mode_threshold", 12)
+        )
+
+        pg = raw.get("pagination", {})
+        self.page_size: int = _env_int(
+            "PROPERTY_LIST_PAGE_SIZE", pg.get("default_page_size", 5)
+        )
+        self.page_size_max: int = _env_int(
+            "PROPERTY_LIST_PAGE_SIZE_MAX", pg.get("max_page_size", 25)
         )
 
         ds = raw["dataset"]

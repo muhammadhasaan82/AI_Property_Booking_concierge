@@ -80,7 +80,11 @@ async def check_faq(
         for key in ("booking_state", "pending_booking", "awaiting_field")
     )
 
-    faq_context_flag = "faq_answered" if in_booking_flow else context_flag
+    has_active_search = isinstance(soft_state, dict) and any(
+        soft_state.get(key)
+        for key in ("all_search_results", "visible_results", "option_map", "last_search")
+    )
+    faq_context_flag = "faq_answered" if (in_booking_flow or has_active_search) else context_flag
 
     if not question or len(question.strip()) < 4:
         return _missing_critical_data(
