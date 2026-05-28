@@ -276,7 +276,7 @@ class RetrievalScoringWeightsConfig(BaseModel):
 class RetrievalRuntimeConfig(BaseModel):
     """Retrieval runtime settings."""
     top_k: int = 10
-    result_limit: int = 5
+    result_limit: int = 50
     scoring_weights: RetrievalScoringWeightsConfig = Field(default_factory=RetrievalScoringWeightsConfig)
 
 
