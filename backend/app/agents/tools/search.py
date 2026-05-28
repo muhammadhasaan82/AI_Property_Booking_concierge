@@ -736,9 +736,6 @@ async def get_property_details(
                 break
 
     if selection_value is not None and not selected_item and last_search:
-
-    if selection_value is not None and last_search:
-
         for item in last_search.get("properties", []):
             if item.get("number") == selection_value:
                 selected_item = item
