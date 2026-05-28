@@ -48,14 +48,13 @@ class RouterDecision(TypedDict, total=False):
     reasoning: str
 
 def _has_active_shortlist(soft_state: Dict[str, Any]) -> bool:
-    last_search = soft_state.get("last_search")
-    if not isinstance(last_search, dict):
-        return False
-    properties = last_search.get("properties") or []
-    return bool(properties)
-
+    return bool(
+        soft_state.get("option_map")
+        or soft_state.get("active_property_options_map")
+        or soft_state.get("visible_results")
+    )
 def _has_pending_booking(soft_state: Dict[str, Any]) -> bool:
-    booking_state = soft_state.get("Booking_state") or {}
+    booking_state = soft_state.get("booking_state") or {}
     pending = soft_state.get("pending_booking") or {}
     return bool(booking_state) or bool(pending)
 
