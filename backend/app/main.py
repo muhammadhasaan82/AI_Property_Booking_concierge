@@ -104,6 +104,20 @@ async def debug_model_config():
     """Inspect resolved model identifiers without exposing credentials."""
     return get_model_config_snapshot()
 
+
+@app.get("/debug/adk-model-config", tags=["debug"])
+async def debug_adk_model_config():
+    """Inspect actual ADK agent model identifiers without exposing credentials."""
+    from app.agents import adk_agents as a
+    return {
+        "snapshot": get_model_config_snapshot(),
+        "adk_dispatcher_model": getattr(a, "DISPATCHER_MODEL", None),
+        "adk_voice_model": getattr(a, "VOICE_MODEL", None),
+        "dispatcher_llm": str(getattr(a, "dispatcher_llm", "")),
+        "voice_llm": str(getattr(a, "voice_llm", "")),
+        "adk_agents_path": getattr(a, "__file__", None),
+    }
+
 @app.post("/echo")
 async def post_echo(payload: dict):
     return {
