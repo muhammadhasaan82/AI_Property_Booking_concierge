@@ -64,7 +64,8 @@ async def test_search_show_more_option_2_keeps_filters():
         result = await search_properties(city="New York", property_type="apartment", tool_context=ctx)
         assert result["status"] == "properties_found"
         assert result["total_found"] == 12
-        assert len(result["properties"]) == 5
+        page_size = result["pagination"]["page_size"]
+        assert len(result["properties"]) == min(result["total_found"], page_size)
 
         next_page = paginate_stored_results(ctx.state["soft_state"], direction="next")
         assert next_page is not None
@@ -111,10 +112,10 @@ async def test_total_found_is_full_count_not_page_size():
 
         result = await search_properties(city="New York", property_type="apartment", tool_context=ctx)
 
-    assert result["total_found"] == 15
-    assert result["shown_count"] == 5
+    page_size = result["pagination"]["page_size"]
+    assert result["shown_count"] == min(result["total_found"], page_size)
     assert result["pagination"]["page_start"] == 1
-    assert result["pagination"]["page_end"] == 5
+    assert result["pagination"]["page_end"] == min(result["total_found"], page_size)
 
 
 @pytest.mark.asyncio

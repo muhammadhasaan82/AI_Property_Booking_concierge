@@ -1,17 +1,21 @@
 import asyncio
+import logging
 import sys
 
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+import app.services.config
 from fastapi import FastAPI, Request, Response
 from app.route import health, properties, booking, faq, chat, mobile, admin
 from app.route import stripe_webhook
 from app.route import test as test_router
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
+from app.config.model_config_loader import get_model_config_snapshot
 
 app = FastAPI(title="AI Concierge & Calling Agent")
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,6 +24,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def log_resolved_model_config():
+    logger.info("[Config] Resolved model config: %s", get_model_config_snapshot())
 
 @app.get("/")
 async def root():
@@ -50,7 +59,8 @@ async def debug_config():
         "intent_catalog": get_intent_catalog().model_dump(),
         "routing_policies": get_routing_policies().model_dump(),
         "guardrails": get_guardrails().model_dump(),
-        "vocabulary": get_vocabulary().model_dump()
+        "vocabulary": get_vocabulary().model_dump(),
+        "resolved_models": get_model_config_snapshot(),
     }
     try:
         from app.config.booking_schema_loader import booking_schema as _bs
@@ -88,6 +98,26 @@ async def debug_config():
         pass
 
     return payload
+
+
+@app.get("/debug/model-config", tags=["debug"])
+async def debug_model_config():
+    """Inspect resolved model identifiers without exposing credentials."""
+    return get_model_config_snapshot()
+
+
+@app.get("/debug/adk-model-config", tags=["debug"])
+async def debug_adk_model_config():
+    """Inspect actual ADK agent model identifiers without exposing credentials."""
+    from app.agents import adk_agents as a
+    return {
+        "snapshot": get_model_config_snapshot(),
+        "adk_dispatcher_model": getattr(a, "DISPATCHER_MODEL", None),
+        "adk_voice_model": getattr(a, "VOICE_MODEL", None),
+        "dispatcher_llm": str(getattr(a, "dispatcher_llm", "")),
+        "voice_llm": str(getattr(a, "voice_llm", "")),
+        "adk_agents_path": getattr(a, "__file__", None),
+    }
 
 @app.post("/echo")
 async def post_echo(payload: dict):

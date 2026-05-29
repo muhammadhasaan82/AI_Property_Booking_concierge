@@ -2,14 +2,14 @@ from __future__ import annotations
 from contextlib import contextmanager
 from huggingface_hub import login
 import os
-from dotenv import load_dotenv
+import app.services.config
 import json
 import threading
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from app.services.dynamic_config import get_retrieval_config
 
-load_dotenv()
+# load_dotenv()
 _RETRIEVAL_CFG = get_retrieval_config()
 CHROMA_DIR = os.getenv("CHROMA_DIR", _RETRIEVAL_CFG.chroma.persist_dir)
 EMBED_MODEL = os.getenv("EMBED_MODEL", _RETRIEVAL_CFG.embeddings.model_name)

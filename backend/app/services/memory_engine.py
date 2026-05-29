@@ -23,6 +23,8 @@ from typing import Any, Callable, Optional
 
 import transformers
 
+from app.config.model_config_loader import load_model_config
+
 transformers.logging.set_verbosity_error()
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ def initialize_memory():
         return None
 
     try:
+        model_config = load_model_config()
         config = {
             "vector_store": {
                 "provider": "chroma",
@@ -54,7 +57,7 @@ def initialize_memory():
             "llm": {
                 "provider": "litellm",
                 "config": {
-                    "model": os.getenv("MEM0_LLM_MODEL", "groq/llama-3.3-70b-versatile"),
+                    "model": model_config.mem0_llm_model,
                 },
             },
             "embedder": {
@@ -112,9 +115,10 @@ def _get_client():
     _client = initialize_memory()
 
     if _client is not None:
+        model_config = load_model_config()
         logger.info(
             "[Memory] Local Mem0 initialized (llm=litellm:%s, embedder=huggingface:%s, vector_store=chroma:%s)",
-            os.getenv("MEM0_LLM_MODEL", "groq/llama-3.3-70b-versatile"),
+            model_config.mem0_llm_model,
             os.getenv("MEM0_EMBEDDER_MODEL", "BAAI/bge-base-en-v1.5"),
             os.getenv("MEM0_COLLECTION_NAME", "ai_concierge_memories"),
         )

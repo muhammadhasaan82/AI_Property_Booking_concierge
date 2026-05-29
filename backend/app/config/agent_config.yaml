@@ -44,8 +44,18 @@ models:
 
   voice:
     env_key: ADK_VOICE_MODEL
-    default: "groq/llama-3.3-70b-versatile"
+    default: "groq/llama-3.1-8b-instant"
     temperature: 0.6
+
+  pre_router_fast:
+    env_key: PRE_ROUTER_FAST_MODEL
+    default: "groq/llama-3.1-8b-instant"
+
+  mem0:
+    provider_env_key: MEM0_LLM_PROVIDER
+    provider_default: groq
+    env_key: MEM0_LLM_MODEL
+    default: "llama-3.1-8b-instant"
 
 # ── Session ─────────────────────────────────────────────────────────────────
 session:

@@ -145,24 +145,17 @@ def _resolve_property_id_from_selection(
         return None
 
     if isinstance(soft_state, dict):
-
         option_map = soft_state.get("option_map")
-
-        option_map = soft_state.get("active_property_options_map")
-
         if isinstance(option_map, dict):
             option = option_map.get(str(selection_value))
             if isinstance(option, dict) and option.get("property_id") is not None:
                 return str(option.get("property_id"))
-
 
         legacy_map = soft_state.get("active_property_options_map")
         if isinstance(legacy_map, dict):
             option = legacy_map.get(str(selection_value))
             if isinstance(option, dict) and option.get("property_id") is not None:
                 return str(option.get("property_id"))
-
-
 
     if isinstance(last_search, dict):
         for item in last_search.get("properties", []):
@@ -194,10 +187,25 @@ def _get_active_option_window(
     return max(shown_count, 0), max(total_found, 0)
 
 
-    pass
+def _resolve_page_size_max() -> int:
+    configured = _coerce_int(getattr(cfg, "page_size_max", None)) or 25
+    return max(configured, 1)
 
-PROPERTY_PAGE_SIZE: int = cfg.page_size
-PROPERTY_PAGE_SIZE_MAX: int = cfg.page_size_max
+
+def _resolve_page_size() -> int:
+    configured = _coerce_int(getattr(cfg, "page_size", None))
+    max_size = _resolve_page_size_max()
+    if configured is None or configured <= 0:
+        configured = 5
+    return max(1, min(configured, max_size))
+
+
+def _resolve_page_size_from(value: Any) -> int:
+    configured = _coerce_int(value)
+    if configured is None or configured <= 0:
+        return _resolve_page_size()
+    return max(1, min(configured, _resolve_page_size_max()))
+
 
 def _build_option_map_from_formatted(
     formatted:List[Dict[str, Any]],
@@ -224,12 +232,12 @@ def _build_search_page_payload(
     results: List[Dict[str, Any]],
     filters: Dict[str, Any],
     page: int,
-    page_size: int = PROPERTY_PAGE_SIZE,
+    page_size: Optional[int] = None,
     search_limit: int = PROPERTY_RESULT_LIMIT_DEFAULT,
     summary_threshold: int = PROPERTY_SUMMARY_THRESHOLD,
 ) -> tuple[Dict[str, Any], list[Dict[str,Any]], Dict[str, Dict[str, Any]]]:
     total_found = len(results)
-    safe_page_size = max(_coerce_int(page_size) or PROPERTY_PAGE_SIZE, 1)
+    safe_page_size = _resolve_page_size_from(page_size)
     safe_page = max(_coerce_int(page) or 1, 1)
     total_pages = max((total_found + safe_page_size - 1) // safe_page_size, 1)
     safe_page = min(safe_page, total_pages)
@@ -302,7 +310,7 @@ def paginate_stored_results(
         return None
  
     current_page = max(_coerce_int(soft_state.get("current_page")) or 1, 1)
-    page_size = max(_coerce_int(soft_state.get("page_size")) or PROPERTY_PAGE_SIZE, 1)
+    page_size = _resolve_page_size_from(soft_state.get("page_size"))
     filters = soft_state.get("last_filters") or {}
  
     if direction == "previous":
@@ -571,13 +579,14 @@ async def search_properties(
         "beds": beds_value,
         "property_type": normalized_property_type,
     }
+    page_size = _resolve_page_size()
     payload, visible_results, option_map = _build_search_page_payload(
         results=results,
         filters=filters,
         page=1,
-        page_size=PROPERTY_PAGE_SIZE,
+        page_size=page_size,
         search_limit=search_limit,
-        summary_threshold=search_limit,
+        summary_threshold=summary_threshold,
     )
 
     if isinstance(soft_state, dict):
@@ -585,7 +594,7 @@ async def search_properties(
         soft_state["last_filters"] = filters
         soft_state["all_search_results"] = list(results)
         soft_state["current_page"] = payload["pagination"]["current_page"]
-        soft_state["page_size"] = PROPERTY_PAGE_SIZE
+        soft_state["page_size"] = page_size
         soft_state["visible_results"] = visible_results
         soft_state["option_map"] = option_map
         soft_state["selected_property_id"] = None

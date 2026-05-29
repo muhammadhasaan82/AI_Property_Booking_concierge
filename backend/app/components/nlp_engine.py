@@ -9,14 +9,14 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 import logging
-from dotenv import load_dotenv
+import app.services.config
 from huggingface_hub import login
 import os
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
-load_dotenv()
+
 
 from app.services.dynamic_config import get_intent_catalog as _get_catalog
 from app.services.dynamic_config import get_retrieval_config as _get_retrieval_config

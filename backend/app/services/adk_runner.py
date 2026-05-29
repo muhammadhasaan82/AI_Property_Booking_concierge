@@ -9,7 +9,6 @@ Phase 3: DPO telemetry capture + tool-loop anomaly detection.
 Phase 4 (V2): Removed V1 LangGraph fallback - pure ADK pipeline.
 """
 from __future__ import annotations
-import re
 from types import SimpleNamespace
 import asyncio
 import hashlib
@@ -697,21 +696,6 @@ async def _render_voice_from_router_output(
         logger.warning("[ADK] Voice handoff fallback failed: %s", exc)
         return ""
 
-def _extract_option_selection(message: str) -> str:
-    text = (message or "").strip().lower()
-    patterns = [
-        r"\boption\s+(\d+)\b",
-        r"\bselect\s+(\d+)\b",
-        r"\bchoose\s+option\s+(\d+)\b",
-        r"\bchoose\s+(\d+)\b",
-        r"\bbook\s+option\s+(\d+)\b",
-        r"\bgo\s+with\s+(\d+)\b",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return int(match.group(1))
-    return None
 async def _maybe_handle_search_state_shortcut(
     *,
     session_id: str,
@@ -720,16 +704,23 @@ async def _maybe_handle_search_state_shortcut(
     from app.agents.tools.search import paginate_stored_results, select_property
 
     snapshot = await get_session_snapshot(session_id)
-    state = snapshot.get("state", {}) if isinstance(snapshot, dict) else  {}
-    soft_state = state.get("soft_state", {}) if isinstance(state, dict) else{}
+    if not isinstance(snapshot, dict):
+        return None
+
+    state = snapshot.get("state") or {}
+    if not isinstance(state, dict):
+        return None
+
+    soft_state = state.get("soft_state") or {}
     if not isinstance(soft_state, dict):
         return None
 
-    short = match_shortcut(message, soft_state)
-    if not shortcut:
+    shortcut = match_shortcut(message, soft_state)
+    if shortcut is None:
         return None
 
     payload: Optional[Dict[str, Any]] = None
+
     if shortcut.action == "select_property" and shortcut.selection_number is not None:
         tool_context = SimpleNamespace(state={"soft_state": soft_state})
         payload = await select_property(
@@ -737,14 +728,29 @@ async def _maybe_handle_search_state_shortcut(
             tool_context=tool_context,
         )
     elif shortcut.action == "paginate_results":
-        payload = paginate_stored_results(soft_state, direction=shortcut.direction or "next")
+        payload = paginate_stored_results(
+            soft_state,
+            direction=shortcut.direction or "next",
+        )
 
-    if payload:
-        state["soft_state"] = soft_state
-        await save_session_snapshot(session_id=session_id, state=state)
-        return payload
-    return None
-    
+    if not payload:
+        return None
+
+    state["soft_state"] = soft_state
+    meta = snapshot.get("meta") or {}
+    await save_session_snapshot(
+        session_id=session_id,
+        history=snapshot.get("history", []),
+        state=state,
+        metadata={
+            key: meta[key]
+            for key in ("app_name", "user_id", "last_update_time")
+            if key in meta
+        },
+    )
+    return payload
+
+
 async def run_adk_turn(
     user_id: str,
     session_id: str,
