@@ -5,6 +5,7 @@ import sys
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+import app.services.config
 from fastapi import FastAPI, Request, Response
 from app.route import health, properties, booking, faq, chat, mobile, admin
 from app.route import stripe_webhook

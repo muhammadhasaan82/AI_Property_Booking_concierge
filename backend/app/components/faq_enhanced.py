@@ -32,17 +32,11 @@ except Exception:
     except Exception:  
         HuggingFaceBgeEmbeddings = None
 
-from dotenv import load_dotenv
+import app.services.config
 from ..services.dynamic_config import get_retrieval_config, get_vocabulary
 
 
-env_path_root = Path(__file__).resolve().parents[2] / ".env"
-env_path_services = Path(__file__).parent / ".env"
 
-if env_path_root.exists():
-    load_dotenv(env_path_root)
-elif env_path_services.exists():
-    load_dotenv(env_path_services)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-5-nano")

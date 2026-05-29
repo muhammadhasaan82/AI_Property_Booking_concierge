@@ -21,20 +21,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
-from dotenv import load_dotenv
+import app.services.config
 import logging
 
 logger = logging.getLogger(__name__)
-load_dotenv()
-env_path = Path(__file__).resolve().parents[3] / ".env"
-if env_path.exists():
-    load_dotenv(env_path)
-else:
-    env_path_svc = Path(__file__).parent / ".env"
-    if env_path_svc.exists():
-        load_dotenv(env_path_svc)
-        # login(token=os.getenv("HF_TOKEN"))
-        # print(whoami())
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 EMBED_MODEL = ""
