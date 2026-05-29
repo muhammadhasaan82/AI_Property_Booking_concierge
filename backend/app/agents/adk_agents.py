@@ -27,6 +27,7 @@ from google.adk.agents.sequential_agent import SequentialAgent
 from google.adk.models.lite_llm import LiteLlm
 from google.genai import types as genai_types
 from app.config.agent_config_loader import cfg
+from app.config.model_config_loader import load_model_config
 from app.agents.prompts.loader import load_prompt
 from app.config.tool_registry_loader import registry as _tool_registry
 from app.agents.schemas.understanding_frame import UnderstandingFrame
@@ -38,8 +39,15 @@ os.environ["LITELLM_LOG"] = "ERROR"
 
 logger = logging.getLogger(__name__)
 
-DISPATCHER_MODEL: str = cfg.dispatcher_model
-VOICE_MODEL: str = cfg.voice_model
+resolved_models = load_model_config()
+DISPATCHER_MODEL: str = resolved_models.dispatcher_model
+VOICE_MODEL: str = resolved_models.voice_model
+
+logger.info(
+    "[ADK] Creating LiteLlm models: dispatcher=%s voice=%s",
+    DISPATCHER_MODEL,
+    VOICE_MODEL,
+)
 
 dispatcher_llm = LiteLlm(
     model=DISPATCHER_MODEL,
