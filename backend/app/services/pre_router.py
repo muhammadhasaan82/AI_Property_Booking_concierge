@@ -64,7 +64,9 @@ def _detect_intent(message: str) -> Optional[str]:
             if getattr(intent_cfg, "defer_to_adk", False):
                 return None
             return intent_name
-            
+
+    return None
+
 async def _generate_reply(intent_name: str, user_message: str) -> str:
     """Probabilistic reply generation via fast LLM, driven by YAML role."""
     config = getattr(cfg, "pre_router", None)

@@ -145,24 +145,17 @@ def _resolve_property_id_from_selection(
         return None
 
     if isinstance(soft_state, dict):
-
         option_map = soft_state.get("option_map")
-
-        option_map = soft_state.get("active_property_options_map")
-
         if isinstance(option_map, dict):
             option = option_map.get(str(selection_value))
             if isinstance(option, dict) and option.get("property_id") is not None:
                 return str(option.get("property_id"))
-
 
         legacy_map = soft_state.get("active_property_options_map")
         if isinstance(legacy_map, dict):
             option = legacy_map.get(str(selection_value))
             if isinstance(option, dict) and option.get("property_id") is not None:
                 return str(option.get("property_id"))
-
-
 
     if isinstance(last_search, dict):
         for item in last_search.get("properties", []):
