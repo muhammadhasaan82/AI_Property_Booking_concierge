@@ -637,7 +637,19 @@ async def _render_voice_from_router_output(
     user_cognitive_context: str,
     understanding_frame_json: str = "",
 ) -> str:
-    """Force Node-2 voice synthesis when only router JSON is available."""
+    """
+    Constructs a voice-style concierge response from router output and contextual information.
+    
+    If `router_output` contains routable JSON or text, this function synthesizes a final conversational reply that incorporates the provided user cognitive context and optional understanding frame. Returns an empty string when `router_output` is blank, when synthesis produces no usable text, or when an internal failure occurs.
+    
+    Parameters:
+        router_output (str | dict): Router output as a JSON string or dict containing routing results.
+        user_cognitive_context (str): Normalized, truncated user cognitive context to include in the prompt.
+        understanding_frame_json (str): Optional compact JSON representation of an UnderstandingFrame to inform generation.
+    
+    Returns:
+        str: The synthesized concierge reply, or an empty string if no reply could be generated.
+    """
     if not router_output or not router_output.strip():
         return ""
 
@@ -701,6 +713,20 @@ async def _maybe_handle_search_state_shortcut(
     session_id: str,
     message: str,
 ) -> Optional[Dict[str, Any]]:
+    """
+    Check the message for a stored search shortcut and, if matched, execute the corresponding search tool and persist any updated soft_state.
+    
+    The function:
+    - Loads the Redis session snapshot for the given session_id and validates that snapshot, snapshot["state"], and snapshot["state"]["soft_state"] are dictionaries.
+    - Calls match_shortcut(message, soft_state); if no shortcut matches, returns None.
+    - If the shortcut action is "select_property" and a selection_number is provided, calls select_property(...) with a tool context containing the current soft_state.
+    - If the shortcut action is "paginate_results", calls paginate_stored_results(...) with the requested direction ("next" by default).
+    - If a tool payload is produced, updates snapshot.state.soft_state, saves the session snapshot (preserving history and the meta keys app_name, user_id, last_update_time when present), and returns the payload.
+    - Returns None when validation fails, no shortcut matches, or the tool produced no payload.
+    
+    Returns:
+        Optional[Dict[str, Any]]: The tool payload produced by the shortcut when handled, or `None` if no shortcut was applied or no payload was produced.
+    """
     from app.agents.tools.search import paginate_stored_results, select_property
 
     snapshot = await get_session_snapshot(session_id)
@@ -756,19 +782,18 @@ async def run_adk_turn(
     session_id: str,
     message: str,
 ) -> AsyncGenerator[str, None]:
-    """Process a single conversation turn, yielding text chunks as an async generator.
-
-    Two-Speed Rule:
-      - triage_router events (tool calls, routing) are silently consumed.
-      - concierge_voice text deltas are yielded immediately to the caller.
-
-    Args:
-        user_id: Unique user identifier (from Chainlit session).
-        session_id: Conversation thread ID.
-        message: The user's message text.
-
+    """
+    Run a single ADK conversation turn and stream the assistant's reply as text chunks.
+    
+    Performs input sanitization, optional pre-routing or search-shortcut handling, invokes the ADK runner for one turn (including tool calls and routing), applies deterministic property rendering or policy overrides when applicable, persists soft-state, and records telemetry. Yields partial or final text segments produced for the user.
+    
+    Parameters:
+        user_id (str): Unique identifier for the user.
+        session_id (str): Conversation/session identifier.
+        message (str): The raw user message.
+    
     Yields:
-        Text chunks from the concierge_voice agent as they arrive.
+        str: Partial or final text segments from the assistant (concierge_voice) or a deterministic render; each yielded value is a chunk of the reply.
     """
     cleaned_message, is_safe = sanitize_input(message)
     if not is_safe:

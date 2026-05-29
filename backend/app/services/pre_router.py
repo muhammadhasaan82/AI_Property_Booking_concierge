@@ -20,7 +20,14 @@ def _normalize(text: str) -> str:
 
 
 def _detect_intent(message: str) -> Optional[str]:
-    """Deterministic classification — returns intent name or None."""
+    """
+    Deterministically classify a user message into a configured pre-router intent.
+    
+    If the pre-router is disabled or no intents are configured, no intent is selected. If the normalized message is empty and an `empty_or_unclear` intent exists, that intent name is returned. Matching uses intent-configured exact, starts-with, or contains-any phrases; if a matched intent has `defer_to_adk` set to True, no intent is selected.
+    
+    Returns:
+        intent_name (str): The matching intent's name, or `None` when no intent is selected.
+    """
     config = getattr(cfg, "pre_router", None)
     if not config or not getattr(config, "enabled", False):
         return None
@@ -68,7 +75,14 @@ def _detect_intent(message: str) -> Optional[str]:
     return None
 
 async def _generate_reply(intent_name: str, user_message: str) -> str:
-    """Probabilistic reply generation via fast LLM, driven by YAML role."""
+    """
+    Generate a reply for the given intent using a fast LLM and the intent's configured role.
+    
+    Reads generator settings (temperature, max tokens, timeout) and the pre-router fast model from configuration, invokes the model with the intent's role as the system prompt and the user's message as the user prompt, and returns the model's trimmed output. If the model call fails or produces no content, returns the pre_router emergency fallback or an empty string.
+    
+    Returns:
+        reply (str): The trimmed model-generated reply, or the configured emergency fallback/empty string on failure.
+    """
     config = getattr(cfg, "pre_router", None)
     intents = getattr(config, "intents", None)
     intent_cfg = getattr(intents, intent_name, None)
@@ -108,7 +122,18 @@ async def route_pre_adk(
     user_id: str,
     session_id: str,
 ) -> Optional[dict[str, Any]]:
-    """Two-stage: deterministic detect → probabilistic generate. Returns None to defer to ADK."""
+    """
+    Attempt to pre-route a user message by detecting a deterministic intent and, if found, generating an intent-specific reply.
+    
+    Parameters:
+    	message (str): The user's message to classify and respond to.
+    	user_id (str): Identifier for the user (accepted for interface compatibility; not used).
+    	session_id (str): Identifier for the session (accepted for interface compatibility; not used).
+    
+    Returns:
+    	dict[str, Any]: A dictionary with keys `intent` (the matched intent name), `reply` (the generated reply text), and `source` set to `"pre_router"` when a reply was produced.
+    	None: If no intent was detected or no reply could be generated, indicating downstream handling should proceed.
+    """
     intent = _detect_intent(message)
     if intent is None:
         return None

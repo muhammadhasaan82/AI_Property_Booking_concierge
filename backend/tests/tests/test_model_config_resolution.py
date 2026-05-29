@@ -11,6 +11,12 @@ from app.main import app
 
 
 def _clear_model_env(monkeypatch):
+    """
+    Clears model-related environment variables from the process environment using the provided pytest monkeypatch.
+    
+    Parameters:
+        monkeypatch: pytest.MonkeyPatch fixture used to remove environment variables without raising if they are absent.
+    """
     for key in (
         "ADK_DISPATCHER_MODEL",
         "ADK_VOICE_MODEL",
@@ -53,6 +59,11 @@ def test_mem0_prefixed_model_is_preserved(monkeypatch):
 
 
 def test_backend_app_python_and_yaml_do_not_contain_70b_fallback():
+    """
+    Scan all .py, .yaml, and .yml files under the application directory and assert that the banned model identifier "groq/llama-3.3-70b-versatile" does not appear in any file.
+    
+    This test raises an assertion if the banned substring is found in any scanned file.
+    """
     banned = "groq/llama-3.3-70b-versatile"
     scanned_roots = (Path("app"),)
 
@@ -64,6 +75,15 @@ def test_backend_app_python_and_yaml_do_not_contain_70b_fallback():
 
 
 def _llm_public_text(llm: object) -> str:
+    """
+    Builds a single space-separated string describing a language-model-like object for public display.
+    
+    Parameters:
+        llm (object): An object representing an LLM or agent; inspected for textual representation and common model-identifying attributes.
+    
+    Returns:
+        str: A string containing repr(llm), str(llm), and any of the attribute values from `model`, `model_name`, `_model`, or `name` (if present), joined by spaces.
+    """
     parts = [repr(llm), str(llm)]
     for attr in ("model", "model_name", "_model", "name"):
         value = getattr(llm, attr, None)

@@ -28,10 +28,25 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def log_resolved_model_config():
+    """
+    Log the resolved model configuration snapshot to the module logger.
+    
+    This is intended to be run on application startup and records the output of
+    get_model_config_snapshot() at INFO level for debugging and observability.
+    """
     logger.info("[Config] Resolved model config: %s", get_model_config_snapshot())
 
 @app.get("/")
 async def root():
+    """
+    Return basic API metadata and a mapping of public endpoint names to their paths.
+    
+    Returns:
+        info (dict): Dictionary with keys:
+            - "message": API identification string.
+            - "status": Current service status.
+            - "endpoints": Mapping of endpoint names to their URL paths.
+    """
     return {
         "message": "AI Concierge & Calling Agent API",
         "status": "running",
@@ -53,7 +68,30 @@ from app.services.dynamic_config import (
 
 @app.get("/debug/config", tags=["debug"])
 async def debug_config():
-    """Inspect the internal state of all dynamically loaded rules and lexicons."""
+    """
+    Return a diagnostic snapshot of dynamically loaded configuration, policies, lexicons, and resolved model mappings.
+    
+    The returned payload aggregates legacy flags, intent/routing/guardrail/vocabulary dumps, resolved model configuration, and optional metadata (booking schema, tool registry, agent/response policies, and admin config version/reload timestamp) when those components are available.
+    
+    Returns:
+        payload (dict): A mapping containing:
+            - legacy_mode: boolean flag for legacy rules.
+            - intent_catalog: serialized intent catalog.
+            - routing_policies: serialized routing policies.
+            - guardrails: serialized guardrails.
+            - vocabulary: serialized vocabulary.
+            - resolved_models: resolved model configuration snapshot.
+            - booking_schema_version (optional): version string of the booking schema.
+            - booking_schema_tools (optional): list of booking schema tool names.
+            - tool_registry_version (optional): version string of the tool registry.
+            - tool_registry_tools (optional): list of tool registry tool names.
+            - agent_policy_version (optional): version string of the agent policy.
+            - agent_policy_tools (optional): list of agent policy tool names.
+            - response_policies_version (optional): version string of the response policies.
+            - response_policies_tools (optional): list of response policy tool names.
+            - config_version (optional): admin config version metadata.
+            - last_reload_at (optional): admin config last reload timestamp.
+    """
     payload = {
         "legacy_mode": LEGACY_RULES,
         "intent_catalog": get_intent_catalog().model_dump(),
@@ -102,13 +140,31 @@ async def debug_config():
 
 @app.get("/debug/model-config", tags=["debug"])
 async def debug_model_config():
-    """Inspect resolved model identifiers without exposing credentials."""
+    """
+    Return a snapshot of resolved model configuration identifiers and metadata without exposing credentials.
+    
+    The snapshot contains resolved model names/identifiers and related configuration metadata useful for debugging model routing and selection. Secret values or credentials are not included.
+    
+    Returns:
+        dict: Mapping of resolved model configuration details (identifiers and metadata).
+    """
     return get_model_config_snapshot()
 
 
 @app.get("/debug/adk-model-config", tags=["debug"])
 async def debug_adk_model_config():
-    """Inspect actual ADK agent model identifiers without exposing credentials."""
+    """
+    Return selected ADK agent model identifiers and related metadata without exposing credentials.
+    
+    Returns:
+        payload (dict): Mapping with keys:
+            - snapshot: Resolved model configuration snapshot from get_model_config_snapshot().
+            - adk_dispatcher_model: Dispatcher model identifier from the ADK agents module, or `None` if unavailable.
+            - adk_voice_model: Voice model identifier from the ADK agents module, or `None` if unavailable.
+            - dispatcher_llm: String representation of the dispatcher LLM object, or an empty string if unavailable.
+            - voice_llm: String representation of the voice LLM object, or an empty string if unavailable.
+            - adk_agents_path: Filesystem path to the ADK agents module (`__file__`), or `None` if unavailable.
+    """
     from app.agents import adk_agents as a
     return {
         "snapshot": get_model_config_snapshot(),
@@ -121,6 +177,18 @@ async def debug_adk_model_config():
 
 @app.post("/echo")
 async def post_echo(payload: dict):
+    """
+    Echoes the given payload along with a method label and UTC timestamp.
+    
+    Parameters:
+        payload (dict): The data to include in the echoed response.
+    
+    Returns:
+        dict: A mapping with keys:
+            - `method`: the HTTP method label ("POST").
+            - `received_at`: ISO 8601 UTC timestamp when the payload was received.
+            - `data`: the original `payload` value.
+    """
     return {
         "method": "POST",
         "received_at": datetime.now(timezone.utc).isoformat(),
