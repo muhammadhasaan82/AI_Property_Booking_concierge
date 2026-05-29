@@ -593,7 +593,7 @@ async def search_properties(
         page=1,
         page_size=page_size,
         search_limit=search_limit,
-        summary_threshold=search_limit,
+        summary_threshold=summary_threshold,
     )
 
     if isinstance(soft_state, dict):

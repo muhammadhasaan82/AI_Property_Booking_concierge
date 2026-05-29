@@ -1,11 +1,11 @@
 from __future__ import annotations
 import asyncio
 import logging
-import os
 import re
 from typing import Any, Optional
 import litellm
 from app.config.agent_config_loader import cfg
+from app.config.model_config_loader import load_model_config
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +73,7 @@ async def _generate_reply(intent_name: str, user_message: str) -> str:
     role = getattr(intent_cfg, "role", "") if intent_cfg else ""
 
     gen = getattr(config, "generator", None)
-    model = os.getenv(getattr(gen, "model_env_key", "PRE_ROUTER_FAST_MODEL"),
-                      getattr(gen, "model_default", "groq/llama-3.1-8b-instant"))
+    model = load_model_config().pre_router_fast_model
     temperature = float(getattr(gen, "temperature", 0.7))
     max_tokens = int(getattr(gen, "max_tokens", 80))
     timeout = float(getattr(gen, "timeout_seconds", 4))

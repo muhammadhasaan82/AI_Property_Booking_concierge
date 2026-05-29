@@ -1,3 +1,10 @@
+"""
+YAML-driven deterministic shortcut matcher.
+
+Phrase lists and pattern templates live in conversation_shortcuts.yaml. This
+module only normalizes text, compiles generic templates, checks required state,
+and returns a typed match for the tool executor.
+"""
 from __future__ import annotations
 
 import logging
@@ -90,7 +97,11 @@ class _ShortcutRouter:
             return False
         return True
 
-    def match(self, message: str, soft_state: Optional[Dict[str, Any]]) -> Optional[ShortcutMatch]:
+    def match(
+        self,
+        message: str,
+        soft_state: Optional[Dict[str, Any]],
+    ) -> Optional[ShortcutMatch]:
         norm = _normalize(message)
         if not norm:
             return None
@@ -139,7 +150,10 @@ def _load() -> _ShortcutRouter:
 shortcut_router = _load()
 
 
-def match_shortcut(message: str, soft_state: Optional[Dict[str, Any]]) -> Optional[ShortcutMatch]:
+def match_shortcut(
+    message: str,
+    soft_state: Optional[Dict[str, Any]],
+) -> Optional[ShortcutMatch]:
     return shortcut_router.match(message, soft_state)
 
 

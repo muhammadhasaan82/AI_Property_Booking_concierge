@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import sys
 
 if sys.platform == 'win32':
@@ -10,8 +11,10 @@ from app.route import stripe_webhook
 from app.route import test as test_router
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
+from app.config.model_config_loader import get_model_config_snapshot
 
 app = FastAPI(title="AI Concierge & Calling Agent")
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,6 +23,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def log_resolved_model_config():
+    logger.info("[Config] Resolved model config: %s", get_model_config_snapshot())
 
 @app.get("/")
 async def root():
@@ -50,7 +58,8 @@ async def debug_config():
         "intent_catalog": get_intent_catalog().model_dump(),
         "routing_policies": get_routing_policies().model_dump(),
         "guardrails": get_guardrails().model_dump(),
-        "vocabulary": get_vocabulary().model_dump()
+        "vocabulary": get_vocabulary().model_dump(),
+        "resolved_models": get_model_config_snapshot(),
     }
     try:
         from app.config.booking_schema_loader import booking_schema as _bs
@@ -88,6 +97,12 @@ async def debug_config():
         pass
 
     return payload
+
+
+@app.get("/debug/model-config", tags=["debug"])
+async def debug_model_config():
+    """Inspect resolved model identifiers without exposing credentials."""
+    return get_model_config_snapshot()
 
 @app.post("/echo")
 async def post_echo(payload: dict):

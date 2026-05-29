@@ -23,6 +23,8 @@ from typing import Any, FrozenSet
 
 import yaml
 
+from app.config.model_config_loader import load_model_config
+
 _CONFIG_PATH = Path(__file__).resolve().parent / "agent_config.yaml"
 
 class _Namespace:
@@ -77,14 +79,14 @@ class _AgentConfig:
         self._raw = raw
 
         m = raw["models"]
-        self.dispatcher_model: str = _env_str(
-            m["dispatcher"]["env_key"], m["dispatcher"]["default"]
-        )
+        resolved_models = load_model_config(raw)
+        self.dispatcher_model: str = resolved_models.dispatcher_model
         self.dispatcher_temperature: float = m["dispatcher"]["temperature"]
-        self.voice_model: str = _env_str(
-            m["voice"]["env_key"], m["voice"]["default"]
-        )
+        self.voice_model: str = resolved_models.voice_model
         self.voice_temperature: float = m["voice"]["temperature"]
+        self.pre_router_fast_model: str = resolved_models.pre_router_fast_model
+        self.mem0_llm_model: str = resolved_models.mem0_llm_model
+        self.mem0_llm_provider: str = resolved_models.mem0_llm_provider
 
         s = raw["session"]
         self.session_ttl: int = _env_int(
