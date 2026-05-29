@@ -32,7 +32,7 @@ shortcuts:
 
   resume_booking_selection:
     action: select_property
-    requires_state: [option_map]
+    requires_any_state: [option_map, active_property_options_map]
     entity_schema:
       selection_number: integer
     patterns:
