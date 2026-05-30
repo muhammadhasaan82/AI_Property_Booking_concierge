@@ -37,7 +37,14 @@ _init_attempted = False
 
 
 def initialize_memory():
-    """Initialize the local Mem0 Memory client with a schema-safe config."""
+    """
+    Create and return a configured local Mem0 Memory client, or disable memory if initialization fails.
+    
+    Attempts to import Mem0, load runtime model configuration, and construct a schema-safe config for a local (Chroma + litellm + Hugging Face embedder) Memory instance. If the Mem0 package is unavailable or any initialization step raises an exception, the function logs a warning and returns `None`.
+    
+    Returns:
+        Memory or None: A configured Mem0 `Memory` instance when initialization succeeds, or `None` if initialization is skipped or the Mem0 package cannot be imported.
+    """
     try:
         Memory = importlib.import_module("mem0").Memory
     except Exception as exc:
@@ -105,7 +112,14 @@ def _call_with_fallbacks(attempts: list[Callable[[], Any]]) -> Any:
 
 
 def _get_client():
-    """Lazily initialize the local open-source Mem0 Memory engine."""
+    """
+    Return the module-level Mem0 client, initializing it on first call.
+    
+    Initializes and caches a local open-source Mem0 Memory client the first time the function is called; subsequent calls return the cached client. Logs the configured LLM, embedder, and vector store on successful initialization and logs a warning if memory is disabled.
+    
+    Returns:
+        The initialized Mem0 Memory client instance, or `None` if initialization failed or memory is disabled.
+    """
     global _client, _init_attempted
 
     if _init_attempted:
