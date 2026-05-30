@@ -718,11 +718,13 @@ async def _maybe_handle_search_state_shortcut(
     Check the message for a stored search shortcut and, if matched, execute the corresponding search tool and persist any updated soft_state.
     
     The function:
-    - Loads the Redis session snapshot for the given session_id and validates that snapshot, snapshot["state"], and snapshot["state"]["soft_state"] are dictionaries.
+    - Loads the Redis session snapshot for the given session_id.
+    - Robustly extracts soft_state (supports both nested 'soft_state' and flat/compatibility shapes).
     - Calls match_shortcut(message, soft_state); if no shortcut matches, returns None.
     - If the shortcut action is "select_property" and a selection_number is provided, calls select_property(...) with a tool context containing the current soft_state.
     - If the shortcut action is "paginate_results", calls paginate_stored_results(...) with the requested direction ("next" by default).
-    - If a tool payload is produced, updates snapshot.state.soft_state, saves the session snapshot (preserving history and the meta keys app_name, user_id, last_update_time when present), and returns the payload.
+    - If the shortcut action is "return_to_previous_results", calls return_to_previous_results(soft_state).
+    - If a tool payload is produced, updates snapshot.state.soft_state, saves the session snapshot, and returns the payload.
     - Returns None when validation fails, no shortcut matches, or the tool produced no payload.
     
     Returns:
@@ -742,9 +744,15 @@ async def _maybe_handle_search_state_shortcut(
     if not isinstance(state, dict):
         return None
 
-    soft_state = state.get("soft_state") or {}
-    if not isinstance(soft_state, dict):
-        return None
+    # Robust extraction of soft_state:
+    # 1. If state contains "soft_state" key and its value is a dict, use it.
+    # 2. Otherwise, treat state itself as soft_state to preserve flat/compatibility state shapes.
+    soft_state: Dict[str, Any]
+    if "soft_state" in state and isinstance(state["soft_state"], dict):
+        soft_state = state["soft_state"]
+    else:
+        # Copy to avoid making state self-referential / circular when setting state["soft_state"] later.
+        soft_state = dict(state)
 
     shortcut = match_shortcut(message, soft_state)
     if shortcut is None:
