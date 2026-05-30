@@ -16,6 +16,7 @@ from app.route import test as test_router
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.model_config_loader import get_model_config_snapshot
+from app.services.redis_store import get_session_snapshot
 
 app = FastAPI(title="AI Concierge & Calling Agent")
 logger = logging.getLogger(__name__)
@@ -149,6 +150,48 @@ async def debug_config():
     return payload
 
 
+@app.get("/debug/session/{session_id}", tags=["debug"])
+async def debug_session(session_id: str) -> dict:
+    snapshot = await get_session_snapshot(session_id)
+    state = snapshot.get("state", {}) if isinstance(snapshot, dict) else {}
+    if not isinstance(state, dict):
+        state = {}
+
+    soft_state = state.get("soft_state")
+    if not isinstance(soft_state, dict):
+        soft_state = state
+
+    allowed_keys = {
+        "active_flow",
+        "active_property_options_generated_at",
+        "active_property_options_map",
+        "active_property_options_shown_count",
+        "active_property_options_total_found",
+        "all_search_results",
+        "current_page",
+        "last_filters",
+        "last_presented_view",
+        "last_rejected_property_id",
+        "last_search",
+        "last_selected_property_at",
+        "last_selected_property_id",
+        "option_map",
+        "page_size",
+        "visible_results",
+    }
+    safe_soft_state = {
+        key: soft_state[key]
+        for key in sorted(allowed_keys)
+        if key in soft_state
+    }
+
+    return {
+        "session_id": session_id,
+        "state_keys": sorted(state.keys()),
+        "soft_state": safe_soft_state,
+    }
+
+
 @app.get("/debug/model-config", tags=["debug"])
 async def debug_model_config():
     """
@@ -249,4 +292,3 @@ app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
 app.include_router(stripe_webhook.router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(admin.router, tags=["admin"])
-

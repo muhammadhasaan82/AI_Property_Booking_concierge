@@ -75,6 +75,22 @@ def _filter_persistent_state(state: Any) -> Dict[str, Any]:
         if not str(key).startswith("temp:")
     }
 
+def _merge_soft_state(existing: Any, updates: Any) -> Dict[str, Any]:
+    base = dict(existing) if isinstance(existing, dict) else {}
+    if isinstance(updates, dict):
+        base.update(updates)
+    return base
+
+def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
+    if not isinstance(target, dict) or not isinstance(updates, dict):
+        return
+    soft_updates = updates.get("soft_state")
+    if isinstance(soft_updates, dict):
+        merged_soft = _merge_soft_state(target.get("soft_state"), soft_updates)
+        updates = dict(updates)
+        updates["soft_state"] = merged_soft
+    target.update(updates)
+
 
 def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -469,12 +485,14 @@ class RedisSessionService(BaseSessionService):
             storage_session.events = _trim_events_for_context(storage_session.events)
             storage_session.last_update_time = session.last_update_time
 
+            if not isinstance(storage_session.state, dict):
+                storage_session.state = {}
             if isinstance(session.state, dict):
-                storage_session.state.update(_filter_persistent_state(session.state))
+                _merge_state(storage_session.state, _filter_persistent_state(session.state))
 
             state_delta = getattr(getattr(event, "actions", None), "state_delta", None)
             if isinstance(state_delta, dict):
-                storage_session.state.update(_filter_persistent_state(state_delta))
+                _merge_state(storage_session.state, _filter_persistent_state(state_delta))
 
             await save_session_snapshot(
                 session_id=storage_session.id,
@@ -1040,9 +1058,23 @@ async def run_adk_turn(
             fresh_soft_state = updated_session.state.get("soft_state")
             if isinstance(fresh_soft_state, dict) and fresh_soft_state:
                 current_snapshot = await get_session_snapshot(session_id)
-                merged_state = current_snapshot.get("state", {})
-                merged_state["soft_state"] = fresh_soft_state
-                await save_session_snapshot(session_id=session_id, state=merged_state)
+                current_state = current_snapshot.get("state", {})
+                merged_state = dict(current_state) if isinstance(current_state, dict) else {}
+                merged_state["soft_state"] = _merge_soft_state(
+                    merged_state.get("soft_state"),
+                    fresh_soft_state,
+                )
+                meta = current_snapshot.get("meta") or {}
+                await save_session_snapshot(
+                    session_id=session_id,
+                    history=current_snapshot.get("history", []),
+                    state=merged_state,
+                    metadata={
+                        key: meta[key]
+                        for key in ("app_name", "user_id", "last_update_time")
+                        if key in meta
+                    },
+                )
                 logger.debug("[ADK] soft state presisted explicity for session %s", session_id)
     except Exception as exc:
         logger.warning("[ADK] Could not persist soft_state to Redis: %s", exc)
@@ -1217,4 +1249,3 @@ def _extract_tool_response(event: Any) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
     return None
-

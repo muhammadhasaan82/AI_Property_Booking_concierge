@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -30,6 +31,39 @@ def _make_props(count: int) -> list[dict]:
         }
         for idx in range(1, count + 1)
     ]
+
+
+class _FakeRunner:
+    def __init__(self, events):
+        self._events = events
+
+    async def run_async(self, **_kwargs):
+        for event in self._events:
+            yield event
+
+
+class _FakeSessionService:
+    def __init__(self, state):
+        self._state = state
+
+    async def get_session(self, **_kwargs):
+        return SimpleNamespace(state=self._state)
+
+
+def _make_event(*, author: str, tool_response: dict | None = None, text: str | None = None, final: bool = False):
+    event = MagicMock()
+    event.author = author
+    event.content = MagicMock()
+    parts = []
+    if tool_response is not None:
+        parts.append(
+            MagicMock(function_response=MagicMock(response=tool_response), function_call=None, text=None)
+        )
+    if text is not None:
+        parts.append(MagicMock(text=text, function_call=None, function_response=None))
+    event.content.parts = parts
+    event.is_final_response.return_value = final
+    return event
 
 
 @pytest.mark.asyncio
@@ -161,3 +195,172 @@ async def test_no_after_property_details_flat_state_compatibility(monkeypatch):
     assert soft_state["last_rejected_property_id"] == search_result["properties"][2]["id"]
     assert len(soft_state["visible_results"]) == 8
     assert saved_states
+
+
+@pytest.mark.asyncio
+async def test_run_adk_turn_select_property_persists_soft_state(monkeypatch):
+    ctx = _Ctx()
+    fake = _make_props(8)
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        search_result = await search_properties(
+            city="New York",
+            property_type="apartment",
+            tool_context=ctx,
+        )
+
+    snapshot = {
+        "state": {"soft_state": dict(ctx.state["soft_state"])},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": "u-adk-persist",
+            "last_update_time": 1.0,
+        },
+    }
+
+    async def fake_get_session_snapshot(_session_id):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+        snapshot["history"] = history
+        snapshot["meta"].update(metadata or {})
+
+    selection_state = {
+        "soft_state": {
+            "last_presented_view": "property_details",
+            "last_selected_property_id": search_result["properties"][2]["id"],
+        }
+    }
+
+    events = [
+        _make_event(author="triage_router", tool_response={"status": "property_details"}, final=False),
+        _make_event(author="concierge_voice", text="details", final=True),
+    ]
+
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(adk_runner, "_get_session_service", lambda: _FakeSessionService(selection_state))
+    monkeypatch.setattr(adk_runner, "_get_runner", lambda: _FakeRunner(events))
+    monkeypatch.setattr(adk_runner, "sanitize_input", lambda msg: (msg, True))
+    monkeypatch.setattr(adk_runner, "sanitize_output", lambda msg: msg)
+    monkeypatch.setattr(
+        adk_runner,
+        "_build_invocation_state_delta",
+        AsyncMock(return_value={"user_cognitive_context": "", "soft_state": {}}),
+    )
+    monkeypatch.setattr(adk_runner, "_maybe_handle_search_state_shortcut", AsyncMock(return_value=None))
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn("u-adk-persist", "s-adk-persist", "please show me option 3"):
+        chunks.append(chunk)
+
+    soft_state = snapshot["state"]["soft_state"]
+    assert soft_state["last_presented_view"] == "property_details"
+    assert soft_state["last_selected_property_id"] == search_result["properties"][2]["id"]
+    assert soft_state["visible_results"]
+    assert soft_state["option_map"]
+    assert soft_state["all_search_results"]
+
+
+@pytest.mark.asyncio
+async def test_run_adk_turn_rejection_after_selection_returns_menu(monkeypatch):
+    ctx = _Ctx()
+    fake = _make_props(8)
+    real_shortcut = adk_runner._maybe_handle_search_state_shortcut
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        search_result = await search_properties(
+            city="New York",
+            property_type="apartment",
+            tool_context=ctx,
+        )
+
+    snapshot = {
+        "state": {},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": "u-adk-flow",
+            "last_update_time": 1.0,
+        },
+    }
+
+    async def fake_get_session_snapshot(_session_id):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+        snapshot["history"] = history
+        snapshot["meta"].update(metadata or {})
+
+    search_events = [
+        _make_event(author="triage_router", tool_response=search_result, final=False),
+        _make_event(author="concierge_voice", text="menu", final=True),
+    ]
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(
+        adk_runner,
+        "_get_session_service",
+        lambda: _FakeSessionService({"soft_state": dict(ctx.state["soft_state"])}),
+    )
+    monkeypatch.setattr(adk_runner, "_get_runner", lambda: _FakeRunner(search_events))
+    monkeypatch.setattr(adk_runner, "sanitize_input", lambda msg: (msg, True))
+    monkeypatch.setattr(adk_runner, "sanitize_output", lambda msg: msg)
+    monkeypatch.setattr(
+        adk_runner,
+        "_build_invocation_state_delta",
+        AsyncMock(return_value={"user_cognitive_context": "", "soft_state": {}}),
+    )
+    monkeypatch.setattr(adk_runner, "_maybe_handle_search_state_shortcut", AsyncMock(return_value=None))
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn("u-adk-flow", "s-adk-flow", "I am looking for an apartment in New York"):
+        chunks.append(chunk)
+
+    selection_state = {
+        "soft_state": {
+            "last_presented_view": "property_details",
+            "last_selected_property_id": search_result["properties"][2]["id"],
+        }
+    }
+    events = [
+        _make_event(author="triage_router", tool_response={"status": "property_details"}, final=False),
+        _make_event(author="concierge_voice", text="details", final=True),
+    ]
+
+    monkeypatch.setattr(adk_runner, "_get_session_service", lambda: _FakeSessionService(selection_state))
+    monkeypatch.setattr(adk_runner, "_get_runner", lambda: _FakeRunner(events))
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn("u-adk-flow", "s-adk-flow", "please show me option 3"):
+        chunks.append(chunk)
+
+    monkeypatch.setattr(adk_runner, "_maybe_handle_search_state_shortcut", real_shortcut)
+
+    def fail_get_runner():
+        raise AssertionError("ADK runner must not be invoked for property rejection")
+
+    route_pre_adk = AsyncMock(return_value={"reply": "generic concierge greeting"})
+    monkeypatch.setattr(adk_runner, "_get_runner", fail_get_runner)
+    monkeypatch.setattr(adk_runner, "route_pre_adk", route_pre_adk)
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn("u-adk-flow", "s-adk-flow", "no"):
+        chunks.append(chunk)
+
+    reply = "".join(chunks)
+    assert "Apartment 1" in reply
+    assert "Apartment 8" in reply
+    assert "generic concierge greeting" not in reply
+    route_pre_adk.assert_not_awaited()
+
+    soft_state = snapshot["state"]["soft_state"]
+    assert soft_state["last_presented_view"] == "property_list"
+    assert soft_state["last_rejected_property_id"] == search_result["properties"][2]["id"]
