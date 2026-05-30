@@ -46,6 +46,7 @@ from app.agents.schemas.understanding_frame import UnderstandingFrame
 from app.config.response_policies_loader import render_policy_snippet
 from app.config.conversation_shortcuts_loader import match_shortcut
 from app.config.agent_config_loader import cfg as _cfg
+from app.config.service_coverage_loader import evaluate_message_coverage
 
 ADK_TURN_TIMEOUT = float(getattr(_cfg, "runtime_turn_timeout_seconds", 45))
 logger = logging.getLogger(__name__)
@@ -777,6 +778,44 @@ async def _maybe_handle_search_state_shortcut(
     return payload
 
 
+async def _maybe_record_unsupported_region(
+    *,
+    session_id: str,
+    country: str | None,
+) -> None:
+    """Persist only last_unsupported_region; do not touch booking/search state."""
+    if not country:
+        return
+    try:
+        snapshot = await get_session_snapshot(session_id)
+        if not isinstance(snapshot, dict):
+            return
+        state = snapshot.get("state")
+        if not isinstance(state, dict):
+            return
+        soft_state = state.get("soft_state")
+        if not isinstance(soft_state, dict):
+            soft_state = {}
+        else:
+            soft_state = dict(soft_state)
+        soft_state["last_unsupported_region"] = country
+        state = dict(state)
+        state["soft_state"] = soft_state
+        meta = snapshot.get("meta") or {}
+        await save_session_snapshot(
+            session_id=session_id,
+            history=snapshot.get("history", []),
+            state=state,
+            metadata={
+                key: meta[key]
+                for key in ("app_name", "user_id", "last_update_time")
+                if key in meta
+            },
+        )
+    except Exception as exc:
+        logger.debug("[service_coverage] Could not persist last_unsupported_region: %s", exc)
+
+
 async def run_adk_turn(
     user_id: str,
     session_id: str,
@@ -798,6 +837,15 @@ async def run_adk_turn(
     cleaned_message, is_safe = sanitize_input(message)
     if not is_safe:
         yield "I'm sorry, I can't process that request. Could you rephrase?"
+        return
+
+    coverage_decision = evaluate_message_coverage(cleaned_message)
+    if coverage_decision.blocked and coverage_decision.message:
+        await _maybe_record_unsupported_region(
+            session_id=session_id,
+            country=coverage_decision.country,
+        )
+        yield coverage_decision.message
         return
 
     pre_routed = await route_pre_adk(

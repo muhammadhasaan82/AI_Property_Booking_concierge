@@ -140,6 +140,12 @@ async def debug_config():
     except Exception:
         pass
 
+    try:
+        from app.config.service_coverage_loader import get_service_coverage_snapshot
+        payload["service_coverage"] = get_service_coverage_snapshot()
+    except Exception:
+        pass
+
     return payload
 
 
