@@ -27,6 +27,7 @@ class ShortcutMatch(BaseModel):
     selection_number: Optional[int] = None
     requires_state: List[str] = Field(default_factory=list)
     requires_any_state: List[str] = Field(default_factory=list)
+    requires_context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ShortcutSpec(BaseModel):
@@ -35,6 +36,7 @@ class ShortcutSpec(BaseModel):
     direction: Optional[str] = None
     requires_state: List[str] = Field(default_factory=list)
     requires_any_state: List[str] = Field(default_factory=list)
+    requires_context: Dict[str, Any] = Field(default_factory=dict)
     examples: List[str] = Field(default_factory=list)
     patterns: List[str] = Field(default_factory=list)
     entity_schema: Dict[str, Any] = Field(default_factory=dict)
@@ -107,6 +109,10 @@ def _spec_body(body: Any) -> Dict[str, Any]:
     data = dict(body or {}) if isinstance(body, dict) else {}
     for key in ("requires_state", "requires_any_state", "examples", "patterns"):
         data[key] = _as_str_list(data.get(key))
+    requires_context = data.get("requires_context")
+    data["requires_context"] = (
+        dict(requires_context) if isinstance(requires_context, dict) else {}
+    )
     return data
 
 
@@ -163,6 +169,9 @@ class _ShortcutRouter:
             soft_state.get(key) for key in spec.requires_any_state
         ):
             return False
+        for key, expected in spec.requires_context.items():
+            if soft_state.get(key) != expected:
+                return False
         return True
 
     def match(
@@ -202,6 +211,7 @@ class _ShortcutRouter:
                     selection_number=int(number) if number is not None else None,
                     requires_state=spec.requires_state,
                     requires_any_state=spec.requires_any_state,
+                    requires_context=spec.requires_context,
                 )
 
             for example in spec.examples:
@@ -212,6 +222,7 @@ class _ShortcutRouter:
                         direction=spec.direction,
                         requires_state=spec.requires_state,
                         requires_any_state=spec.requires_any_state,
+                        requires_context=spec.requires_context,
                     )
 
         return None

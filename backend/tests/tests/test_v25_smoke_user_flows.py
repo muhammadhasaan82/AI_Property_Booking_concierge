@@ -210,9 +210,9 @@ async def test_property_type_city_filters_and_total_found(city: str, property_ty
         and normalize_property_type(row["property_type"]) == normalize_property_type(property_type)
     ]
     assert result["total_found"] == len(expected)
-    page_size = result["pagination"]["page_size"]
-    assert result["shown_count"] == min(len(expected), page_size)
-    assert result["max_results"] == 3
+    assert result["shown_count"] == len(expected)
+    assert result["pagination"]["has_more"] is False
+    assert result["max_results"] == len(expected)
 
     returned_titles = {prop["title"] for prop in result["properties"]}
     expected_titles = {row["title"] for row in expected}

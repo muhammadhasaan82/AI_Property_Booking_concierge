@@ -234,15 +234,17 @@ def _resolve_page_size() -> int:
     """
     Determine the effective page size for pagination, clamped to allowed bounds.
     
-    Reads the configured page size and uses 5 if the configured value is missing or not positive, then clamps the result to the range [1, page_size_max].
+    Reads the configured page size and falls back to the configured maximum if
+    the default is missing or invalid, then clamps the result to the range
+    [1, page_size_max].
     
     Returns:
-        int: An integer page size between 1 and the configured maximum; defaults to 5 when no valid configuration is present.
+        int: An integer page size between 1 and the configured maximum.
     """
     configured = _coerce_int(getattr(cfg, "page_size", None))
     max_size = _resolve_page_size_max()
     if configured is None or configured <= 0:
-        configured = 5
+        configured = max_size
     return max(1, min(configured, max_size))
 
 
@@ -260,6 +262,80 @@ def _resolve_page_size_from(value: Any) -> int:
     if configured is None or configured <= 0:
         return _resolve_page_size()
     return max(1, min(configured, _resolve_page_size_max()))
+
+
+def _search_display_cfg() -> Any:
+    return getattr(cfg, "search_display", None)
+
+
+def _search_display_mode() -> str:
+    display = _search_display_cfg()
+    return str(getattr(display, "mode", "paginated") or "paginated").strip().lower()
+
+
+def _search_display_pagination_enabled() -> bool:
+    display = _search_display_cfg()
+    return bool(getattr(display, "pagination_enabled", True))
+
+
+def _search_display_max_inline_results() -> Optional[int]:
+    display = _search_display_cfg()
+    raw = getattr(display, "max_inline_results", None)
+    value = _coerce_int(raw)
+    return value if value and value > 0 else None
+
+
+def _search_display_sort_rules() -> List[Dict[str, Any]]:
+    display = _search_display_cfg()
+    rules = getattr(display, "sort", []) or []
+    return [dict(rule) for rule in rules if isinstance(rule, dict)]
+
+
+def _uses_all_matching_display() -> bool:
+    return (
+        _search_display_mode() == "all_matching"
+        and not _search_display_pagination_enabled()
+    )
+
+
+def _is_missing_sort_value(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _sort_value(value: Any) -> Any:
+    if isinstance(value, (int, float)):
+        return (0, value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        try:
+            return (0, float(stripped.replace("$", "").replace(",", "")))
+        except ValueError:
+            return (1, stripped.lower())
+    return (1, str(value).lower())
+
+
+def _sort_results_for_display(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    sorted_results = list(results)
+    for rule in reversed(_search_display_sort_rules()):
+        field = str(rule.get("field") or "").strip()
+        if not field:
+            continue
+        descending = str(rule.get("direction") or "asc").strip().lower() == "desc"
+        missing_last = bool(rule.get("missing_last", True))
+        present = [
+            item for item in sorted_results
+            if not _is_missing_sort_value(item.get(field))
+        ]
+        missing = [
+            item for item in sorted_results
+            if _is_missing_sort_value(item.get(field))
+        ]
+        present.sort(
+            key=lambda item, sort_field=field: _sort_value(item.get(sort_field)),
+            reverse=descending,
+        )
+        sorted_results = present + missing if missing_last else missing + present
+    return sorted_results
 
 
 def _build_option_map_from_formatted(
@@ -285,6 +361,7 @@ def _build_option_map_from_formatted(
             "city": item.get("city"),
             "price_per_night": item.get("price_per_night"),
             "rating": item.get("rating"),
+            "reviews_count": item.get("reviews_count"),
             "bedrooms": item.get("bedrooms"),
             "bathrooms": item.get("bathrooms"),
             "property_type": item.get("property_type"),
@@ -323,17 +400,27 @@ def _build_search_page_payload(
             - option_map: Mapping from stringified option number to a compact dict of property fields for each visible item.
     """
     total_found = len(results)
-    safe_page_size = _resolve_page_size_from(page_size)
-    safe_page = max(_coerce_int(page) or 1, 1)
-    total_pages = max((total_found + safe_page_size - 1) // safe_page_size, 1)
-    safe_page = min(safe_page, total_pages)
+    pagination_enabled = _search_display_pagination_enabled()
+    max_inline_results = _search_display_max_inline_results()
+    all_matching_display = _uses_all_matching_display()
 
-    start = (safe_page - 1) * safe_page_size
-    end = min(start + safe_page_size, total_found)
+    if all_matching_display:
+        safe_page = 1
+        total_pages = 1
+        start = 0
+        end = total_found if max_inline_results is None else min(max_inline_results, total_found)
+        safe_page_size = end
+    else:
+        safe_page_size = max_inline_results or _resolve_page_size_from(page_size)
+        safe_page = max(_coerce_int(page) or 1, 1)
+        total_pages = max((total_found + safe_page_size - 1) // safe_page_size, 1)
+        safe_page = min(safe_page, total_pages)
+        start = (safe_page - 1) * safe_page_size
+        end = min(start + safe_page_size, total_found)
 
     visible_results = results[start:end]
     formatted: List[Dict[str, Any]] = []
-    for i , r in enumerate(visible_results, 1):
+    for i, r in enumerate(visible_results, start + 1):
         raw_amenities = r.get("amenities") or []
         top_amenities = raw_amenities[:3] if isinstance(raw_amenities, list) else []
         formatted.append(
@@ -347,13 +434,15 @@ def _build_search_page_payload(
                 "bathrooms": r.get("bathrooms"),
                 "property_type": r.get("property_type", ""),
                 "rating": r.get("rating"),
+                "reviews_count": r.get("reviews_count"),
                 "amenities": top_amenities,
             }
         )
  
     option_map = _build_option_map_from_formatted(formatted)
     shown_count = len(formatted)
-    has_more = end < total_found
+    has_more = bool(pagination_enabled and end < total_found)
+    has_prev = bool(pagination_enabled and safe_page > 1)
     remaining_count = max(total_found - end, 0)
  
     payload = {
@@ -378,9 +467,13 @@ def _build_search_page_payload(
             "page_start": start + 1 if total_found else 0,
             "page_end": end,
             "total_pages": total_pages,
+            "has_more": has_more,
+            "has_next": has_more,
+            "has_prev": has_prev,
+            "pagination_enabled": pagination_enabled,
         },
     }
-    return payload, visible_results, option_map
+    return payload, formatted, option_map
  
  
 def paginate_stored_results(
@@ -410,6 +503,38 @@ def paginate_stored_results(
     all_results = soft_state.get("all_search_results") or []
     if not isinstance(all_results, list) or not all_results:
         return None
+
+    last_payload = soft_state.get("last_search")
+    pagination_state = (
+        last_payload.get("pagination", {}) if isinstance(last_payload, dict) else {}
+    )
+    if not _search_display_pagination_enabled() or (
+        direction != "previous" and not bool(pagination_state.get("has_more", False))
+    ):
+        return {
+            "status": Status.PROPERTIES_FOUND,
+            "deterministic_reply": cfg.msg_all_results_already_shown,
+            "message": cfg.msg_all_results_already_shown,
+            "properties": [],
+            "total_found": len(all_results),
+            "shown_count": len(soft_state.get("visible_results") or []),
+            "pagination": {
+                "current_page": _coerce_int(soft_state.get("current_page")) or 1,
+                "page_size": len(soft_state.get("visible_results") or []),
+                "page_start": 1 if all_results else 0,
+                "page_end": len(soft_state.get("visible_results") or []),
+                "total_pages": 1,
+                "has_more": False,
+                "has_next": False,
+                "has_prev": False,
+                "pagination_enabled": False,
+            },
+            "source": Source.MEMORY,
+            "memory": {
+                "read_from": "soft_state.all_search_results",
+                "state_available": True,
+            },
+        }
  
     current_page = max(_coerce_int(soft_state.get("current_page")) or 1, 1)
     page_size = _resolve_page_size_from(soft_state.get("page_size"))
@@ -444,6 +569,81 @@ def paginate_stored_results(
     payload["memory"] = {
         "read_from": "soft_state.all_search_results",
         "written_to": "soft_state.visible_results",
+        "state_available": True,
+    }
+    return payload
+
+
+def return_to_previous_results(
+    soft_state: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(soft_state, dict):
+        return None
+
+    visible_results = soft_state.get("visible_results") or []
+    all_results = soft_state.get("all_search_results") or []
+    if not isinstance(visible_results, list) or not visible_results:
+        if not isinstance(all_results, list) or not all_results:
+            return None
+        filters = soft_state.get("last_filters") or {}
+        sorted_results = _sort_results_for_display(list(all_results))
+        payload, visible_results, option_map = _build_search_page_payload(
+            results=sorted_results,
+            filters=filters,
+            page=1,
+            page_size=len(sorted_results),
+            search_limit=len(sorted_results),
+            summary_threshold=PROPERTY_SUMMARY_THRESHOLD,
+        )
+    else:
+        last_search = _get_cached_last_search(soft_state) or {}
+        payload = dict(last_search) if isinstance(last_search, dict) else {}
+        if not payload:
+            filters = soft_state.get("last_filters") or {}
+            payload, visible_results, option_map = _build_search_page_payload(
+                results=list(visible_results),
+                filters=filters,
+                page=1,
+                page_size=len(visible_results),
+                search_limit=len(visible_results),
+                summary_threshold=PROPERTY_SUMMARY_THRESHOLD,
+            )
+        else:
+            option_map = soft_state.get("option_map") or {}
+            payload["properties"] = list(visible_results)
+            payload["shown_count"] = len(visible_results)
+            payload["total_found"] = _coerce_int(payload.get("total_found")) or len(visible_results)
+            payload["has_more"] = False
+            payload["remaining_count"] = 0
+            payload["pagination"] = {
+                "current_page": 1,
+                "page_size": len(visible_results),
+                "page_start": 1 if visible_results else 0,
+                "page_end": len(visible_results),
+                "total_pages": 1,
+                "has_more": False,
+                "has_next": False,
+                "has_prev": False,
+                "pagination_enabled": False,
+            }
+
+    option_map = _build_option_map_from_formatted(payload.get("properties") or [])
+    rejected_id = soft_state.get("last_selected_property_id")
+    if rejected_id:
+        soft_state["last_rejected_property_id"] = rejected_id
+    soft_state["last_presented_view"] = "property_list"
+    soft_state["selected_property_id"] = None
+    soft_state["visible_results"] = list(payload.get("properties") or [])
+    soft_state["option_map"] = option_map
+    soft_state["active_property_options_map"] = option_map
+    soft_state["active_property_options_shown_count"] = payload.get("shown_count")
+    soft_state["active_property_options_total_found"] = payload.get("total_found")
+    _set_cached_last_search(soft_state, dict(payload))
+
+    payload["source"] = Source.MEMORY
+    payload["memory"] = {
+        "read_from": "soft_state.visible_results",
+        "written_to": "soft_state.last_presented_view",
         "state_available": True,
     }
     return payload
@@ -618,24 +818,25 @@ async def search_properties(
     should_rerank = bool(vibe_query)
 
     results = None
-    try:
-        rust_result = await rust_search(
-            location=city,
-            budget=budget_value,
-            beds=beds_value,
-            amenities=amenity_list or [],
-            property_type=normalized_property_type or "",
-            max_results=search_limit,
-            summary_mode_threshold=summary_threshold,
-            properties=_DATASET or None,
-        )
-        if rust_result and not rust_result.get("fallback"):
-            inner = rust_result.get("result", rust_result) or {}
-            rust_results = inner.get("results", [])
-            if isinstance(rust_results, list):
-                results = rust_results
-    except Exception as e:
-        logger.warning("Rust property search failed: %s, using Python fallback", e)
+    if not _uses_all_matching_display():
+        try:
+            rust_result = await rust_search(
+                location=city,
+                budget=budget_value,
+                beds=beds_value,
+                amenities=amenity_list or [],
+                property_type=normalized_property_type or "",
+                max_results=search_limit,
+                summary_mode_threshold=summary_threshold,
+                properties=_DATASET or None,
+            )
+            if rust_result and not rust_result.get("fallback"):
+                inner = rust_result.get("result", rust_result) or {}
+                rust_results = inner.get("results", [])
+                if isinstance(rust_results, list):
+                    results = rust_results
+        except Exception as e:
+            logger.warning("Rust property search failed: %s, using Python fallback", e)
 
     if results is None:
         results = await asyncio.to_thread(
@@ -654,6 +855,8 @@ async def search_properties(
             if _normalize_property_type(r.get("property_type") or "")
             == normalized_property_type
         ]
+
+    results = _sort_results_for_display(list(results or []))
 
     if not results:
         unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
@@ -681,13 +884,13 @@ async def search_properties(
         "beds": beds_value,
         "property_type": normalized_property_type,
     }
-    page_size = _resolve_page_size()
+    page_size = _search_display_max_inline_results() or _resolve_page_size()
     payload, visible_results, option_map = _build_search_page_payload(
         results=results,
         filters=filters,
         page=1,
         page_size=page_size,
-        search_limit=search_limit,
+        search_limit=len(results) if _uses_all_matching_display() else search_limit,
         summary_threshold=summary_threshold,
     )
 
@@ -696,10 +899,11 @@ async def search_properties(
         soft_state["last_filters"] = filters
         soft_state["all_search_results"] = list(results)
         soft_state["current_page"] = payload["pagination"]["current_page"]
-        soft_state["page_size"] = page_size
+        soft_state["page_size"] = payload["pagination"]["page_size"]
         soft_state["visible_results"] = visible_results
         soft_state["option_map"] = option_map
         soft_state["selected_property_id"] = None
+        soft_state["last_presented_view"] = "property_list"
         soft_state["active_property_options_map"] = option_map
         soft_state["active_property_options_shown_count"] = payload["shown_count"]
         soft_state["active_property_options_total_found"] = payload["total_found"]
@@ -871,11 +1075,13 @@ async def get_property_details(
                 "amenities": matched_prop.get("amenities"),
                 "description": matched_prop.get("description"),
                 "rating": matched_prop.get("rating"),
+                "reviews_count": matched_prop.get("reviews_count"),
             },
         }
         if isinstance(soft_state, dict):
             soft_state["last_selected_property_id"] = payload["property"]["id"]
             soft_state["last_selected_property_at"] = time.time()
+            soft_state["last_presented_view"] = "property_details"
             _set_unresolved_turns(soft_state, 0)
         payload["memory"] = {
             "read_from": "soft_state.last_search" if resolved_from_history else None,

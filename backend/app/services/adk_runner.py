@@ -728,7 +728,11 @@ async def _maybe_handle_search_state_shortcut(
     Returns:
         Optional[Dict[str, Any]]: The tool payload produced by the shortcut when handled, or `None` if no shortcut was applied or no payload was produced.
     """
-    from app.agents.tools.search import paginate_stored_results, select_property
+    from app.agents.tools.search import (
+        paginate_stored_results,
+        return_to_previous_results,
+        select_property,
+    )
 
     snapshot = await get_session_snapshot(session_id)
     if not isinstance(snapshot, dict):
@@ -759,6 +763,8 @@ async def _maybe_handle_search_state_shortcut(
             soft_state,
             direction=shortcut.direction or "next",
         )
+    elif shortcut.action == "return_to_previous_results":
+        payload = return_to_previous_results(soft_state)
 
     if not payload:
         return None
@@ -848,19 +854,15 @@ async def run_adk_turn(
         yield coverage_decision.message
         return
 
-    pre_routed = await route_pre_adk(
-        message=cleaned_message,
-        user_id=user_id,
-        session_id=session_id,
-    )
-    if pre_routed and pre_routed.get("reply"):
-        yield str(pre_routed["reply"])
-        return
     shortcut_payload = await _maybe_handle_search_state_shortcut(
         session_id = session_id,
         message=cleaned_message
     )
     if shortcut_payload:
+        deterministic_reply = shortcut_payload.get("deterministic_reply")
+        if deterministic_reply:
+            yield str(deterministic_reply)
+            return
         if shortcut_payload.get("status") == "properties_found" and shortcut_payload.get("properties"):
             deterministic = _render_property_results_from_router_output(shortcut_payload)
             if deterministic:
@@ -875,6 +877,14 @@ async def run_adk_turn(
         if shortcut_text:
             yield shortcut_text
             return
+    pre_routed = await route_pre_adk(
+        message=cleaned_message,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if pre_routed and pre_routed.get("reply"):
+        yield str(pre_routed["reply"])
+        return
     if not cleaned_message.strip():
         yield "I didn't catch that. Could you repeat your question?"
         return
