@@ -455,4 +455,4 @@ async def test_run_adk_turn_search_result_persists_visible_results_from_router_o
 
     # Confirm option_map values reference the correct property IDs.
     expected_id_1 = str(props[0].get("id") or "")
-    assert soft_state["option_map"]["1"] == expected_id_1
+    assert soft_state["option_map"]["1"]["property_id"] == expected_id_1

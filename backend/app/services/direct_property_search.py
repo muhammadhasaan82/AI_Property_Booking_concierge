@@ -11,7 +11,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -204,14 +204,25 @@ def extract_soft_state_from_snapshot(snapshot: Optional[Dict[str, Any]]) -> Dict
 async def maybe_handle_direct_property_search(
     message: str,
     session_id: str,
+    *,
+    get_snapshot: Optional[Callable[[str], Any]] = None,
+    save_snapshot: Optional[Callable[..., Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Run search_properties for clear search intents and persist soft_state to Redis.
 
     Returns the tool payload when handled; None when the message should fall through.
     """
-    snapshot = await get_session_snapshot(session_id)
-    soft_state = extract_soft_state_from_snapshot(snapshot)
+    get_snapshot = get_snapshot or get_session_snapshot
+    save_snapshot = save_snapshot or save_session_snapshot
+
+    snapshot = await get_snapshot(session_id)
+    state = snapshot.get("state") if isinstance(snapshot, dict) else {}
+    if not isinstance(state, dict):
+        state = {}
+    soft_state = state.get("soft_state")
+    if not isinstance(soft_state, dict):
+        soft_state = dict(state) if isinstance(state, dict) else {}
 
     if not is_clear_direct_property_search(message, soft_state):
         return None
@@ -236,21 +247,21 @@ async def maybe_handle_direct_property_search(
     if not isinstance(snapshot, dict):
         snapshot = {"state": {}, "history": [], "meta": {}}
 
-    state = snapshot.get("state")
-    if not isinstance(state, dict):
-        state = {}
+    persisted_state = snapshot.get("state")
+    if not isinstance(persisted_state, dict):
+        persisted_state = {}
     else:
-        state = dict(state)
+        persisted_state = dict(persisted_state)
 
     updated_soft = tool_context.state.get("soft_state")
     if isinstance(updated_soft, dict):
-        state["soft_state"] = updated_soft
+        persisted_state["soft_state"] = updated_soft
 
     meta = snapshot.get("meta") or {}
-    await save_session_snapshot(
+    await save_snapshot(
         session_id=session_id,
         history=snapshot.get("history", []),
-        state=state,
+        state=persisted_state,
         metadata={
             key: meta[key]
             for key in ("app_name", "user_id", "last_update_time")

@@ -130,16 +130,57 @@ def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, A
         pagination = router_output.get("pagination") or {}
         current_page = int(pagination.get("current_page") or 1)
         page_size = int(pagination.get("page_size") or len(props))
-        # Build a deterministic option_map: {"1": id, "2": id, ...}
-        option_map: Dict[str, str] = {
-            str(i + 1): str(p.get("id") or p.get("property_id") or "")
-            for i, p in enumerate(props)
-        }
+        query_context = router_output.get("query_context") or {}
+        filters_applied = router_output.get("filters_applied") or {}
+        last_filters: Dict[str, Any] = {}
+        if isinstance(query_context, dict):
+            last_filters.update(query_context)
+        if isinstance(filters_applied, dict):
+            last_filters.update(filters_applied)
+
+        def _option_payload(prop: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "property_id": prop.get("id") or prop.get("property_id"),
+                "title": prop.get("title"),
+                "city": prop.get("city"),
+                "price_per_night": prop.get("price_per_night"),
+                "rating": prop.get("rating"),
+                "reviews_count": prop.get("reviews_count"),
+                "bedrooms": prop.get("bedrooms"),
+                "bathrooms": prop.get("bathrooms"),
+                "property_type": prop.get("property_type"),
+            }
+
+        option_map = router_output.get("option_map")
+        option_map_valid = False
+        if isinstance(option_map, dict) and option_map:
+            option_map_valid = all(
+                isinstance(val, dict) and ("property_id" in val or "id" in val)
+                for val in option_map.values()
+            )
+        if not option_map_valid:
+            option_map = {}
+            for idx, prop in enumerate(props, start=1):
+                number = prop.get("number") or idx
+                option_map[str(number)] = _option_payload(prop)
+
+        active_option_map = router_output.get("active_property_options_map")
+        if not isinstance(active_option_map, dict) or not active_option_map:
+            active_option_map = option_map
+
+        shown_count = int(router_output.get("shown_count") or len(props))
+        total_found = int(router_output.get("total_found") or len(props))
+
         return {
             "active_flow": "search",
             "visible_results": props,
             "all_search_results": props,
             "option_map": option_map,
+            "active_property_options_map": active_option_map,
+            "active_property_options_shown_count": shown_count,
+            "active_property_options_total_found": total_found,
+            "last_search": dict(router_output),
+            "last_filters": last_filters,
             "last_presented_view": "property_list",
             "current_page": current_page,
             "page_size": page_size,
@@ -986,6 +1027,8 @@ async def run_adk_turn(
     direct_search_payload = await maybe_handle_direct_property_search(
         cleaned_message,
         session_id,
+        get_snapshot=get_session_snapshot,
+        save_snapshot=save_session_snapshot,
     )
     if direct_search_payload:
         if (
