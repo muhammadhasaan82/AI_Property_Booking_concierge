@@ -53,7 +53,7 @@ shortcuts:
       - option_map
       - all_search_results
     examples:
-      - no
+      - "no"
       - no thanks
       - not this one
       - i don't like this one
