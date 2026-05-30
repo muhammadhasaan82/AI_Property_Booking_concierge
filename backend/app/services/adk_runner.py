@@ -867,6 +867,9 @@ async def _maybe_handle_search_state_shortcut(
     # Robust soft_state extraction:
     # - preferred shape: snapshot["state"]["soft_state"]
     # - compatibility shape: snapshot["state"] itself is the soft_state
+    # Use dict(state) for the flat shape to avoid circular references when
+    # persisting back as state["soft_state"] = soft_state.
+    soft_state: Dict[str, Any]
     if "soft_state" in state and isinstance(state["soft_state"], dict):
         soft_state = state["soft_state"]
     else:
