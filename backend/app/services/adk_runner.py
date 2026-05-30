@@ -762,6 +762,7 @@ async def _maybe_handle_search_state_shortcut(
     if not isinstance(state, dict):
         return None
 
+<<<<<<< HEAD
     # Robust extraction of soft_state:
     # 1. If state contains "soft_state" key and its value is a dict, use it.
     # 2. Otherwise, treat state itself as soft_state to preserve flat/compatibility state shapes.
@@ -770,6 +771,16 @@ async def _maybe_handle_search_state_shortcut(
         soft_state = state["soft_state"]
     else:
         # Copy to avoid making state self-referential / circular when setting state["soft_state"] later.
+=======
+    # Robust soft_state extraction:
+    # - preferred shape: snapshot["state"]["soft_state"]
+    # - compatibility shape: snapshot["state"] itself is the soft_state
+    # Use dict(state) for the flat shape to avoid circular references when
+    # persisting back as state["soft_state"] = soft_state.
+    if "soft_state" in state and isinstance(state["soft_state"], dict):
+        soft_state = state["soft_state"]
+    else:
+>>>>>>> e4fb719 (bug fixed)
         soft_state = dict(state)
 
     shortcut = match_shortcut(message, soft_state)
