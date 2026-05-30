@@ -1,0 +1,43 @@
+version: "1.0"
+
+coverage:
+  enabled: true
+  supported_countries:
+    - United States
+  supported_country_codes:
+    - US
+    - USA
+  unsupported_region_response: >-
+    This application is only available for the United States region only.
+  allow_dataset_regions_outside_supported_market: false
+
+city_country_map:
+  New York: United States
+  Los Angeles: United States
+  Chicago: United States
+  San Francisco: United States
+  Miami: United States
+  Boston: United States
+  Seattle: United States
+  Austin: United States
+  Dallas: United States
+  Houston: United States
+  Washington: United States
+  Lahore: Pakistan
+  Karachi: Pakistan
+  Islamabad: Pakistan
+  Dubai: United Arab Emirates
+
+region_aliases:
+  United States:
+    - united states
+    - usa
+    - us
+    - america
+  Pakistan:
+    - pakistan
+    - pk
+  United Arab Emirates:
+    - uae
+    - united arab emirates
+    - dubai

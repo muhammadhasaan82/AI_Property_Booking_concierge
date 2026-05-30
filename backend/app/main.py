@@ -5,14 +5,18 @@ import sys
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-import app.services.config
 from fastapi import FastAPI, Request, Response
+from app.config.env_loader import get_env_debug_snapshot, load_backend_env
+
+load_backend_env()
+
 from app.route import health, properties, booking, faq, chat, mobile, admin
 from app.route import stripe_webhook
 from app.route import test as test_router
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.model_config_loader import get_model_config_snapshot
+from app.services.redis_store import get_session_snapshot
 
 app = FastAPI(title="AI Concierge & Calling Agent")
 logger = logging.getLogger(__name__)
@@ -29,11 +33,12 @@ app.add_middleware(
 @app.on_event("startup")
 async def log_resolved_model_config():
     """
-    Log the resolved model configuration snapshot to the module logger.
+    Log secret-safe environment and model configuration snapshots at startup.
     
     This is intended to be run on application startup and records the output of
     get_model_config_snapshot() at INFO level for debugging and observability.
     """
+    logger.info("[Config] Dotenv sources: %s", get_env_debug_snapshot())
     logger.info("[Config] Resolved model config: %s", get_model_config_snapshot())
 
 @app.get("/")
@@ -98,6 +103,7 @@ async def debug_config():
         "routing_policies": get_routing_policies().model_dump(),
         "guardrails": get_guardrails().model_dump(),
         "vocabulary": get_vocabulary().model_dump(),
+        "dotenv": get_env_debug_snapshot(),
         "resolved_models": get_model_config_snapshot(),
     }
     try:
@@ -135,7 +141,55 @@ async def debug_config():
     except Exception:
         pass
 
+    try:
+        from app.config.service_coverage_loader import get_service_coverage_snapshot
+        payload["service_coverage"] = get_service_coverage_snapshot()
+    except Exception:
+        pass
+
     return payload
+
+
+@app.get("/debug/session/{session_id}", tags=["debug"])
+async def debug_session(session_id: str) -> dict:
+    snapshot = await get_session_snapshot(session_id)
+    state = snapshot.get("state", {}) if isinstance(snapshot, dict) else {}
+    if not isinstance(state, dict):
+        state = {}
+
+    soft_state = state.get("soft_state")
+    if not isinstance(soft_state, dict):
+        soft_state = state
+
+    allowed_keys = {
+        "active_flow",
+        "active_property_options_generated_at",
+        "active_property_options_map",
+        "active_property_options_shown_count",
+        "active_property_options_total_found",
+        "all_search_results",
+        "current_page",
+        "last_filters",
+        "last_presented_view",
+        "last_rejected_property_id",
+        "last_search",
+        "last_selected_property_at",
+        "last_selected_property_id",
+        "option_map",
+        "page_size",
+        "visible_results",
+    }
+    safe_soft_state = {
+        key: soft_state[key]
+        for key in sorted(allowed_keys)
+        if key in soft_state
+    }
+
+    return {
+        "session_id": session_id,
+        "state_keys": sorted(state.keys()),
+        "soft_state": safe_soft_state,
+    }
 
 
 @app.get("/debug/model-config", tags=["debug"])
@@ -238,4 +292,3 @@ app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
 app.include_router(stripe_webhook.router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(admin.router, tags=["admin"])
-

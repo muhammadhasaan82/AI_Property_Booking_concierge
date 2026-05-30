@@ -123,6 +123,7 @@ class _AgentConfig:
         self.search_summary_mode_threshold: int = _env_int(
             "PROPERTY_SEARCH_SUMMARY_THRESHOLD", sr.get("summary_mode_threshold", 12)
         )
+        self.search_display = _Namespace(raw.get("search_display", {}))
 
         pg = raw.get("pagination", {})
         self.page_size: int = _env_int(
@@ -174,6 +175,7 @@ class _AgentConfig:
             "selection_out_of_range",
             "That option number is outside the current shortlist."
         )
+        self.msg_all_results_already_shown: str = msg["all_results_already_shown"]
         self.msg_escalation_default: str = msg["escalation_default_reason"]
 
         st_raw = raw["status"]

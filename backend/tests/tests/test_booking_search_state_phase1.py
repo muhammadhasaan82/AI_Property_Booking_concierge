@@ -64,22 +64,20 @@ async def test_search_show_more_option_2_keeps_filters():
         result = await search_properties(city="New York", property_type="apartment", tool_context=ctx)
         assert result["status"] == "properties_found"
         assert result["total_found"] == 12
-        page_size = result["pagination"]["page_size"]
-        assert len(result["properties"]) == min(result["total_found"], page_size)
+        assert result["shown_count"] == 12
+        assert result["pagination"]["has_more"] is False
 
         next_page = paginate_stored_results(ctx.state["soft_state"], direction="next")
         assert next_page is not None
         assert next_page["status"] == "properties_found"
-        assert next_page["pagination"]["current_page"] == 2
-        assert next_page["query_context"]["city"] == "New York"
-        assert next_page["query_context"]["property_type"] == "apartment"
+        assert next_page["deterministic_reply"] == "All matching properties are already shown."
 
-        returned_types = {item["property_type"].lower() for item in next_page["properties"]}
+        returned_types = {item["property_type"].lower() for item in result["properties"]}
         assert returned_types == {"apartment"}
 
-        selected = await select_property(option_number=2, tool_context=ctx)
+        selected = await select_property(option_number=7, tool_context=ctx)
         assert selected["status"] == "property_details"
-        assert selected["property"]["id"] == "apartment-7"
+        assert selected["property"]["id"] == result["properties"][6]["id"]
 
 
 @pytest.mark.asyncio
@@ -112,10 +110,9 @@ async def test_total_found_is_full_count_not_page_size():
 
         result = await search_properties(city="New York", property_type="apartment", tool_context=ctx)
 
-    page_size = result["pagination"]["page_size"]
-    assert result["shown_count"] == min(result["total_found"], page_size)
+    assert result["shown_count"] == result["total_found"]
     assert result["pagination"]["page_start"] == 1
-    assert result["pagination"]["page_end"] == min(result["total_found"], page_size)
+    assert result["pagination"]["page_end"] == result["total_found"]
 
 
 @pytest.mark.asyncio

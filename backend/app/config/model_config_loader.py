@@ -13,6 +13,10 @@ from typing import Any, Mapping, Optional
 
 import yaml
 
+from app.config.env_loader import load_backend_env
+
+load_backend_env()
+
 _CONFIG_PATH = Path(__file__).resolve().parent / "agent_config.yaml"
 _LIGHTWEIGHT_GROQ_MODEL = "llama-3.1-8b-instant"
 _LIGHTWEIGHT_LITELLM_MODEL = f"groq/{_LIGHTWEIGHT_GROQ_MODEL}"

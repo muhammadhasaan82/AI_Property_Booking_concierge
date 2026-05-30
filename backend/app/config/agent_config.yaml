@@ -72,6 +72,21 @@ search:
   result_limit_max: 50             # env: PROPERTY_SEARCH_RESULT_LIMIT_MAX
   summary_mode_threshold: 8        # env: PROPERTY_SEARCH_SUMMARY_THRESHOLD
   full_specific_search_when_city_and_property_type: true
+
+search_display:
+  mode: all_matching
+  sort:
+    - field: rating
+      direction: desc
+      missing_last: true
+    - field: reviews_count
+      direction: desc
+      missing_last: true
+    - field: price_per_night
+      direction: asc
+      missing_last: true
+  max_inline_results: null
+  pagination_enabled: false
 # ── Pagination (display) ────────────────────────────────────────────────────
 pagination:
   default_page_size: 5     # env: PROPERTY_LIST_PAGE_SIZE
@@ -290,7 +305,9 @@ messages:
 
   selection_out_of_range: >-
     That option number is outside the current shortlist. Choose one of the listed options,
-    or ask me to show more results.
+    or refine your search.
+  all_results_already_shown: >-
+    All matching properties are already shown.
   pipeline_timeout_fallback: >-
     I'm taking a bit longer than usual on that. Could you try once more?
   escalation_default_reason: "User requested assistance."

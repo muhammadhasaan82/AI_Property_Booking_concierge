@@ -31,6 +31,18 @@ def test_numbered_selection_shortcut_extracts_entity():
     assert m.selection_number == 3
 
 
+def test_property_detail_rejection_shortcut_is_context_gated():
+    state = {
+        "last_presented_view": "property_details",
+        "visible_results": [{"id": "x"}],
+    }
+    m = match_shortcut("no thanks", state)
+    assert m is not None
+    assert m.action == "return_to_previous_results"
+
+    assert match_shortcut("no thanks", {"visible_results": [{"id": "x"}]}) is None
+
+
 def test_renaming_or_removing_shortcut_in_yaml_changes_behavior_without_python():
     # Build a router from a custom dict (simulates an edited YAML) — no Python change.
     custom = _ShortcutRouter(

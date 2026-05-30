@@ -46,6 +46,8 @@ from app.agents.schemas.understanding_frame import UnderstandingFrame
 from app.config.response_policies_loader import render_policy_snippet
 from app.config.conversation_shortcuts_loader import match_shortcut
 from app.config.agent_config_loader import cfg as _cfg
+from app.config.service_coverage_loader import evaluate_message_coverage
+from app.services.direct_property_search import maybe_handle_direct_property_search
 
 ADK_TURN_TIMEOUT = float(getattr(_cfg, "runtime_turn_timeout_seconds", 45))
 logger = logging.getLogger(__name__)
@@ -73,6 +75,126 @@ def _filter_persistent_state(state: Any) -> Dict[str, Any]:
         for key, value in state.items()
         if not str(key).startswith("temp:")
     }
+
+def _merge_soft_state(existing: Any, updates: Any) -> Dict[str, Any]:
+    base = dict(existing) if isinstance(existing, dict) else {}
+    if isinstance(updates, dict):
+        base.update(updates)
+    return base
+
+def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
+    if not isinstance(target, dict) or not isinstance(updates, dict):
+        return
+    soft_updates = updates.get("soft_state")
+    if isinstance(soft_updates, dict):
+        merged_soft = _merge_soft_state(target.get("soft_state"), soft_updates)
+        updates = dict(updates)
+        updates["soft_state"] = merged_soft
+    target.update(updates)
+
+
+def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract navigable search/selection context from a triage_router tool payload.
+
+    When the ADK in-memory session does not propagate soft_state mutations back
+    to Redis, this helper rebuilds a best-effort soft_state from the tool return
+    value so that follow-up shortcuts (select, paginate, reject) always have
+    navigable context.
+
+    Mapping rules
+    -------------
+    status == "properties_found"
+        visible_results      <- properties list
+        all_search_results   <- properties list (seed; pagination fills later)
+        option_map           <- {"1": id, "2": id, ...} built from properties
+        last_presented_view  <- "property_list"
+        current_page         <- pagination.current_page or 1
+        page_size            <- pagination.page_size or len(properties)
+
+    status == "property_details"
+        last_presented_view      <- "property_details"
+        last_selected_property_id <- property["id"] (first item if present)
+        (does NOT overwrite search context keys)
+
+    All other statuses: returns empty dict (no soft_state derived).
+    """
+    if not isinstance(router_output, dict):
+        return {}
+
+    status = (router_output.get("status") or "").lower()
+
+    if status == "properties_found":
+        props: List[Dict[str, Any]] = list(router_output.get("properties") or [])
+        if not props:
+            return {}
+        pagination = router_output.get("pagination") or {}
+        current_page = int(pagination.get("current_page") or 1)
+        page_size = int(pagination.get("page_size") or len(props))
+        query_context = router_output.get("query_context") or {}
+        filters_applied = router_output.get("filters_applied") or {}
+        last_filters: Dict[str, Any] = {}
+        if isinstance(query_context, dict):
+            last_filters.update(query_context)
+        if isinstance(filters_applied, dict):
+            last_filters.update(filters_applied)
+
+        def _option_payload(prop: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "property_id": prop.get("id") or prop.get("property_id"),
+                "title": prop.get("title"),
+                "city": prop.get("city"),
+                "price_per_night": prop.get("price_per_night"),
+                "rating": prop.get("rating"),
+                "reviews_count": prop.get("reviews_count"),
+                "bedrooms": prop.get("bedrooms"),
+                "bathrooms": prop.get("bathrooms"),
+                "property_type": prop.get("property_type"),
+            }
+
+        option_map = router_output.get("option_map")
+        option_map_valid = False
+        if isinstance(option_map, dict) and option_map:
+            option_map_valid = all(
+                isinstance(val, dict) and ("property_id" in val or "id" in val)
+                for val in option_map.values()
+            )
+        if not option_map_valid:
+            option_map = {}
+            for idx, prop in enumerate(props, start=1):
+                number = prop.get("number") or idx
+                option_map[str(number)] = _option_payload(prop)
+
+        active_option_map = router_output.get("active_property_options_map")
+        if not isinstance(active_option_map, dict) or not active_option_map:
+            active_option_map = option_map
+
+        shown_count = int(router_output.get("shown_count") or len(props))
+        total_found = int(router_output.get("total_found") or len(props))
+
+        return {
+            "active_flow": "search",
+            "visible_results": props,
+            "all_search_results": props,
+            "option_map": option_map,
+            "active_property_options_map": active_option_map,
+            "active_property_options_shown_count": shown_count,
+            "active_property_options_total_found": total_found,
+            "last_search": dict(router_output),
+            "last_filters": last_filters,
+            "last_presented_view": "property_list",
+            "current_page": current_page,
+            "page_size": page_size,
+        }
+
+    if status == "property_details":
+        props = list(router_output.get("properties") or [])
+        first_id = str(props[0].get("id") or "") if props else ""
+        result: Dict[str, Any] = {"last_presented_view": "property_details"}
+        if first_id:
+            result["last_selected_property_id"] = first_id
+        return result
+
+    return {}
 
 
 def _jsonable(value: Any) -> Any:
@@ -468,12 +590,14 @@ class RedisSessionService(BaseSessionService):
             storage_session.events = _trim_events_for_context(storage_session.events)
             storage_session.last_update_time = session.last_update_time
 
+            if not isinstance(storage_session.state, dict):
+                storage_session.state = {}
             if isinstance(session.state, dict):
-                storage_session.state.update(_filter_persistent_state(session.state))
+                _merge_state(storage_session.state, _filter_persistent_state(session.state))
 
             state_delta = getattr(getattr(event, "actions", None), "state_delta", None)
             if isinstance(state_delta, dict):
-                storage_session.state.update(_filter_persistent_state(state_delta))
+                _merge_state(storage_session.state, _filter_persistent_state(state_delta))
 
             await save_session_snapshot(
                 session_id=storage_session.id,
@@ -632,6 +756,44 @@ def _render_property_results_from_router_output(router_output: Dict[str, Any]) -
     return "\n".join(lines)
 
 
+def _render_property_details_from_router_output(router_output: Dict[str, Any]) -> str:
+    """Build a deterministic property-details reply from tool payload fields only."""
+    prop: Dict[str, Any] = router_output.get("property") or {}
+    if not isinstance(prop, dict) or not prop:
+        return ""
+
+    title = (prop.get("title") or "").strip()
+    if not title:
+        return ""
+
+    city = (prop.get("city") or "").strip().title()
+    price = prop.get("price_per_night")
+    beds = prop.get("bedrooms")
+    baths = prop.get("bathrooms")
+    rating = prop.get("rating")
+    amenities = prop.get("amenities") or []
+    description = (prop.get("description") or "").strip()
+
+    price_str = f"${int(price)}/night" if price is not None else ""
+    beds_str = f"{beds} bed{'s' if beds != 1 else ''}" if beds is not None else ""
+    baths_str = f"{baths} bath{'s' if baths != 1 else ''}" if baths is not None else ""
+    rating_str = f"\u2605 {float(rating):.1f}" if rating is not None else ""
+    location = city if city else ""
+    amenity_str = ", ".join(str(a) for a in amenities if a) if isinstance(amenities, list) else ""
+
+    lines = [f"**{title}**"]
+    meta = " | ".join(filter(None, [location, price_str, beds_str, baths_str, rating_str]))
+    if meta:
+        lines.append(meta)
+    if amenity_str:
+        lines.append(f"Amenities: {amenity_str}")
+    if description:
+        lines.append(description)
+    lines.append("")
+    lines.append("Want to book this one?")
+    return "\n".join(lines)
+
+
 async def _render_voice_from_router_output(
     router_output: str,
     user_cognitive_context: str,
@@ -717,17 +879,23 @@ async def _maybe_handle_search_state_shortcut(
     Check the message for a stored search shortcut and, if matched, execute the corresponding search tool and persist any updated soft_state.
     
     The function:
-    - Loads the Redis session snapshot for the given session_id and validates that snapshot, snapshot["state"], and snapshot["state"]["soft_state"] are dictionaries.
+    - Loads the Redis session snapshot for the given session_id.
+    - Robustly extracts soft_state (supports both nested 'soft_state' and flat/compatibility shapes).
     - Calls match_shortcut(message, soft_state); if no shortcut matches, returns None.
     - If the shortcut action is "select_property" and a selection_number is provided, calls select_property(...) with a tool context containing the current soft_state.
     - If the shortcut action is "paginate_results", calls paginate_stored_results(...) with the requested direction ("next" by default).
-    - If a tool payload is produced, updates snapshot.state.soft_state, saves the session snapshot (preserving history and the meta keys app_name, user_id, last_update_time when present), and returns the payload.
+    - If the shortcut action is "return_to_previous_results", calls return_to_previous_results(soft_state).
+    - If a tool payload is produced, updates snapshot.state.soft_state, saves the session snapshot, and returns the payload.
     - Returns None when validation fails, no shortcut matches, or the tool produced no payload.
     
     Returns:
         Optional[Dict[str, Any]]: The tool payload produced by the shortcut when handled, or `None` if no shortcut was applied or no payload was produced.
     """
-    from app.agents.tools.search import paginate_stored_results, select_property
+    from app.agents.tools.search import (
+        paginate_stored_results,
+        return_to_previous_results,
+        select_property,
+    )
 
     snapshot = await get_session_snapshot(session_id)
     if not isinstance(snapshot, dict):
@@ -737,9 +905,16 @@ async def _maybe_handle_search_state_shortcut(
     if not isinstance(state, dict):
         return None
 
-    soft_state = state.get("soft_state") or {}
-    if not isinstance(soft_state, dict):
-        return None
+    # Robust soft_state extraction:
+    # - preferred shape: snapshot["state"]["soft_state"]
+    # - compatibility shape: snapshot["state"] itself is the soft_state
+    # Use dict(state) for the flat shape to avoid circular references when
+    # persisting back as state["soft_state"] = soft_state.
+    soft_state: Dict[str, Any]
+    if "soft_state" in state and isinstance(state["soft_state"], dict):
+        soft_state = state["soft_state"]
+    else:
+        soft_state = dict(state)
 
     shortcut = match_shortcut(message, soft_state)
     if shortcut is None:
@@ -758,6 +933,8 @@ async def _maybe_handle_search_state_shortcut(
             soft_state,
             direction=shortcut.direction or "next",
         )
+    elif shortcut.action == "return_to_previous_results":
+        payload = return_to_previous_results(soft_state)
 
     if not payload:
         return None
@@ -775,6 +952,44 @@ async def _maybe_handle_search_state_shortcut(
         },
     )
     return payload
+
+
+async def _maybe_record_unsupported_region(
+    *,
+    session_id: str,
+    country: str | None,
+) -> None:
+    """Persist only last_unsupported_region; do not touch booking/search state."""
+    if not country:
+        return
+    try:
+        snapshot = await get_session_snapshot(session_id)
+        if not isinstance(snapshot, dict):
+            return
+        state = snapshot.get("state")
+        if not isinstance(state, dict):
+            return
+        soft_state = state.get("soft_state")
+        if not isinstance(soft_state, dict):
+            soft_state = {}
+        else:
+            soft_state = dict(soft_state)
+        soft_state["last_unsupported_region"] = country
+        state = dict(state)
+        state["soft_state"] = soft_state
+        meta = snapshot.get("meta") or {}
+        await save_session_snapshot(
+            session_id=session_id,
+            history=snapshot.get("history", []),
+            state=state,
+            metadata={
+                key: meta[key]
+                for key in ("app_name", "user_id", "last_update_time")
+                if key in meta
+            },
+        )
+    except Exception as exc:
+        logger.debug("[service_coverage] Could not persist last_unsupported_region: %s", exc)
 
 
 async def run_adk_turn(
@@ -800,23 +1015,58 @@ async def run_adk_turn(
         yield "I'm sorry, I can't process that request. Could you rephrase?"
         return
 
-    pre_routed = await route_pre_adk(
-        message=cleaned_message,
-        user_id=user_id,
-        session_id=session_id,
-    )
-    if pre_routed and pre_routed.get("reply"):
-        yield str(pre_routed["reply"])
+    coverage_decision = evaluate_message_coverage(cleaned_message)
+    if coverage_decision.blocked and coverage_decision.message:
+        await _maybe_record_unsupported_region(
+            session_id=session_id,
+            country=coverage_decision.country,
+        )
+        yield coverage_decision.message
         return
+
+    direct_search_payload = await maybe_handle_direct_property_search(
+        cleaned_message,
+        session_id,
+        get_snapshot=get_session_snapshot,
+        save_snapshot=save_session_snapshot,
+    )
+    if direct_search_payload:
+        if (
+            direct_search_payload.get("status") == "properties_found"
+            and direct_search_payload.get("properties")
+        ):
+            deterministic = _render_property_results_from_router_output(direct_search_payload)
+            if deterministic:
+                yield deterministic
+                return
+        status = str(direct_search_payload.get("status") or "").lower()
+        if status == "no_results":
+            city = (direct_search_payload.get("city") or "").strip()
+            city_part = f" in {city}" if city else ""
+            yield (
+                f"I couldn't find any matching properties{city_part} with those filters. "
+                "Try adjusting the city, property type, or budget."
+            )
+            return
+
     shortcut_payload = await _maybe_handle_search_state_shortcut(
         session_id = session_id,
         message=cleaned_message
     )
     if shortcut_payload:
+        deterministic_reply = shortcut_payload.get("deterministic_reply")
+        if deterministic_reply:
+            yield str(deterministic_reply)
+            return
         if shortcut_payload.get("status") == "properties_found" and shortcut_payload.get("properties"):
             deterministic = _render_property_results_from_router_output(shortcut_payload)
             if deterministic:
                 yield deterministic
+                return
+        if str(shortcut_payload.get("status") or "").lower() == "property_details":
+            details = _render_property_details_from_router_output(shortcut_payload)
+            if details:
+                yield details
                 return
 
         shortcut_text = await _render_voice_from_router_output(
@@ -827,6 +1077,14 @@ async def run_adk_turn(
         if shortcut_text:
             yield shortcut_text
             return
+    pre_routed = await route_pre_adk(
+        message=cleaned_message,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if pre_routed and pre_routed.get("reply"):
+        yield str(pre_routed["reply"])
+        return
     if not cleaned_message.strip():
         yield "I didn't catch that. Could you repeat your question?"
         return
@@ -846,6 +1104,9 @@ async def run_adk_turn(
     router_output_dict: Optional[Dict[str, Any]] = None
     _deterministic_render: Optional[str] = None
     pipeline_failed_reply = ""
+    # Soft-state derived from the triage_router tool payload.
+    # Merged into Redis at the end of the turn so follow-up shortcuts work.
+    _pending_soft_state: Dict[str, Any] = {}
     event_count = 0
     max_adk_events = int(getattr(_cfg, "runtime_max_adk_events_per_turn", 8))
     try:
@@ -915,6 +1176,9 @@ async def run_adk_turn(
                                     "concierge_voice LLM output will be suppressed (%d properties)",
                                     len(_props),
                                 )
+                        # Build pending soft_state from router output so the
+                        # live session always has navigable search context.
+                        _pending_soft_state = _soft_state_from_router_output(router_output_dict)
 
                 if author == "triage_router" and event_text:
                     router_output = event_text
@@ -970,14 +1234,62 @@ async def run_adk_turn(
         updated_session = None
 
     try:
+        current_snapshot = await get_session_snapshot(session_id)
+        current_state = current_snapshot.get("state", {})
+        merged_state = dict(current_state) if isinstance(current_state, dict) else {}
+
+        # Layer 1: best-effort soft_state extracted from the router_output payload.
+        # Applied first so that the in-memory ADK session state (layer 2) can
+        # override individual keys if it has richer data.
+        if _pending_soft_state:
+            # For property_details we must NOT erase existing search context.
+            # Use a selective merge: only add keys that are absent from the
+            # current soft_state when they are search-navigation keys.
+            _SEARCH_NAV_KEYS = frozenset({
+                "visible_results", "all_search_results", "option_map",
+                "current_page", "page_size", "active_flow",
+            })
+            existing_soft = merged_state.get("soft_state") or {}
+            _pss_status = (router_output_dict or {}).get("status", "").lower()
+            if _pss_status == "property_details":
+                # Merge only non-search-nav keys so we don't clobber the menu.
+                safe_updates = {
+                    k: v for k, v in _pending_soft_state.items()
+                    if k not in _SEARCH_NAV_KEYS
+                }
+                merged_state["soft_state"] = _merge_soft_state(existing_soft, safe_updates)
+            else:
+                merged_state["soft_state"] = _merge_soft_state(existing_soft, _pending_soft_state)
+            logger.debug(
+                "[ADK] Pending soft_state from router_output merged: status=%s keys=%s",
+                _pss_status, list(_pending_soft_state.keys()),
+            )
+
+        # Layer 2: authoritative soft_state from the ADK in-memory session
+        # (contains mutations written directly by tool_context inside the tools).
         if updated_session and updated_session.state:
             fresh_soft_state = updated_session.state.get("soft_state")
             if isinstance(fresh_soft_state, dict) and fresh_soft_state:
-                current_snapshot = await get_session_snapshot(session_id)
-                merged_state = current_snapshot.get("state", {})
-                merged_state["soft_state"] = fresh_soft_state
-                await save_session_snapshot(session_id=session_id, state=merged_state)
-                logger.debug("[ADK] soft state presisted explicity for session %s", session_id)
+                merged_state["soft_state"] = _merge_soft_state(
+                    merged_state.get("soft_state"),
+                    fresh_soft_state,
+                )
+                logger.debug("[ADK] ADK session soft_state merged for %s", session_id)
+
+        # Persist whenever we have any soft_state to store.
+        if merged_state.get("soft_state"):
+            meta = current_snapshot.get("meta") or {}
+            await save_session_snapshot(
+                session_id=session_id,
+                history=current_snapshot.get("history", []),
+                state=merged_state,
+                metadata={
+                    key: meta[key]
+                    for key in ("app_name", "user_id", "last_update_time")
+                    if key in meta
+                },
+            )
+            logger.debug("[ADK] soft_state persisted for session %s", session_id)
     except Exception as exc:
         logger.warning("[ADK] Could not persist soft_state to Redis: %s", exc)
     frame_obj = None
@@ -1151,4 +1463,3 @@ def _extract_tool_response(event: Any) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
     return None
-

@@ -64,14 +64,16 @@ def test_backend_app_python_and_yaml_do_not_contain_70b_fallback():
     
     This test raises an assertion if the banned substring is found in any scanned file.
     """
-    banned = "groq/llama-3.3-70b-versatile"
+    banned_strings = ("groq/llama-3.3-70b-versatile", "70b-versatile")
     scanned_roots = (Path("app"),)
 
     for root in scanned_roots:
         for path in root.rglob("*"):
             if path.suffix not in {".py", ".yaml", ".yml"}:
                 continue
-            assert banned not in path.read_text(encoding="utf-8")
+            content = path.read_text(encoding="utf-8")
+            for banned in banned_strings:
+                assert banned not in content
 
 
 def _llm_public_text(llm: object) -> str:
@@ -124,5 +126,25 @@ def test_debug_model_config_exposes_models_without_secrets():
     }
 
     serialized = json.dumps(data).lower()
+    for forbidden in ("api_key", "secret", "database_url", "redis_url", "password"):
+        assert forbidden not in serialized
+
+
+def test_debug_config_exposes_dotenv_paths_without_secrets():
+    response = TestClient(app).get("/debug/config")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "dotenv" in data
+    assert set(data["dotenv"]) == {
+        "loaded_paths",
+        "root_env_loaded",
+        "backend_env_loaded",
+    }
+    assert isinstance(data["dotenv"]["loaded_paths"], list)
+    assert isinstance(data["dotenv"]["root_env_loaded"], bool)
+    assert isinstance(data["dotenv"]["backend_env_loaded"], bool)
+
+    serialized = json.dumps(data["dotenv"]).lower()
     for forbidden in ("api_key", "secret", "database_url", "redis_url", "password"):
         assert forbidden not in serialized
