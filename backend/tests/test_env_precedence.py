@@ -12,7 +12,12 @@ class TestEnvPrecedence(unittest.TestCase):
     @patch("pathlib.Path.exists")
     def test_env_loading_order(self, mock_exists):
         """
-        Verify that backend/app/services/config.py defines the correct loading order.
+        Verify that dotenv files are discovered in the expected precedence: root .env, then backend/.env, then services/.env.
+        
+        Reloads app.services.config with pathlib.Path.exists forced to True, reads config._dotenv_paths, and asserts that a root `.env`, a `backend/.env` (excluding paths containing "app"), and a `services/.env` are present and ordered such that backend/.env appears after the root .env and services/.env appears after backend/.env.
+        
+        Parameters:
+            mock_exists (unittest.mock.Mock): Patched replacement for pathlib.Path.exists; this test sets its return_value to True to simulate that all candidate .env files exist.
         """
         # Force exists() to return True for all .env files
         mock_exists.return_value = True

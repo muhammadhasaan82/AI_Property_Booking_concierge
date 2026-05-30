@@ -76,6 +76,14 @@ class _AgentConfig:
     """
 
     def __init__(self, raw: dict) -> None:
+        """
+        Initialize the configuration object from a raw mapping produced by parsing agent_config.yaml.
+        
+        Constructs typed attributes and nested namespaces from `raw` for configured sections (models, session, search, pagination, dataset, intent_routing, booking, small_talk, engagement, resolution, messages, status, sources, anomaly, features, pre_router, runtime_limits, etc.), applies environment-variable overrides for selected scalar fields, and stores the original raw mapping on `self._raw`.
+        
+        Parameters:
+            raw (dict): Parsed YAML configuration mapping for the agent; expected to contain the keys and shapes described above (e.g., "models", "session", "search", "messages"). The constructor does not validate schema and assumes required keys are present.
+        """
         self._raw = raw
 
         m = raw["models"]

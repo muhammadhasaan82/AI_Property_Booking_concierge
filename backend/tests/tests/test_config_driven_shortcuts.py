@@ -8,6 +8,11 @@ from app.services.property_type_normalizer import normalize_property_type
 
 
 def test_pagination_shortcut_loaded_from_yaml_triggers_when_state_present():
+    """
+    Verify that the pagination shortcut defined in configuration matches when the conversation state contains required pagination data.
+    
+    Calls match_shortcut with the phrase "show me more" and state containing `all_search_results`, and asserts the returned shortcut indicates `action == "paginate_results"` and `direction == "next"`.
+    """
     m = match_shortcut("show me more", {"all_search_results": [1, 2, 3]})
     assert m is not None
     assert m.action == "paginate_results"

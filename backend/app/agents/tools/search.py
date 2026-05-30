@@ -141,6 +141,22 @@ def _resolve_property_id_from_selection(
     soft_state: Optional[Dict[str, Any]],
     last_search: Optional[Dict[str, Any]],
 ) -> Optional[str]:
+    """
+    Resolve a property identifier from a user's numeric selection using session mappings and cached search results.
+    
+    Checks, in order:
+      1. soft_state["option_map"] (preferred) for a mapping keyed by the selection number,
+      2. soft_state["active_property_options_map"] (legacy) as a fallback,
+      3. last_search["properties"] for an item whose `number` equals the selection.
+    
+    Parameters:
+        selection_value (Optional[int]): The numeric selection value provided by the user.
+        soft_state (Optional[Dict[str, Any]]): Session soft state that may contain option maps.
+        last_search (Optional[Dict[str, Any]]): Cached last search payload that may contain a `properties` list.
+    
+    Returns:
+        Optional[str]: The resolved property id as a string if found, `None` otherwise.
+    """
     if selection_value is None:
         return None
 
@@ -171,6 +187,20 @@ def _get_active_option_window(
     soft_state: Optional[Dict[str, Any]],
     last_search: Optional[Dict[str, Any]],
 ) -> tuple[int, int]:
+    """
+    Return the active option window counts (number shown and total found) for the current session or last search.
+    
+    Checks `soft_state` and `last_search` dictionaries for numeric counts and falls back to the length of `last_search["properties"]` when counts are missing or non-positive.
+    
+    Parameters:
+        soft_state (Optional[Dict[str, Any]]): Session soft state; reads
+            `active_property_options_shown_count` and `active_property_options_total_found` if present.
+        last_search (Optional[Dict[str, Any]]): Cached last search payload; reads
+            `shown_count`, `total_found`, and `properties` (used for fallback).
+    
+    Returns:
+        tuple[int, int]: A pair `(shown_count, total_found)` where each value is an integer >= 0.
+    """
     shown_count = 0
     total_found = 0
 
@@ -188,11 +218,27 @@ def _get_active_option_window(
 
 
 def _resolve_page_size_max() -> int:
+    """
+    Determine the maximum allowed page size from configuration.
+    
+    Coerces `cfg.page_size_max` to an integer, uses 25 if the configured value is missing or invalid, and enforces a minimum value of 1.
+    
+    Returns:
+        int: The maximum page size (always >= 1).
+    """
     configured = _coerce_int(getattr(cfg, "page_size_max", None)) or 25
     return max(configured, 1)
 
 
 def _resolve_page_size() -> int:
+    """
+    Determine the effective page size for pagination, clamped to allowed bounds.
+    
+    Reads the configured page size and uses 5 if the configured value is missing or not positive, then clamps the result to the range [1, page_size_max].
+    
+    Returns:
+        int: An integer page size between 1 and the configured maximum; defaults to 5 when no valid configuration is present.
+    """
     configured = _coerce_int(getattr(cfg, "page_size", None))
     max_size = _resolve_page_size_max()
     if configured is None or configured <= 0:
@@ -201,6 +247,15 @@ def _resolve_page_size() -> int:
 
 
 def _resolve_page_size_from(value: Any) -> int:
+    """
+    Resolve an input into a valid page size bounded by configured defaults and maximum.
+    
+    Parameters:
+        value (Any): Candidate page size; will be coerced to an integer.
+    
+    Returns:
+        int: A page size integer at least 1 and at most the configured maximum. If `value` is missing, invalid, or <= 0, the configured default page size is returned.
+    """
     configured = _coerce_int(value)
     if configured is None or configured <= 0:
         return _resolve_page_size()
@@ -210,6 +265,15 @@ def _resolve_page_size_from(value: Any) -> int:
 def _build_option_map_from_formatted(
     formatted:List[Dict[str, Any]],
 ) -> Dict[str, Dict[str, Any]]:
+    """
+    Builds a lookup map from formatted property entries keyed by their displayed number.
+    
+    Parameters:
+        formatted (List[Dict[str, Any]]): List of formatted property dictionaries; each item is expected to include a `number` (display index) and property fields such as `id`, `title`, `city`, `price_per_night`, `rating`, `bedrooms`, `bathrooms`, and `property_type`.
+    
+    Returns:
+        Dict[str, Dict[str, Any]]: Mapping where each key is the stringified `number` and each value is a dictionary containing the property's `property_id`, `title`, `city`, `price_per_night`, `rating`, `bedrooms`, `bathrooms`, and `property_type`. Entries with no `number` are omitted.
+    """
     option_map: Dict[str, Dict[str, Any]] = {}
     for item in formatted:
         number = item.get("number")
@@ -236,6 +300,28 @@ def _build_search_page_payload(
     search_limit: int = PROPERTY_RESULT_LIMIT_DEFAULT,
     summary_threshold: int = PROPERTY_SUMMARY_THRESHOLD,
 ) -> tuple[Dict[str, Any], list[Dict[str,Any]], Dict[str, Dict[str, Any]]]:
+    """
+    Builds a paginated search payload, the visible results for the requested page, and an option map for quick lookup.
+    
+    Parameters:
+        results (List[Dict[str, Any]]): Full list of search result records.
+        filters (Dict[str, Any]): Query context used for the payload (e.g., city, budget, beds, property_type).
+        page (int): 1-based page number to return; values outside valid range are clamped.
+        page_size (Optional[int]): Desired page size; when None or invalid, the configured default is used and the value is clamped to allowed bounds.
+        search_limit (int): Maximum number of results considered for reporting (`max_results` in the payload).
+        summary_threshold (int): Threshold at which the payload enables summary mode when total results exceed this value.
+    
+    Returns:
+        Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+            - payload: A dictionary containing search metadata and the formatted properties for the page. Key fields include:
+                - status, total_found, shown_count, has_more, remaining_count, max_results
+                - summary_mode, summary_mode_threshold
+                - properties: list of formatted property entries (with keys like number, id, title, city, price_per_night, bedrooms, bathrooms, property_type, rating, amenities)
+                - query_context: echo of relevant filters
+                - pagination: {current_page, page_size, page_start, page_end, total_pages}
+            - visible_results: The raw slice of `results` included on the returned page.
+            - option_map: Mapping from stringified option number to a compact dict of property fields for each visible item.
+    """
     total_found = len(results)
     safe_page_size = _resolve_page_size_from(page_size)
     safe_page = max(_coerce_int(page) or 1, 1)
@@ -302,6 +388,22 @@ def paginate_stored_results(
     *,
     direction: str = "next",
 ) -> Optional[Dict[str, Any]]:
+    """
+    Advance or rewind the current paginated search results stored in session soft state.
+    
+    Updates the provided `soft_state` to reflect the new page and returns a payload describing the page.
+    
+    Parameters:
+        soft_state (Optional[Dict[str, Any]]): Session soft state containing `all_search_results` and pagination keys; must be a dict with a non-empty `all_search_results` list.
+        direction (str): "next" to advance a page or "previous" to go back one page.
+    
+    Returns:
+        Optional[Dict[str, Any]]: A payload dictionary with pagination metadata, visible `properties`, and memory instructions, or `None` if `soft_state` is invalid or has no stored results.
+    
+    Side effects:
+        - Mutates `soft_state` setting keys such as `active_flow`, `current_page`, `page_size`, `visible_results`, `option_map`, `active_property_options_*`, and `active_property_options_generated_at`.
+        - Caches the updated last search via `_set_cached_last_search`.
+    """
     if not isinstance(soft_state, dict):
         return None
  
@@ -433,23 +535,23 @@ async def search_properties(
     context_flag: Optional[str] = None,
     tool_context: Optional[ToolContext] = None,
 ) -> dict:
-    """Search for rental properties with soft-coded inputs.
-
-    Use this tool when the user wants to find, browse, or compare properties.
-    All parameters are optional. If critical data is missing, this tool returns
-    status=missing_critical_data rather than failing.
-
-    Args:
-        city: The city name if known.
-        budget: Maximum nightly price in USD (optional).
-        beds: Minimum number of bedrooms (optional).
-        property_type: Type of property like apartment, house, villa, etc (optional).
-        amenities: Comma-separated list of required amenities (optional).
-        free_text: Optional vibe or descriptive constraints for semantic matching.
-        max_results: Optional result window size (bounded by config).
-        action_intent: Optional context flag like "re_evaluate_history" or "new_search".
-        context_flag: Optional secondary context flag.
-        tool_context: ADK tool context for session state.
+    """
+    Search rental properties using optional filters and session-aware behavior.
+    
+    Performs a catalog-aware city resolution, applies budget/beds/property-type/amenity filters,
+    optionally reranks results by a free-text "vibe" query, paginates the first page of results,
+    and updates session soft state and cached last search. If critical inputs are missing the
+    function returns a payload describing the missing data instead of raising.
+    
+    Returns:
+        dict: A response payload describing the outcome. On success the payload includes
+        keys such as `status` (e.g., `Status.PROPERTIES_FOUND`), `properties` (formatted
+        results for the returned page), `pagination` (current page, total pages, etc.),
+        `shown_count`, `total_found`, and `memory` metadata. If no matches are found the
+        payload contains `status: Status.NO_RESULTS` and `filters_applied`. If required
+        inputs are absent the payload indicates missing critical data (e.g., `status:
+        Status.MISSING_CRITICAL_DATA`) and lists the missing fields. The payload also
+        carries `user_engagement_state` and `unresolved_turns` when applicable.
     """
     import asyncio
     from ..tools.rust_client import search_properties as rust_search
