@@ -5,8 +5,11 @@ import sys
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-import app.services.config
 from fastapi import FastAPI, Request, Response
+from app.config.env_loader import get_env_debug_snapshot, load_backend_env
+
+load_backend_env()
+
 from app.route import health, properties, booking, faq, chat, mobile, admin
 from app.route import stripe_webhook
 from app.route import test as test_router
@@ -29,11 +32,12 @@ app.add_middleware(
 @app.on_event("startup")
 async def log_resolved_model_config():
     """
-    Log the resolved model configuration snapshot to the module logger.
+    Log secret-safe environment and model configuration snapshots at startup.
     
     This is intended to be run on application startup and records the output of
     get_model_config_snapshot() at INFO level for debugging and observability.
     """
+    logger.info("[Config] Dotenv sources: %s", get_env_debug_snapshot())
     logger.info("[Config] Resolved model config: %s", get_model_config_snapshot())
 
 @app.get("/")
@@ -98,6 +102,7 @@ async def debug_config():
         "routing_policies": get_routing_policies().model_dump(),
         "guardrails": get_guardrails().model_dump(),
         "vocabulary": get_vocabulary().model_dump(),
+        "dotenv": get_env_debug_snapshot(),
         "resolved_models": get_model_config_snapshot(),
     }
     try:

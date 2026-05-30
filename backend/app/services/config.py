@@ -8,10 +8,11 @@ business rules must live in spec/config YAML files, not here.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Set
 
-from dotenv import load_dotenv
+from app.config.env_loader import load_backend_env
+
+load_backend_env()
 
 
 def _parse_bool(value: str) -> bool:
@@ -20,35 +21,6 @@ def _parse_bool(value: str) -> bool:
 
 def _parse_csv_set(raw: str) -> Set[str]:
     return {token.strip().lower() for token in raw.split(",") if token.strip()}
-
-
-_repo_root = Path(__file__).resolve().parents[3]
-_backend_root = Path(__file__).resolve().parents[2]
-_env_root = _repo_root / ".env"
-_env_backend = _backend_root / ".env"
-_env_services = Path(__file__).parent / ".env"
-
-_dotenv_paths = []
-
-if _env_root.exists():
-    load_dotenv(_env_root)
-    _dotenv_paths.append(str(_env_root))
-
-# backend/.env wins over root .env
-if _env_backend.exists():
-    load_dotenv(_env_backend, override=True)
-    _dotenv_paths.append(str(_env_backend))
-
-
-if _env_services.exists():
-    load_dotenv(_env_services, override=True)
-    _dotenv_paths.append(str(_env_services))
-
-if _dotenv_paths:
-    print(f"[Config] Loaded dotenv files: {', '.join(_dotenv_paths)}")
-else:
-    print("[Config] No .env files found.")
-
 
 DATASET_PATH: str = os.getenv("DATASET_PATH", "data/dataset.csv")
 MOCK_MODE: bool = _parse_bool(os.getenv("MOCK_MODE", "false"))

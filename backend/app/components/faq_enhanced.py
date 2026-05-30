@@ -32,7 +32,6 @@ except Exception:
     except Exception:  
         HuggingFaceBgeEmbeddings = None
 
-import app.services.config
 from ..services.dynamic_config import get_retrieval_config, get_vocabulary
 
 

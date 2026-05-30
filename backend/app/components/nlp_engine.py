@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 import logging
-import app.services.config
 from huggingface_hub import login
 import os
 import re

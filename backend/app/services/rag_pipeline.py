@@ -21,7 +21,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
-import app.services.config
 import logging
 
 logger = logging.getLogger(__name__)
