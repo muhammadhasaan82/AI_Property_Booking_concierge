@@ -47,6 +47,7 @@ from app.config.response_policies_loader import render_policy_snippet
 from app.config.conversation_shortcuts_loader import match_shortcut
 from app.config.agent_config_loader import cfg as _cfg
 from app.config.service_coverage_loader import evaluate_message_coverage
+from app.services.direct_property_search import maybe_handle_direct_property_search
 
 ADK_TURN_TIMEOUT = float(getattr(_cfg, "runtime_turn_timeout_seconds", 45))
 logger = logging.getLogger(__name__)
@@ -714,6 +715,44 @@ def _render_property_results_from_router_output(router_output: Dict[str, Any]) -
     return "\n".join(lines)
 
 
+def _render_property_details_from_router_output(router_output: Dict[str, Any]) -> str:
+    """Build a deterministic property-details reply from tool payload fields only."""
+    prop: Dict[str, Any] = router_output.get("property") or {}
+    if not isinstance(prop, dict) or not prop:
+        return ""
+
+    title = (prop.get("title") or "").strip()
+    if not title:
+        return ""
+
+    city = (prop.get("city") or "").strip().title()
+    price = prop.get("price_per_night")
+    beds = prop.get("bedrooms")
+    baths = prop.get("bathrooms")
+    rating = prop.get("rating")
+    amenities = prop.get("amenities") or []
+    description = (prop.get("description") or "").strip()
+
+    price_str = f"${int(price)}/night" if price is not None else ""
+    beds_str = f"{beds} bed{'s' if beds != 1 else ''}" if beds is not None else ""
+    baths_str = f"{baths} bath{'s' if baths != 1 else ''}" if baths is not None else ""
+    rating_str = f"\u2605 {float(rating):.1f}" if rating is not None else ""
+    location = city if city else ""
+    amenity_str = ", ".join(str(a) for a in amenities if a) if isinstance(amenities, list) else ""
+
+    lines = [f"**{title}**"]
+    meta = " | ".join(filter(None, [location, price_str, beds_str, baths_str, rating_str]))
+    if meta:
+        lines.append(meta)
+    if amenity_str:
+        lines.append(f"Amenities: {amenity_str}")
+    if description:
+        lines.append(description)
+    lines.append("")
+    lines.append("Want to book this one?")
+    return "\n".join(lines)
+
+
 async def _render_voice_from_router_output(
     router_output: str,
     user_cognitive_context: str,
@@ -825,25 +864,12 @@ async def _maybe_handle_search_state_shortcut(
     if not isinstance(state, dict):
         return None
 
-<<<<<<< HEAD
-    # Robust extraction of soft_state:
-    # 1. If state contains "soft_state" key and its value is a dict, use it.
-    # 2. Otherwise, treat state itself as soft_state to preserve flat/compatibility state shapes.
-    soft_state: Dict[str, Any]
-    if "soft_state" in state and isinstance(state["soft_state"], dict):
-        soft_state = state["soft_state"]
-    else:
-        # Copy to avoid making state self-referential / circular when setting state["soft_state"] later.
-=======
     # Robust soft_state extraction:
     # - preferred shape: snapshot["state"]["soft_state"]
     # - compatibility shape: snapshot["state"] itself is the soft_state
-    # Use dict(state) for the flat shape to avoid circular references when
-    # persisting back as state["soft_state"] = soft_state.
     if "soft_state" in state and isinstance(state["soft_state"], dict):
         soft_state = state["soft_state"]
     else:
->>>>>>> e4fb719 (bug fixed)
         soft_state = dict(state)
 
     shortcut = match_shortcut(message, soft_state)
@@ -954,6 +980,29 @@ async def run_adk_turn(
         yield coverage_decision.message
         return
 
+    direct_search_payload = await maybe_handle_direct_property_search(
+        cleaned_message,
+        session_id,
+    )
+    if direct_search_payload:
+        if (
+            direct_search_payload.get("status") == "properties_found"
+            and direct_search_payload.get("properties")
+        ):
+            deterministic = _render_property_results_from_router_output(direct_search_payload)
+            if deterministic:
+                yield deterministic
+                return
+        status = str(direct_search_payload.get("status") or "").lower()
+        if status == "no_results":
+            city = (direct_search_payload.get("city") or "").strip()
+            city_part = f" in {city}" if city else ""
+            yield (
+                f"I couldn't find any matching properties{city_part} with those filters. "
+                "Try adjusting the city, property type, or budget."
+            )
+            return
+
     shortcut_payload = await _maybe_handle_search_state_shortcut(
         session_id = session_id,
         message=cleaned_message
@@ -967,6 +1016,11 @@ async def run_adk_turn(
             deterministic = _render_property_results_from_router_output(shortcut_payload)
             if deterministic:
                 yield deterministic
+                return
+        if str(shortcut_payload.get("status") or "").lower() == "property_details":
+            details = _render_property_details_from_router_output(shortcut_payload)
+            if details:
+                yield details
                 return
 
         shortcut_text = await _render_voice_from_router_output(
