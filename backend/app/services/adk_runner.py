@@ -92,6 +92,69 @@ def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
     target.update(updates)
 
 
+def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract navigable search/selection context from a triage_router tool payload.
+
+    When the ADK in-memory session does not propagate soft_state mutations back
+    to Redis, this helper rebuilds a best-effort soft_state from the tool return
+    value so that follow-up shortcuts (select, paginate, reject) always have
+    navigable context.
+
+    Mapping rules
+    -------------
+    status == "properties_found"
+        visible_results      <- properties list
+        all_search_results   <- properties list (seed; pagination fills later)
+        option_map           <- {"1": id, "2": id, ...} built from properties
+        last_presented_view  <- "property_list"
+        current_page         <- pagination.current_page or 1
+        page_size            <- pagination.page_size or len(properties)
+
+    status == "property_details"
+        last_presented_view      <- "property_details"
+        last_selected_property_id <- property["id"] (first item if present)
+        (does NOT overwrite search context keys)
+
+    All other statuses: returns empty dict (no soft_state derived).
+    """
+    if not isinstance(router_output, dict):
+        return {}
+
+    status = (router_output.get("status") or "").lower()
+
+    if status == "properties_found":
+        props: List[Dict[str, Any]] = list(router_output.get("properties") or [])
+        if not props:
+            return {}
+        pagination = router_output.get("pagination") or {}
+        current_page = int(pagination.get("current_page") or 1)
+        page_size = int(pagination.get("page_size") or len(props))
+        # Build a deterministic option_map: {"1": id, "2": id, ...}
+        option_map: Dict[str, str] = {
+            str(i + 1): str(p.get("id") or p.get("property_id") or "")
+            for i, p in enumerate(props)
+        }
+        return {
+            "active_flow": "search",
+            "visible_results": props,
+            "all_search_results": props,
+            "option_map": option_map,
+            "last_presented_view": "property_list",
+            "current_page": current_page,
+            "page_size": page_size,
+        }
+
+    if status == "property_details":
+        props = list(router_output.get("properties") or [])
+        first_id = str(props[0].get("id") or "") if props else ""
+        result: Dict[str, Any] = {"last_presented_view": "property_details"}
+        if first_id:
+            result["last_selected_property_id"] = first_id
+        return result
+
+    return {}
+
+
 def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -930,6 +993,9 @@ async def run_adk_turn(
     router_output_dict: Optional[Dict[str, Any]] = None
     _deterministic_render: Optional[str] = None
     pipeline_failed_reply = ""
+    # Soft-state derived from the triage_router tool payload.
+    # Merged into Redis at the end of the turn so follow-up shortcuts work.
+    _pending_soft_state: Dict[str, Any] = {}
     event_count = 0
     max_adk_events = int(getattr(_cfg, "runtime_max_adk_events_per_turn", 8))
     try:
@@ -999,6 +1065,9 @@ async def run_adk_turn(
                                     "concierge_voice LLM output will be suppressed (%d properties)",
                                     len(_props),
                                 )
+                        # Build pending soft_state from router output so the
+                        # live session always has navigable search context.
+                        _pending_soft_state = _soft_state_from_router_output(router_output_dict)
 
                 if author == "triage_router" and event_text:
                     router_output = event_text
@@ -1054,28 +1123,62 @@ async def run_adk_turn(
         updated_session = None
 
     try:
+        current_snapshot = await get_session_snapshot(session_id)
+        current_state = current_snapshot.get("state", {})
+        merged_state = dict(current_state) if isinstance(current_state, dict) else {}
+
+        # Layer 1: best-effort soft_state extracted from the router_output payload.
+        # Applied first so that the in-memory ADK session state (layer 2) can
+        # override individual keys if it has richer data.
+        if _pending_soft_state:
+            # For property_details we must NOT erase existing search context.
+            # Use a selective merge: only add keys that are absent from the
+            # current soft_state when they are search-navigation keys.
+            _SEARCH_NAV_KEYS = frozenset({
+                "visible_results", "all_search_results", "option_map",
+                "current_page", "page_size", "active_flow",
+            })
+            existing_soft = merged_state.get("soft_state") or {}
+            _pss_status = (router_output_dict or {}).get("status", "").lower()
+            if _pss_status == "property_details":
+                # Merge only non-search-nav keys so we don't clobber the menu.
+                safe_updates = {
+                    k: v for k, v in _pending_soft_state.items()
+                    if k not in _SEARCH_NAV_KEYS
+                }
+                merged_state["soft_state"] = _merge_soft_state(existing_soft, safe_updates)
+            else:
+                merged_state["soft_state"] = _merge_soft_state(existing_soft, _pending_soft_state)
+            logger.debug(
+                "[ADK] Pending soft_state from router_output merged: status=%s keys=%s",
+                _pss_status, list(_pending_soft_state.keys()),
+            )
+
+        # Layer 2: authoritative soft_state from the ADK in-memory session
+        # (contains mutations written directly by tool_context inside the tools).
         if updated_session and updated_session.state:
             fresh_soft_state = updated_session.state.get("soft_state")
             if isinstance(fresh_soft_state, dict) and fresh_soft_state:
-                current_snapshot = await get_session_snapshot(session_id)
-                current_state = current_snapshot.get("state", {})
-                merged_state = dict(current_state) if isinstance(current_state, dict) else {}
                 merged_state["soft_state"] = _merge_soft_state(
                     merged_state.get("soft_state"),
                     fresh_soft_state,
                 )
-                meta = current_snapshot.get("meta") or {}
-                await save_session_snapshot(
-                    session_id=session_id,
-                    history=current_snapshot.get("history", []),
-                    state=merged_state,
-                    metadata={
-                        key: meta[key]
-                        for key in ("app_name", "user_id", "last_update_time")
-                        if key in meta
-                    },
-                )
-                logger.debug("[ADK] soft state presisted explicity for session %s", session_id)
+                logger.debug("[ADK] ADK session soft_state merged for %s", session_id)
+
+        # Persist whenever we have any soft_state to store.
+        if merged_state.get("soft_state"):
+            meta = current_snapshot.get("meta") or {}
+            await save_session_snapshot(
+                session_id=session_id,
+                history=current_snapshot.get("history", []),
+                state=merged_state,
+                metadata={
+                    key: meta[key]
+                    for key in ("app_name", "user_id", "last_update_time")
+                    if key in meta
+                },
+            )
+            logger.debug("[ADK] soft_state persisted for session %s", session_id)
     except Exception as exc:
         logger.warning("[ADK] Could not persist soft_state to Redis: %s", exc)
     frame_obj = None
