@@ -247,13 +247,72 @@ booking:
   required_fields:
     - property_id
     - property_title
+    - guest_name
     - guest_email
+    - guest_phone
     - check_in
     - check_out
   # Numeric fields validated separately (coerced from LLM output):
   required_numeric_fields:
     - guests
     - price_per_night
+
+  # Fields and copy for deterministic "book this selected property" handoff.
+  # These are user-facing collection fields; property_id/title/price are filled
+  # from the selected property context when available.
+  details_request_fields:
+    - guest_name
+    - guest_email
+    - guest_phone
+    - check_in
+    - check_out
+    - guests
+  details_request_prompt_template: |
+    Great - I'll help you book {property_title}.
+    Please provide:
+    {missing_fields_bullets}
+
+  review_prompt_template: |
+    Please review your booking details for {property_title}:
+    - Full name: {guest_name}
+    - Email: {guest_email}
+    - Phone: {guest_phone}
+    - Check-in: {check_in}
+    - Check-out: {check_out}
+    - Guests: {guests}
+    - Nights: {nights}
+    - Price per night: {price_per_night}
+    - Total: {total}
+
+    Please confirm if everything is correct.
+
+  modification_prompt_template: |
+    What would you like to change: name, email, phone, guests, check-in date, check-out date, or property?
+
+  validation_checkout_after_checkin_template: |
+    Your check-out date cannot be earlier than your check-in date. Please provide a valid check-out date after {check_in_display}.
+
+  validation_capacity_template: |
+    This property can host up to {occupancy_max} guests. Please provide a guest count within that limit.
+
+  faq_resume_prompt: "Would you like to continue your booking?"
+  receipt_prompt_template: |
+    Your booking is confirmed.
+    - Registration ID: {registration_id}
+    - Property: {property_title}
+    - Full name: {guest_name}
+    - Email: {guest_email}
+    - Phone: {guest_phone}
+    - Check-in: {check_in}
+    - Check-out: {check_out}
+    - Guests: {guests}
+    - Nights: {nights}
+    - Price per night: {price_per_night}
+    - Total: {total}
+    - Status: {booking_status}
+
+    You can use your registration ID to check your booking status.
+  registration_id_prefix: "BK"
 
   booking_source_tag: "v2_adk"     # written to DB — change without Python edits
   booking_confirmed_status: "confirmed"

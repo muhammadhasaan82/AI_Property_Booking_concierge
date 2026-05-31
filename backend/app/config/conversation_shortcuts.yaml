@@ -4,6 +4,76 @@ version: "1.0"
 # requires_state gates each shortcut: it fires only when those soft_state keys
 # are present. If nothing matches, the turn falls through to ADK/LLM.
 shortcuts:
+  available_cities_request:
+    action: list_available_cities
+    examples:
+      - "in which cities currently the service is available?"
+      - "which cities are available?"
+      - "what cities do you have available?"
+      - "list available cities"
+      - "show available cities"
+
+  property_detail_booking_confirmed:
+    action: start_booking_for_selected_property
+    requires_context:
+      last_presented_view: property_details
+    requires_any_state:
+      - last_selected_property_id
+    examples:
+      - "yes"
+      - "yeah"
+      - "yeah sure"
+      - "sure"
+      - "yes please"
+      - "book it"
+      - "book this"
+      - "book this property"
+      - "i want to book this property"
+      - "proceed"
+      - "continue"
+      - "confirm"
+
+  booking_review_confirmed:
+    action: confirm_booking_review
+    requires_context:
+      booking_stage: awaiting_confirmation
+    requires_any_state:
+      - booking_review
+      - pending_booking
+    examples:
+      - "yes"
+      - "confirm"
+      - "looks good"
+      - "proceed"
+      - "book it"
+      - "yes please"
+
+  booking_review_modify:
+    action: modify_booking_review
+    requires_any_state:
+      - booking_review
+      - pending_booking
+    requires_context:
+      booking_stage: awaiting_confirmation
+    examples:
+      - "no"
+      - "change name"
+      - "update phone"
+      - "change dates"
+      - "change guests"
+      - "change property"
+
+  resume_booking_after_faq:
+    action: resume_booking_flow
+    requires_state:
+      - booking_stage
+      - booking_property_id
+    examples:
+      - "continue booking"
+      - "continue booking please"
+      - "resume booking"
+      - "continue my booking"
+
   pagination_next:
     action: paginate_results
     direction: next

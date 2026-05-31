@@ -4,19 +4,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-# ---------------------------------------------------------------------------
-# Module-level defaults – resolved once at import time
-# ---------------------------------------------------------------------------
-#   parents[0] = app/config/
-#   parents[1] = app/
-#   parents[2] = backend/           ← backend root
-#   parents[3] = AI_Property_Booking_concierge/  ← repo root
 _DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[2]
-
-# ---------------------------------------------------------------------------
-# Module-level state (updated on every successful load_backend_env() call)
-# ---------------------------------------------------------------------------
 _loaded_dotenv_paths: list[str] = []
 _root_env_loaded: bool = False
 _backend_env_loaded: bool = False
@@ -63,7 +52,7 @@ def load_backend_env(
     """
     global _loaded_dotenv_paths, _root_env_loaded, _backend_env_loaded, _env_loaded
 
-    # Idempotency guard – skip if already loaded unless force=True
+
     if _env_loaded and not force:
         return list(_loaded_dotenv_paths)
 
@@ -79,7 +68,7 @@ def load_backend_env(
     root_env_loaded = False
     backend_env_loaded = False
 
-    # --- Step 1: read files into plain dicts (no os.environ side-effects) ---
+
     root_values: dict[str, str | None] = {}
     if root_env_path.is_file():
         root_values = dict(dotenv_values(root_env_path))
@@ -92,18 +81,16 @@ def load_backend_env(
         loaded_paths.append(str(backend_env_path))
         backend_env_loaded = True
 
-    # --- Step 2: merge – backend wins over root for duplicate keys ----------
-    # Start with root, then let backend overwrite any shared keys.
     merged: dict[str, str | None] = {**root_values, **backend_values}
 
-    # --- Step 3: apply via setdefault – process env is never overwritten ----
-    import os  # local import keeps module-level namespace clean
+
+    import os
 
     for key, value in merged.items():
         if value is not None:
             os.environ.setdefault(key, value)
 
-    # --- Step 4: update module-level state ----------------------------------
+
     _loaded_dotenv_paths = loaded_paths
     _root_env_loaded = root_env_loaded
     _backend_env_loaded = backend_env_loaded

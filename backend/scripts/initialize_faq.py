@@ -12,7 +12,7 @@ backend_root = str(Path(__file__).resolve().parents[1])
 if backend_root not in sys.path:
     sys.path.insert(0, backend_root)
 
-# Load environment variables
+s
 env_path = Path(__file__).resolve().parents[1] / ".env"
 if env_path.exists():
     load_dotenv(env_path)
@@ -26,7 +26,7 @@ def main():
     print("FAQ System Initialization")
     print("="*60)
     
-    # Check if PDF exists
+
     pdf_path = Path(__file__).resolve().parents[1] / "data" / "Company policy.pdf"
     
     if not pdf_path.exists():
@@ -38,7 +38,7 @@ def main():
     print("[Processing] Processing document and creating vector store...")
     
     try:
-        # Process the PDF and create vector store
+
         vector_store = process_policy_document(str(pdf_path), force_reload=True)
         
         print("\n[SUCCESS] FAQ system initialized with the following details:")
@@ -46,7 +46,7 @@ def main():
         print(f"   - Vector store location: {Path(__file__).resolve().parents[1] / 'data' / 'chroma_faq'}")
         print("   - Embeddings model: BAAI/bge-small-en-v1.5")
         
-        # Test with a sample question
+
         print("\n[TEST] Testing with sample question...")
         from app.components.faq_enhanced import semantic_faq_search
         

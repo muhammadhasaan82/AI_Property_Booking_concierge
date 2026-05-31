@@ -8,7 +8,7 @@ No value in this system needs to be changed in Python source code.
 Usage:
     from app.config.agent_config_loader import cfg
 
-    # All values accessed as dot-notation attributes
+
     cfg.session.cache_ttl_seconds
     cfg.booking.required_fields
     cfg.messages.resolution_unresolved_default
@@ -149,6 +149,34 @@ class _AgentConfig:
         self.date_format: str = bk["date_format"]
         self.booking_required_fields: list[str] = bk["required_fields"]
         self.booking_required_numeric_fields: list[str] = bk["required_numeric_fields"]
+        self.booking_details_request_fields: list[str] = list(
+            bk.get("details_request_fields")
+            or (bk["required_fields"] + bk["required_numeric_fields"])
+        )
+        self.booking_details_request_prompt_template: str = str(
+            bk.get("details_request_prompt_template", "")
+        )
+        self.booking_review_prompt_template: str = str(
+            bk.get("review_prompt_template", "")
+        )
+        self.booking_modification_prompt_template: str = str(
+            bk.get("modification_prompt_template", "")
+        )
+        self.booking_validation_checkout_after_checkin_template: str = str(
+            bk.get("validation_checkout_after_checkin_template", "")
+        )
+        self.booking_validation_capacity_template: str = str(
+            bk.get("validation_capacity_template", "")
+        )
+        self.booking_faq_resume_prompt: str = str(
+            bk.get("faq_resume_prompt", "")
+        )
+        self.booking_receipt_prompt_template: str = str(
+            bk.get("receipt_prompt_template", "")
+        )
+        self.booking_registration_id_prefix: str = str(
+            bk.get("registration_id_prefix", "BK")
+        )
         self.booking_source_tag: str = bk["booking_source_tag"]
         self.booking_confirmed_status: str = bk["booking_confirmed_status"]
 
