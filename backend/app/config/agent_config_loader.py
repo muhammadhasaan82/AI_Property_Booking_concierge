@@ -156,6 +156,27 @@ class _AgentConfig:
         self.booking_details_request_prompt_template: str = str(
             bk.get("details_request_prompt_template", "")
         )
+        self.booking_review_prompt_template: str = str(
+            bk.get("review_prompt_template", "")
+        )
+        self.booking_modification_prompt_template: str = str(
+            bk.get("modification_prompt_template", "")
+        )
+        self.booking_validation_checkout_after_checkin_template: str = str(
+            bk.get("validation_checkout_after_checkin_template", "")
+        )
+        self.booking_validation_capacity_template: str = str(
+            bk.get("validation_capacity_template", "")
+        )
+        self.booking_faq_resume_prompt: str = str(
+            bk.get("faq_resume_prompt", "")
+        )
+        self.booking_receipt_prompt_template: str = str(
+            bk.get("receipt_prompt_template", "")
+        )
+        self.booking_registration_id_prefix: str = str(
+            bk.get("registration_id_prefix", "BK")
+        )
         self.booking_source_tag: str = bk["booking_source_tag"]
         self.booking_confirmed_status: str = bk["booking_confirmed_status"]
 

@@ -43,6 +43,29 @@ def test_property_detail_rejection_shortcut_is_context_gated():
     assert match_shortcut("no thanks", {"visible_results": [{"id": "x"}]}) is None
 
 
+def test_booking_review_confirm_shortcut_loaded_from_yaml():
+    state = {
+        "booking_stage": "awaiting_confirmation",
+        "booking_review": {"property_id": "apt-1"},
+    }
+    match = match_shortcut("looks good", state)
+    assert match is not None
+    assert match.action == "confirm_booking_review"
+
+
+def test_resume_booking_shortcut_requires_active_booking_context():
+    state = {
+        "booking_stage": "collecting_details",
+        "booking_property_id": "apt-1",
+    }
+    match = match_shortcut("continue booking please", state)
+    assert match is not None
+    assert match.action == "resume_booking_flow"
+
+    assert match_shortcut("continue booking please", {"booking_stage": "collecting_details"}) is None
+    assert match_shortcut("continue booking please", {"booking_property_id": "apt-1"}) is None
+
+
 def test_renaming_or_removing_shortcut_in_yaml_changes_behavior_without_python():
     # Build a router from a custom dict (simulates an edited YAML) — no Python change.
     custom = _ShortcutRouter(

@@ -47,6 +47,14 @@ from app.config.response_policies_loader import render_policy_snippet
 from app.config.conversation_shortcuts_loader import match_shortcut
 from app.config.agent_config_loader import cfg as _cfg
 from app.config.service_coverage_loader import evaluate_message_coverage
+from app.services.booking_flow import (
+    confirm_booking_review as _confirm_booking_review,
+    handle_active_booking_turn as _handle_active_booking_turn,
+    handle_review_modification_request as _handle_review_modification_request,
+    list_available_cities_payload as _list_available_cities_payload,
+    resume_booking_flow as _resume_booking_flow,
+    start_booking_for_selected_property as _start_booking_for_selected_property_flow,
+)
 from app.services.direct_property_search import maybe_handle_direct_property_search
 
 ADK_TURN_TIMEOUT = float(getattr(_cfg, "runtime_turn_timeout_seconds", 45))
@@ -938,51 +946,7 @@ def _apply_booking_collection_top_level_compat(
 def _start_booking_for_selected_property(
     soft_state: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    selected_id_raw = soft_state.get("last_selected_property_id")
-    if selected_id_raw is None or not str(selected_id_raw).strip():
-        return None
-
-    selected_id = str(selected_id_raw).strip()
-    selected_property = _resolve_selected_property_from_soft_state(soft_state, selected_id)
-    required_fields = _configured_booking_details_fields()
-
-    try:
-        from app.agents.state.booking_state import (
-            extract_booking_updates,
-            set_awaiting_field,
-            update_booking_state,
-        )
-
-        updates = extract_booking_updates(
-            property_id=selected_id,
-            property_title=(selected_property or {}).get("title"),
-            price_per_night=(selected_property or {}).get("price_per_night"),
-        )
-        update_booking_state(soft_state, updates)
-        set_awaiting_field(soft_state, required_fields)
-    except Exception as exc:
-        logger.warning("[ADK] Could not seed booking soft_state: %s", exc)
-
-    _apply_booking_collection_top_level_compat(
-        soft_state,
-        selected_id=selected_id,
-        selected_property=selected_property,
-        required_fields=required_fields,
-    )
-
-    deterministic_reply = _render_booking_details_request(
-        selected_property=selected_property,
-        selected_id=selected_id,
-        required_fields=required_fields,
-    )
-
-    return {
-        "status": "booking_details_required",
-        "property_id": selected_id,
-        "property": selected_property,
-        "required_fields": required_fields,
-        "deterministic_reply": deterministic_reply,
-    }
+    return _start_booking_for_selected_property_flow(soft_state)
 
 
 async def _maybe_handle_search_state_shortcut(
@@ -1001,6 +965,10 @@ async def _maybe_handle_search_state_shortcut(
     - If the shortcut action is "paginate_results", calls paginate_stored_results(...) with the requested direction ("next" by default).
     - If the shortcut action is "return_to_previous_results", calls return_to_previous_results(soft_state).
     - If the shortcut action is "start_booking_for_selected_property", seeds booking state from the selected property.
+    - If the shortcut action is "confirm_booking_review", finalizes the deterministic receipt.
+    - If the shortcut action is "modify_booking_review", enters deterministic review modification.
+    - If the shortcut action is "resume_booking_flow", resumes the active deterministic booking stage.
+    - If the shortcut action is "list_available_cities", returns the dataset-backed city list.
     - If a tool payload is produced, updates snapshot.state.soft_state, saves the session snapshot, and returns the payload.
     - Returns None when validation fails, no shortcut matches, or the tool produced no payload.
     
@@ -1053,6 +1021,14 @@ async def _maybe_handle_search_state_shortcut(
         payload = return_to_previous_results(soft_state)
     elif shortcut.action == "start_booking_for_selected_property":
         payload = _start_booking_for_selected_property(soft_state)
+    elif shortcut.action == "confirm_booking_review":
+        payload = await _confirm_booking_review(soft_state)
+    elif shortcut.action == "modify_booking_review":
+        payload = _handle_review_modification_request(message, soft_state)
+    elif shortcut.action == "resume_booking_flow":
+        payload = _resume_booking_flow(soft_state)
+    elif shortcut.action == "list_available_cities":
+        payload = _list_available_cities_payload()
 
     if not payload:
         return None
@@ -1108,6 +1084,43 @@ async def _maybe_record_unsupported_region(
         )
     except Exception as exc:
         logger.debug("[service_coverage] Could not persist last_unsupported_region: %s", exc)
+
+
+async def _maybe_handle_active_booking_turn(
+    *,
+    session_id: str,
+    message: str,
+) -> Optional[Dict[str, Any]]:
+    snapshot = await get_session_snapshot(session_id)
+    if not isinstance(snapshot, dict):
+        return None
+
+    state = snapshot.get("state") or {}
+    if not isinstance(state, dict):
+        return None
+
+    if "soft_state" in state and isinstance(state["soft_state"], dict):
+        soft_state = state["soft_state"]
+    else:
+        soft_state = dict(state)
+
+    payload = await _handle_active_booking_turn(message, soft_state)
+    if not payload:
+        return None
+
+    state["soft_state"] = soft_state
+    meta = snapshot.get("meta") or {}
+    await save_session_snapshot(
+        session_id=session_id,
+        history=snapshot.get("history", []),
+        state=state,
+        metadata={
+            key: meta[key]
+            for key in ("app_name", "user_id", "last_update_time")
+            if key in meta
+        },
+    )
+    return payload
 
 
 async def run_adk_turn(
@@ -1194,6 +1207,15 @@ async def run_adk_turn(
         )
         if shortcut_text:
             yield shortcut_text
+            return
+    booking_payload = await _maybe_handle_active_booking_turn(
+        session_id=session_id,
+        message=cleaned_message,
+    )
+    if booking_payload:
+        deterministic_reply = booking_payload.get("deterministic_reply")
+        if deterministic_reply:
+            yield str(deterministic_reply)
             return
     pre_routed = await route_pre_adk(
         message=cleaned_message,

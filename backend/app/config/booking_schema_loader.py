@@ -32,7 +32,9 @@ class _BookingBlock(BaseModel):
     required_fields: List[str] = Field(default_factory=list)
     required_numeric_fields: List[str] = Field(default_factory=list)
     ask_order: List[str] = Field(default_factory=list)
+    field_display_names: Dict[str, str] = Field(default_factory=dict)
     field_prompts: Dict[str, str] = Field(default_factory=dict)
+    field_aliases: Dict[str, List[str]] = Field(default_factory=dict)
     validators: Dict[str, _ValidatorSpec] = Field(default_factory=dict)
     date_format: str = "%Y-%m-%d"
     source_tag: str = "v2_adk"
@@ -63,6 +65,17 @@ def get_ask_order() -> List[str]:
 
 def get_field_prompt(field: str) -> Optional[str]:
     return booking_schema.booking.field_prompts.get(field)
+
+
+def get_field_display_name(field: str) -> str:
+    return str(booking_schema.booking.field_display_names.get(field) or field)
+
+
+def get_field_aliases() -> Dict[str, List[str]]:
+    return {
+        str(field): [str(alias).strip() for alias in aliases if str(alias).strip()]
+        for field, aliases in (booking_schema.booking.field_aliases or {}).items()
+    }
 
 def next_field_to_ask(missing_fields: List[str]) -> Optional[str]:
     """Return the first field in ask_order that is also in missing_fields."""

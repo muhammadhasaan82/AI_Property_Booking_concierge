@@ -16,7 +16,9 @@ booking:
   required_fields:
     - property_id
     - property_title
+    - guest_name
     - guest_email
+    - guest_phone
     - check_in
     - check_out
 
@@ -28,14 +30,29 @@ booking:
   # Property fields (property_id, property_title, price_per_night) are typically
   # populated by select_property; the user is asked for these in order:
   ask_order:
+    - guest_name
     - guest_email
+    - guest_phone
     - check_in
     - check_out
     - guests
 
   # User-facing prompts when a field is missing. Edit copy here, not in tools/.
+  field_display_names:
+    property_id: "Property ID"
+    property_title: "Property"
+    guest_name: "Full name"
+    guest_email: "Email"
+    guest_phone: "Phone number"
+    check_in: "Check-in date"
+    check_out: "Check-out date"
+    guests: "Number of guests"
+    price_per_night: "Price per night"
+
   field_prompts:
+    guest_name: "What full name should I use for the reservation?"
     guest_email: "What email should I use for your reservation?"
+    guest_phone: "What phone number should I use for the reservation?"
     check_in: "What check-in date would you prefer?"
     check_out: "And the check-out date?"
     guests: "How many guests will be staying?"
@@ -45,10 +62,21 @@ booking:
 
   # Per-field validators. Used by policy router and review_booking_details.
   validators:
+    guest_name:
+      type: length
+      min: 2
+      max: 120
+      message: "Please provide the guest's full name."
+
     guest_email:
       type: regex
       pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
       message: "That doesn't look like a valid email — could you double-check?"
+
+    guest_phone:
+      type: regex
+      pattern: '^[0-9+\-\s()]{7,20}$'
+      message: "That doesn't look like a valid phone number — could you double-check?"
 
     guests:
       type: integer
@@ -72,6 +100,15 @@ booking:
       format: "%Y-%m-%d"
       after_field: check_in
       message: "Check-out must be after check-in."
+
+  field_aliases:
+    guest_name: ["name", "full name", "guest name"]
+    guest_email: ["email", "email address", "mail"]
+    guest_phone: ["phone", "phone number", "mobile", "mobile number", "contact number", "number"]
+    check_in: ["check in", "check-in", "check in date", "check-in date", "arrival", "arrival date"]
+    check_out: ["check out", "check-out", "check out date", "check-out date", "departure", "departure date"]
+    guests: ["guest", "guests", "people", "persons", "party size"]
+    property_id: ["property"]
 
   
   date_format: "%Y-%m-%d"
