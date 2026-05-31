@@ -124,6 +124,8 @@ async def test_direct_property_search_then_option_then_no_live_style(monkeypatch
             chunks.append(chunk)
 
         assert len(snapshot["state"]["soft_state"]["all_search_results"]) == 8
+        soft_state = snapshot["state"]["soft_state"]
+        expected_title = soft_state["visible_results"][2]["title"]
 
         chunks = []
         async for chunk in adk_runner.run_adk_turn(
@@ -134,7 +136,7 @@ async def test_direct_property_search_then_option_then_no_live_style(monkeypatch
             chunks.append(chunk)
 
     details_reply = "".join(chunks)
-    assert "Apartment 3" in details_reply
+    assert expected_title in details_reply
     soft_state = snapshot["state"]["soft_state"]
     assert soft_state["last_presented_view"] == "property_details"
     assert soft_state.get("last_selected_property_id")

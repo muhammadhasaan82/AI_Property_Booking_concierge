@@ -307,6 +307,11 @@ async def test_run_adk_turn_rejection_after_selection_returns_menu(monkeypatch):
     monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
     monkeypatch.setattr(
         adk_runner,
+        "maybe_handle_direct_property_search",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        adk_runner,
         "_get_session_service",
         lambda: _FakeSessionService({"soft_state": dict(ctx.state["soft_state"])}),
     )
@@ -394,6 +399,7 @@ async def test_run_adk_turn_search_result_persists_visible_results_from_router_o
             "has_more": False,
         },
     }
+    search_result = search_router_output
 
     snapshot: dict = {
         "state": {},
@@ -427,6 +433,11 @@ async def test_run_adk_turn_search_result_persists_visible_results_from_router_o
 
     monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
     monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(
+        adk_runner,
+        "maybe_handle_direct_property_search",
+        AsyncMock(return_value=None),
+    )
     monkeypatch.setattr(adk_runner, "_get_session_service", lambda: _FakeSessionService(adk_session_state))
     monkeypatch.setattr(adk_runner, "_get_runner", lambda: _FakeRunner(events))
     monkeypatch.setattr(adk_runner, "sanitize_input", lambda msg: (msg, True))
@@ -454,5 +465,5 @@ async def test_run_adk_turn_search_result_persists_visible_results_from_router_o
     assert soft_state.get("last_presented_view") == "property_list"
 
     # Confirm option_map values reference the correct property IDs.
-    expected_id_1 = str(props[0].get("id") or "")
+    expected_id_1 = str(search_result["properties"][0].get("id") or "")
     assert soft_state["option_map"]["1"]["property_id"] == expected_id_1
