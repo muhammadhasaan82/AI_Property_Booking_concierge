@@ -104,95 +104,61 @@ def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, A
     Mapping rules
     -------------
     status == "properties_found"
-        visible_results      <- properties list
-        all_search_results   <- properties list (seed; pagination fills later)
-        option_map           <- {"1": id, "2": id, ...} built from properties
-        last_presented_view  <- "property_list"
-        current_page         <- pagination.current_page or 1
-        page_size            <- pagination.page_size or len(properties)
+        visible_results                    <- properties list
+        all_search_results                 <- all_search_results/results_full fallback to properties
+        option_map                         <- {"1": {"property_id": id}, ...} built from properties
+        active_property_options_map        <- option_map
+        active_property_options_shown_count <- shown_count or len(properties)
+        active_property_options_total_found <- total_found or len(all_search_results)
+        last_filters                       <- query_context or filters
+        last_presented_view                <- "property_list"
 
     status == "property_details"
-        last_presented_view      <- "property_details"
-        last_selected_property_id <- property["id"] (first item if present)
-        (does NOT overwrite search context keys)
+        last_presented_view       <- "property_details"
+        last_selected_property_id <- property_id or property["id"]
 
     All other statuses: returns empty dict (no soft_state derived).
     """
     if not isinstance(router_output, dict):
         return {}
 
-    status = (router_output.get("status") or "").lower()
-
+    status = str(router_output.get("status") or "").lower()
     if status == "properties_found":
-        props: List[Dict[str, Any]] = list(router_output.get("properties") or [])
-        if not props:
-            return {}
-        pagination = router_output.get("pagination") or {}
-        current_page = int(pagination.get("current_page") or 1)
-        page_size = int(pagination.get("page_size") or len(props))
-        query_context = router_output.get("query_context") or {}
-        filters_applied = router_output.get("filters_applied") or {}
-        last_filters: Dict[str, Any] = {}
-        if isinstance(query_context, dict):
-            last_filters.update(query_context)
-        if isinstance(filters_applied, dict):
-            last_filters.update(filters_applied)
-
-        def _option_payload(prop: Dict[str, Any]) -> Dict[str, Any]:
-            return {
-                "property_id": prop.get("id") or prop.get("property_id"),
-                "title": prop.get("title"),
-                "city": prop.get("city"),
-                "price_per_night": prop.get("price_per_night"),
-                "rating": prop.get("rating"),
-                "reviews_count": prop.get("reviews_count"),
-                "bedrooms": prop.get("bedrooms"),
-                "bathrooms": prop.get("bathrooms"),
-                "property_type": prop.get("property_type"),
-            }
-
+        props = router_output.get("properties") or []
+        all_results = (
+            router_output.get("all_search_results")
+            or router_output.get("results_full")
+            or props
+        )
         option_map = router_output.get("option_map")
-        option_map_valid = False
-        if isinstance(option_map, dict) and option_map:
-            option_map_valid = all(
-                isinstance(val, dict) and ("property_id" in val or "id" in val)
-                for val in option_map.values()
-            )
-        if not option_map_valid:
+        if not isinstance(option_map, dict) or not option_map:
             option_map = {}
-            for idx, prop in enumerate(props, start=1):
-                number = prop.get("number") or idx
-                option_map[str(number)] = _option_payload(prop)
-
-        active_option_map = router_output.get("active_property_options_map")
-        if not isinstance(active_option_map, dict) or not active_option_map:
-            active_option_map = option_map
-
-        shown_count = int(router_output.get("shown_count") or len(props))
-        total_found = int(router_output.get("total_found") or len(props))
+            for item in props:
+                number = item.get("number")
+                prop_id = item.get("id")
+                if number is not None and prop_id is not None:
+                    option_map[str(number)] = {"property_id": prop_id}
 
         return {
             "active_flow": "search",
             "visible_results": props,
-            "all_search_results": props,
+            "all_search_results": all_results,
             "option_map": option_map,
-            "active_property_options_map": active_option_map,
-            "active_property_options_shown_count": shown_count,
-            "active_property_options_total_found": total_found,
-            "last_search": dict(router_output),
-            "last_filters": last_filters,
+            "active_property_options_map": option_map,
+            "active_property_options_shown_count": router_output.get("shown_count") or len(props),
+            "active_property_options_total_found": router_output.get("total_found") or len(all_results),
+            "last_search": router_output,
+            "last_filters": router_output.get("query_context") or router_output.get("filters") or {},
             "last_presented_view": "property_list",
-            "current_page": current_page,
-            "page_size": page_size,
         }
 
     if status == "property_details":
-        props = list(router_output.get("properties") or [])
-        first_id = str(props[0].get("id") or "") if props else ""
-        result: Dict[str, Any] = {"last_presented_view": "property_details"}
-        if first_id:
-            result["last_selected_property_id"] = first_id
-        return result
+        prop = router_output.get("property") or {}
+        prop_id = router_output.get("property_id") or prop.get("id")
+        updates: Dict[str, Any] = {"last_presented_view": "property_details"}
+        if prop_id:
+            updates["last_selected_property_id"] = prop_id
+        return updates
 
     return {}
 
@@ -1106,7 +1072,7 @@ async def run_adk_turn(
     pipeline_failed_reply = ""
     # Soft-state derived from the triage_router tool payload.
     # Merged into Redis at the end of the turn so follow-up shortcuts work.
-    _pending_soft_state: Dict[str, Any] = {}
+    pending_soft_state_updates: Dict[str, Any] = {}
     event_count = 0
     max_adk_events = int(getattr(_cfg, "runtime_max_adk_events_per_turn", 8))
     try:
@@ -1178,7 +1144,10 @@ async def run_adk_turn(
                                 )
                         # Build pending soft_state from router output so the
                         # live session always has navigable search context.
-                        _pending_soft_state = _soft_state_from_router_output(router_output_dict)
+                        pending_soft_state_updates = _merge_soft_state(
+                            pending_soft_state_updates,
+                            _soft_state_from_router_output(router_output_dict),
+                        )
 
                 if author == "triage_router" and event_text:
                     router_output = event_text
@@ -1241,7 +1210,7 @@ async def run_adk_turn(
         # Layer 1: best-effort soft_state extracted from the router_output payload.
         # Applied first so that the in-memory ADK session state (layer 2) can
         # override individual keys if it has richer data.
-        if _pending_soft_state:
+        if pending_soft_state_updates:
             # For property_details we must NOT erase existing search context.
             # Use a selective merge: only add keys that are absent from the
             # current soft_state when they are search-navigation keys.
@@ -1254,15 +1223,17 @@ async def run_adk_turn(
             if _pss_status == "property_details":
                 # Merge only non-search-nav keys so we don't clobber the menu.
                 safe_updates = {
-                    k: v for k, v in _pending_soft_state.items()
+                    k: v for k, v in pending_soft_state_updates.items()
                     if k not in _SEARCH_NAV_KEYS
                 }
                 merged_state["soft_state"] = _merge_soft_state(existing_soft, safe_updates)
             else:
-                merged_state["soft_state"] = _merge_soft_state(existing_soft, _pending_soft_state)
+                merged_state["soft_state"] = _merge_soft_state(
+                    existing_soft, pending_soft_state_updates
+                )
             logger.debug(
                 "[ADK] Pending soft_state from router_output merged: status=%s keys=%s",
-                _pss_status, list(_pending_soft_state.keys()),
+                _pss_status, list(pending_soft_state_updates.keys()),
             )
 
         # Layer 2: authoritative soft_state from the ADK in-memory session
