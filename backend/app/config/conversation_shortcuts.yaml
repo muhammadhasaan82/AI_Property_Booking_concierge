@@ -4,6 +4,26 @@ version: "1.0"
 # requires_state gates each shortcut: it fires only when those soft_state keys
 # are present. If nothing matches, the turn falls through to ADK/LLM.
 shortcuts:
+  property_detail_booking_confirmed:
+    action: start_booking_for_selected_property
+    requires_context:
+      last_presented_view: property_details
+    requires_any_state:
+      - last_selected_property_id
+    examples:
+      - "yes"
+      - "yeah"
+      - "yeah sure"
+      - "sure"
+      - "yes please"
+      - "book it"
+      - "book this"
+      - "book this property"
+      - "i want to book this property"
+      - "proceed"
+      - "continue"
+      - "confirm"
+
   pagination_next:
     action: paginate_results
     direction: next

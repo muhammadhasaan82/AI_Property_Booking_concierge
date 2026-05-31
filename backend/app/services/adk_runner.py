@@ -840,6 +840,130 @@ async def _render_voice_from_router_output(
         logger.warning("[ADK] Voice handoff fallback failed: %s", exc)
         return ""
 
+def _configured_booking_details_fields() -> List[str]:
+    fields = getattr(_cfg, "booking_details_request_fields", None) or []
+    cleaned = [str(field).strip() for field in fields if str(field).strip()]
+    if cleaned:
+        return cleaned
+    return list(_cfg.booking_required_fields + _cfg.booking_required_numeric_fields)
+
+
+def _property_id_matches(item: Any, selected_id: str) -> bool:
+    if not isinstance(item, dict):
+        return False
+    for key in ("id", "property_id"):
+        value = item.get(key)
+        if value is not None and str(value) == selected_id:
+            return True
+    return False
+
+
+def _resolve_selected_property_from_soft_state(
+    soft_state: Dict[str, Any],
+    selected_id: str,
+) -> Optional[Dict[str, Any]]:
+    for state_key in ("visible_results", "all_search_results"):
+        candidates = soft_state.get(state_key) or []
+        if not isinstance(candidates, list):
+            continue
+        for item in candidates:
+            if _property_id_matches(item, selected_id):
+                return dict(item)
+
+    last_search = soft_state.get("last_search")
+    if isinstance(last_search, dict):
+        for item in last_search.get("properties", []) or []:
+            if _property_id_matches(item, selected_id):
+                return dict(item)
+
+    active_map = soft_state.get("active_property_options_map")
+    if isinstance(active_map, dict):
+        for option in active_map.values():
+            if not _property_id_matches(option, selected_id):
+                continue
+            selected = dict(option)
+            selected.setdefault("id", selected.get("property_id"))
+            return selected
+
+    return None
+
+
+def _render_booking_details_request(
+    *,
+    selected_property: Optional[Dict[str, Any]],
+    selected_id: str,
+    required_fields: List[str],
+) -> str:
+    title = ""
+    if isinstance(selected_property, dict):
+        title = str(selected_property.get("title") or "").strip()
+    property_title = title or "this property"
+    template = str(
+        getattr(_cfg, "booking_details_request_prompt_template", "") or ""
+    ).strip()
+    field_list = "\n".join(f"- {field}" for field in required_fields)
+    if not template:
+        return ""
+    try:
+        return template.format(
+            property_title=property_title,
+            property_id=selected_id,
+            required_fields=field_list,
+        )
+    except Exception as exc:
+        logger.warning("[ADK] Booking details prompt template failed: %s", exc)
+        return template
+
+
+def _start_booking_for_selected_property(
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    selected_id_raw = soft_state.get("last_selected_property_id")
+    if selected_id_raw is None or not str(selected_id_raw).strip():
+        return None
+
+    selected_id = str(selected_id_raw).strip()
+    selected_property = _resolve_selected_property_from_soft_state(soft_state, selected_id)
+    required_fields = _configured_booking_details_fields()
+
+    soft_state["booking_property_id"] = selected_id
+    if selected_property:
+        soft_state["booking_selected_property"] = selected_property
+    soft_state["booking_stage"] = "collecting_details"
+    soft_state["last_presented_view"] = "booking_details_request"
+
+    try:
+        from app.agents.state.booking_state import (
+            extract_booking_updates,
+            set_awaiting_field,
+            update_booking_state,
+        )
+
+        updates = extract_booking_updates(
+            property_id=selected_id,
+            property_title=(selected_property or {}).get("title"),
+            price_per_night=(selected_property or {}).get("price_per_night"),
+        )
+        update_booking_state(soft_state, updates)
+        set_awaiting_field(soft_state, required_fields)
+    except Exception as exc:
+        logger.warning("[ADK] Could not seed booking soft_state: %s", exc)
+
+    deterministic_reply = _render_booking_details_request(
+        selected_property=selected_property,
+        selected_id=selected_id,
+        required_fields=required_fields,
+    )
+
+    return {
+        "status": "booking_details_required",
+        "property_id": selected_id,
+        "property": selected_property,
+        "required_fields": required_fields,
+        "deterministic_reply": deterministic_reply,
+    }
+
+
 async def _maybe_handle_search_state_shortcut(
     *,
     session_id: str,
@@ -855,6 +979,7 @@ async def _maybe_handle_search_state_shortcut(
     - If the shortcut action is "select_property" and a selection_number is provided, calls select_property(...) with a tool context containing the current soft_state.
     - If the shortcut action is "paginate_results", calls paginate_stored_results(...) with the requested direction ("next" by default).
     - If the shortcut action is "return_to_previous_results", calls return_to_previous_results(soft_state).
+    - If the shortcut action is "start_booking_for_selected_property", seeds booking state from the selected property.
     - If a tool payload is produced, updates snapshot.state.soft_state, saves the session snapshot, and returns the payload.
     - Returns None when validation fails, no shortcut matches, or the tool produced no payload.
     
@@ -905,6 +1030,8 @@ async def _maybe_handle_search_state_shortcut(
         )
     elif shortcut.action == "return_to_previous_results":
         payload = return_to_previous_results(soft_state)
+    elif shortcut.action == "start_booking_for_selected_property":
+        payload = _start_booking_for_selected_property(soft_state)
 
     if not payload:
         return None

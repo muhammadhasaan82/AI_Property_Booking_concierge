@@ -255,6 +255,26 @@ booking:
     - guests
     - price_per_night
 
+  # Fields and copy for deterministic "book this selected property" handoff.
+  # These are user-facing collection fields; property_id/title/price are filled
+  # from the selected property context when available.
+  details_request_fields:
+    - guest_name
+    - guest_email
+    - guest_phone
+    - check_in
+    - check_out
+    - guests
+  details_request_prompt_template: |
+    Great - I'll help you book {property_title}.
+    Please provide:
+    - Full name
+    - Email
+    - Phone number
+    - Check-in date
+    - Check-out date
+    - Number of guests
+
   booking_source_tag: "v2_adk"     # written to DB — change without Python edits
   booking_confirmed_status: "confirmed"
 

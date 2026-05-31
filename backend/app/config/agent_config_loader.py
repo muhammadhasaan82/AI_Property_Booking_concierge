@@ -149,6 +149,13 @@ class _AgentConfig:
         self.date_format: str = bk["date_format"]
         self.booking_required_fields: list[str] = bk["required_fields"]
         self.booking_required_numeric_fields: list[str] = bk["required_numeric_fields"]
+        self.booking_details_request_fields: list[str] = list(
+            bk.get("details_request_fields")
+            or (bk["required_fields"] + bk["required_numeric_fields"])
+        )
+        self.booking_details_request_prompt_template: str = str(
+            bk.get("details_request_prompt_template", "")
+        )
         self.booking_source_tag: str = bk["booking_source_tag"]
         self.booking_confirmed_status: str = bk["booking_confirmed_status"]
 
