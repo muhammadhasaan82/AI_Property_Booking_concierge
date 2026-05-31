@@ -124,7 +124,11 @@ def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, A
 
     status = str(router_output.get("status") or "").lower()
     if status == "properties_found":
-        props = router_output.get("properties") or []
+        props = [
+            item
+            for item in (router_output.get("properties") or [])
+            if isinstance(item, dict)
+        ]
         all_results = (
             router_output.get("all_search_results")
             or router_output.get("results_full")
@@ -133,11 +137,11 @@ def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, A
         option_map = router_output.get("option_map")
         if not isinstance(option_map, dict) or not option_map:
             option_map = {}
-            for item in props:
-                number = item.get("number")
+            for idx, item in enumerate(props, start=1):
+                number = item.get("number") or idx
                 prop_id = item.get("id")
-                if number is not None and prop_id is not None:
-                    option_map[str(number)] = {"property_id": prop_id}
+                if prop_id is not None:
+                    option_map[str(number)] = {"property_id": str(prop_id)}
 
         return {
             "active_flow": "search",
