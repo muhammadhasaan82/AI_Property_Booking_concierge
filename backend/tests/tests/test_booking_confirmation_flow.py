@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.agents.state import booking_state as booking_state_module
+
 from app.agents.tools.search import search_properties, select_property
 from app.config.conversation_shortcuts_loader import match_shortcut
 from app.services import adk_runner
@@ -106,6 +108,8 @@ async def test_yes_after_property_details_starts_booking_details_collection(monk
     assert soft_state["booking_property_id"] == selected_property["id"]
     assert soft_state["last_presented_view"] == "booking_details_request"
     assert soft_state["booking_selected_property"]["id"] == selected_property["id"]
+    assert soft_state["booking_required_fields"]
+    assert soft_state["booking_property_id"] == soft_state["last_selected_property_id"]
     assert soft_state["visible_results"]
     assert soft_state["option_map"]
     assert soft_state["all_search_results"]
@@ -206,3 +210,45 @@ async def test_booking_confirmation_preserves_search_state(monkeypatch):
     assert len(soft_state["all_search_results"]) == 8
     assert soft_state["last_selected_property_id"] == selected["property"]["id"]
     assert soft_state["booking_property_id"] == selected["property"]["id"]
+    assert soft_state["booking_stage"] == "collecting_details"
+
+
+def test_start_booking_for_selected_property_restores_top_level_keys_after_helpers():
+    """Top-level booking keys must survive canonical booking_state helper side effects."""
+    selected_property = {
+        "id": "apt-7",
+        "title": "Apartment 7",
+        "city": "New York",
+        "price_per_night": 107,
+    }
+    soft_state = {
+        "last_selected_property_id": selected_property["id"],
+        "last_presented_view": "property_details",
+        "visible_results": [selected_property],
+        "option_map": {"7": {"property_id": selected_property["id"]}},
+    }
+
+    real_update = booking_state_module.update_booking_state
+
+    def update_then_strip_top_level(soft_state_arg, updates):
+        state = real_update(soft_state_arg, updates)
+        soft_state_arg.pop("booking_stage", None)
+        soft_state_arg.pop("booking_property_id", None)
+        soft_state_arg.pop("booking_required_fields", None)
+        return state
+
+    with patch.object(
+        booking_state_module,
+        "update_booking_state",
+        side_effect=update_then_strip_top_level,
+    ):
+        payload = adk_runner._start_booking_for_selected_property(soft_state)
+
+    assert payload is not None
+    assert payload["status"] == "booking_details_required"
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert soft_state["booking_property_id"] == selected_property["id"]
+    assert soft_state["last_presented_view"] == "booking_details_request"
+    assert soft_state["booking_selected_property"]["id"] == selected_property["id"]
+    assert soft_state["booking_required_fields"]
+    assert soft_state["booking_property_id"] == soft_state["last_selected_property_id"]

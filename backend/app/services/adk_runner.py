@@ -915,6 +915,26 @@ def _render_booking_details_request(
         return template
 
 
+def _apply_booking_collection_top_level_compat(
+    soft_state: Dict[str, Any],
+    *,
+    selected_id: str,
+    selected_property: Optional[Dict[str, Any]],
+    required_fields: List[str],
+) -> None:
+    """Re-apply legacy top-level booking keys after canonical booking_state helpers.
+
+    Nested ``booking_state`` updates must not erase compatibility fields used by
+    shortcuts, debug endpoints, and follow-up collection turns.
+    """
+    soft_state["booking_property_id"] = selected_id
+    soft_state["booking_stage"] = "collecting_details"
+    soft_state["last_presented_view"] = "booking_details_request"
+    soft_state["booking_required_fields"] = list(required_fields)
+    if selected_property:
+        soft_state["booking_selected_property"] = selected_property
+
+
 def _start_booking_for_selected_property(
     soft_state: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
@@ -925,12 +945,6 @@ def _start_booking_for_selected_property(
     selected_id = str(selected_id_raw).strip()
     selected_property = _resolve_selected_property_from_soft_state(soft_state, selected_id)
     required_fields = _configured_booking_details_fields()
-
-    soft_state["booking_property_id"] = selected_id
-    if selected_property:
-        soft_state["booking_selected_property"] = selected_property
-    soft_state["booking_stage"] = "collecting_details"
-    soft_state["last_presented_view"] = "booking_details_request"
 
     try:
         from app.agents.state.booking_state import (
@@ -948,6 +962,13 @@ def _start_booking_for_selected_property(
         set_awaiting_field(soft_state, required_fields)
     except Exception as exc:
         logger.warning("[ADK] Could not seed booking soft_state: %s", exc)
+
+    _apply_booking_collection_top_level_compat(
+        soft_state,
+        selected_id=selected_id,
+        selected_property=selected_property,
+        required_fields=required_fields,
+    )
 
     deterministic_reply = _render_booking_details_request(
         selected_property=selected_property,
