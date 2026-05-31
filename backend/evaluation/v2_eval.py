@@ -1,4 +1,3 @@
-# evaluation/v2_eval.py
 """
 V2 Evaluation Framework — Replaces legacy offline_eval.py
 
@@ -11,7 +10,7 @@ I/O so no DB or Rust gateway is needed).
 
 Usage (from backend/ directory):
     python evaluation/v2_eval.py
-    python evaluation/v2_eval.py --json            # machine-readable output
+    python evaluation/v2_eval.py --json           
     python evaluation/v2_eval.py --out eval_results/run.json
 """
 from __future__ import annotations
@@ -25,10 +24,6 @@ import sys
 import time
 from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Optional
-
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _BACKEND = os.path.dirname(_HERE)
 if _BACKEND not in sys.path:
@@ -38,9 +33,6 @@ logging.basicConfig(level=logging.WARNING)
 for _noisy in ("httpx", "litellm", "google", "asyncio"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
-# ---------------------------------------------------------------------------
-# Terminal colours
-# ---------------------------------------------------------------------------
 GREEN  = "\033[92m"
 RED    = "\033[91m"
 YELLOW = "\033[93m"
@@ -49,10 +41,6 @@ BOLD   = "\033[1m"
 DIM    = "\033[2m"
 RESET  = "\033[0m"
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# EVAL DATASET  (20 labelled prompts)
-# ═══════════════════════════════════════════════════════════════════════════
 
 @dataclass
 class EvalSample:
@@ -65,7 +53,7 @@ class EvalSample:
 
 
 EVAL_DATASET: List[EvalSample] = [
-    # ── Property Search ───────────────────────────────────────────────────
+
     EvalSample(
         id="search_01",
         prompt="Find apartments in New York under $150",
@@ -108,7 +96,7 @@ EVAL_DATASET: List[EvalSample] = [
         expected_args={"city": "chicago", "property_type": "condo"},
         tags=["search"],
     ),
-    # ── FAQ ───────────────────────────────────────────────────────────────
+
     EvalSample(
         id="faq_01",
         prompt="What is your cancellation policy?",
@@ -137,7 +125,7 @@ EVAL_DATASET: List[EvalSample] = [
         expected_args={},
         tags=["faq", "payment"],
     ),
-    # ── Booking — Off-Switch (missing data) ───────────────────────────────
+
     EvalSample(
         id="booking_off_01",
         prompt="I want to book option 3. My name is John.",
@@ -159,7 +147,7 @@ EVAL_DATASET: List[EvalSample] = [
         expected_args={},
         tags=["booking", "off_switch"],
     ),
-    # ── Booking — Full (process_v2_booking) ───────────────────────────────
+
     EvalSample(
         id="booking_full_01",
         prompt=(
@@ -180,7 +168,7 @@ EVAL_DATASET: List[EvalSample] = [
         expected_args={"guest_name": "mike smith", "guest_email": "mike@co.com", "guests": 2},
         tags=["booking", "full"],
     ),
-    # ── Booking Status ────────────────────────────────────────────────────
+
     EvalSample(
         id="status_01",
         prompt="Can you check my booking? ID is abc-123-xyz",
@@ -195,7 +183,7 @@ EVAL_DATASET: List[EvalSample] = [
         expected_args={},
         tags=["status"],
     ),
-    # ── City List ─────────────────────────────────────────────────────────
+
     EvalSample(
         id="cities_01",
         prompt="What cities do you have available?",
@@ -203,7 +191,7 @@ EVAL_DATASET: List[EvalSample] = [
         expected_args={},
         tags=["cities"],
     ),
-    # ── Escalation ───────────────────────────────────────────────────────
+
     EvalSample(
         id="escalate_01",
         prompt="I need to speak to a real person NOW.",
@@ -220,10 +208,6 @@ EVAL_DATASET: List[EvalSample] = [
     ),
 ]
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STUB LAYER — intercepts tool calls without touching real I/O
-# ═══════════════════════════════════════════════════════════════════════════
 
 _STUB_RESPONSES: Dict[str, dict] = {
     "search_properties": {
@@ -280,10 +264,6 @@ def _install_eval_stubs():
     router.tools = new_tools
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# EVALUATION RESULT
-# ═══════════════════════════════════════════════════════════════════════════
-
 @dataclass
 class EvalResult:
     sample_id: str
@@ -301,9 +281,7 @@ class EvalResult:
         return self.tool_correct and self.args_correct
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# SINGLE SAMPLE RUNNER
-# ═══════════════════════════════════════════════════════════════════════════
+
 
 async def _evaluate_sample(sample: EvalSample, session_idx: int) -> EvalResult:
     from app.services.adk_runner import run_adk_turn
@@ -323,7 +301,6 @@ async def _evaluate_sample(sample: EvalSample, session_idx: int) -> EvalResult:
 
     tool_correct = actual_tool == sample.expected_tool
 
-    # Arg extraction check — only if tool was right
     arg_failures: List[str] = []
     if tool_correct and sample.expected_args:
         for key, expected in sample.expected_args.items():
@@ -355,10 +332,6 @@ async def _evaluate_sample(sample: EvalSample, session_idx: int) -> EvalResult:
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BATCH EVALUATOR (async loop — no concurrency to avoid session collisions)
-# ═══════════════════════════════════════════════════════════════════════════
-
 async def run_evaluation(dataset: List[EvalSample]) -> List[EvalResult]:
     _install_eval_stubs()
     results: List[EvalResult] = []
@@ -368,10 +341,6 @@ async def run_evaluation(dataset: List[EvalSample]) -> List[EvalResult]:
     return results
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# METRICS CALCULATOR
-# ═══════════════════════════════════════════════════════════════════════════
-
 def compute_metrics(results: List[EvalResult]) -> Dict[str, Any]:
     total = len(results)
     tool_correct = sum(1 for r in results if r.tool_correct)
@@ -379,7 +348,7 @@ def compute_metrics(results: List[EvalResult]) -> Dict[str, Any]:
     fully_correct = sum(1 for r in results if r.fully_correct)
     latencies = [r.latency_ms for r in results]
 
-    # Per-tag breakdown
+
     tag_stats: Dict[str, Dict[str, int]] = {}
     for r in results:
         for tag in r.tags:
@@ -421,9 +390,6 @@ def compute_metrics(results: List[EvalResult]) -> Dict[str, Any]:
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# TERMINAL REPORT
-# ═══════════════════════════════════════════════════════════════════════════
 
 def _pct_colour(pct: float) -> str:
     if pct >= 90:
@@ -440,7 +406,6 @@ def print_report(results: List[EvalResult], metrics: Dict[str, Any]) -> None:
     print(f"{BOLD}{CYAN}  V2 EVALUATION REPORT  —  {len(results)} samples{RESET}")
     print(f"{BOLD}{CYAN}{'═' * W}{RESET}\n")
 
-    # ── Per-sample table ──────────────────────────────────────────────────
     col_id      = 14
     col_expect  = 28
     col_actual  = 28
@@ -467,7 +432,6 @@ def print_report(results: List[EvalResult], metrics: Dict[str, Any]) -> None:
             for af in r.arg_failures:
                 print(f"  {' ' * col_id}   {YELLOW}↳ arg: {af}{RESET}")
 
-    # ── Aggregate metrics ─────────────────────────────────────────────────
     tool_pct = metrics["tool_selection_accuracy"]
     arg_pct  = metrics["arg_extraction_accuracy"]
     full_pct = metrics["full_pass_rate"]
@@ -489,7 +453,7 @@ def print_report(results: List[EvalResult], metrics: Dict[str, Any]) -> None:
           f"min={lat['min']} ms  max={lat['max']} ms  "
           f"p50={lat['p50']} ms  p95={lat['p95']} ms")
 
-    # ── Per-tag breakdown ─────────────────────────────────────────────────
+
     if metrics["per_tag"]:
         print(f"\n{BOLD}  PER-TAG BREAKDOWN{RESET}")
         for tag, stats in sorted(metrics["per_tag"].items()):
@@ -503,7 +467,6 @@ def print_report(results: List[EvalResult], metrics: Dict[str, Any]) -> None:
                   f"{_pct_colour(pct)}{tp}/{t} tool-correct{RESET}  "
                   f"{fp}/{t} full-pass")
 
-    # ── Failure detail ────────────────────────────────────────────────────
     failures = metrics["failures"]
     if failures:
         print(f"\n{BOLD}  FAILURES ({len(failures)}){RESET}")
@@ -517,10 +480,6 @@ def print_report(results: List[EvalResult], metrics: Dict[str, Any]) -> None:
 
     print(f"{BOLD}{CYAN}{'═' * W}{RESET}\n")
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════════
 
 async def _main(args: argparse.Namespace) -> int:
     dataset = EVAL_DATASET

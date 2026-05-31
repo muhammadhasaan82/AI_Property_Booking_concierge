@@ -1,6 +1,3 @@
-# services/whatsapp.py
-# Async WhatsApp sender stub (replace with your actual provider, e.g., Meta API or Twilio).
-
 from __future__ import annotations
 import os
 from typing import Dict, Any

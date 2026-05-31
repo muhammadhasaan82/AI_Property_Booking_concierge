@@ -1,5 +1,4 @@
-# services/toon.py
-# -*- coding: utf-8 -*-
+
 """
 TOON (Token-Optimized Object Notation) serializer/deserializer.
 
@@ -10,10 +9,10 @@ TOON text.
 
 Format rules
 ─────────────
-  key: value            # simple key/value on one line
-  key:                  # nested object starts on next indented lines
+  key: value           
+  key:                
     child_key: value
-  key: []               # uniform array header
+  key: []             
     - item1
     - item2
 
@@ -28,7 +27,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Union
 
-# ────────────────────── Encoder ──────────────────────
 
 _NEEDS_QUOTING = re.compile(r'[:\n\r]')
 
@@ -41,11 +39,11 @@ def _quote_value(v: str) -> str:
     if _NEEDS_QUOTING.search(v):
         escaped = v.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
         return f'"{escaped}"'
-    # Avoid ambiguity with bool/null/number literals
+
     lower = v.strip().lower()
     if lower in ('true', 'false', 'null', 'none'):
         return f'"{v}"'
-    # If it looks purely numeric, quote to preserve string type
+
     try:
         float(v)
         return f'"{v}"'
@@ -65,8 +63,8 @@ def _encode_value(val: Any, indent: int = 0) -> str:
     if isinstance(val, int):
         return str(val)
     if isinstance(val, float):
-        # Finite check
-        if val != val:  # NaN
+
+        if val != val:
             return 'null'
         return f'{val:g}'
     if isinstance(val, str):
@@ -79,7 +77,7 @@ def _encode_value(val: Any, indent: int = 0) -> str:
         for item in val:
             encoded = _encode_value(item, indent + 1)
             if isinstance(item, dict):
-                # Multi-line dict item: first line on `- ` prefix, rest indented
+
                 dict_lines = _encode_dict(item, indent + 2)
                 lines.append(f'{prefix}  -')
                 lines.append(dict_lines)
@@ -90,7 +88,7 @@ def _encode_value(val: Any, indent: int = 0) -> str:
     if isinstance(val, dict):
         return _encode_dict(val, indent)
 
-    # Fallback: treat as string
+
     return _quote_value(str(val))
 
 
@@ -111,7 +109,7 @@ def _encode_dict(d: Dict[str, Any], indent: int = 0) -> str:
         elif isinstance(val, list):
             encoded = _encode_value(val, indent)
             if '\n' in encoded:
-                # Multi-line array
+
                 first, *rest = encoded.split('\n', 1)
                 lines.append(f'{prefix}{safe_key}: {first}')
                 if rest:
@@ -132,7 +130,7 @@ def toon_encode(obj: Any) -> str:
     return _encode_value(obj, 0)
 
 
-# ────────────────────── Decoder ──────────────────────
+
 
 class _ToonDecoder:
     """Line-by-line TOON parser with indent tracking."""
@@ -174,14 +172,13 @@ class _ToonDecoder:
         if raw == '{}':
             return {}
 
-        # Quoted string
+
         if raw.startswith('"') and raw.endswith('"') and len(raw) >= 2:
             inner = raw[1:-1]
-            # Unescape
+
             inner = inner.replace('\\n', '\n').replace('\\r', '\r').replace('\\"', '"').replace('\\\\', '\\')
             return inner
 
-        # Try number
         try:
             if '.' in raw or 'e' in raw.lower():
                 return float(raw)
@@ -189,7 +186,6 @@ class _ToonDecoder:
         except ValueError:
             pass
 
-        # Bare string
         return raw
 
     def _parse_object(self, expected_indent: int) -> Dict[str, Any]:
@@ -208,8 +204,6 @@ class _ToonDecoder:
             if stripped.startswith('- ') or stripped == '-':
                 break
 
-            # Parse key: value
-            # Handle escaped colons in keys
             colon_idx = self._find_key_colon(stripped)
             if colon_idx == -1:
                 self.pos += 1
@@ -220,13 +214,12 @@ class _ToonDecoder:
             self.pos += 1
 
             if not rest:
-                # Nested object on next lines
+   
                 result[key] = self._parse_object(expected_indent + 1)
             elif rest == '[]':
-                # Array header — items follow
+
                 result[key] = self._parse_array_items(expected_indent + 1)
             elif rest.startswith('[]'):
-                # Inline empty array indicator followed by nothing meaningful
                 result[key] = self._parse_array_items(expected_indent + 1)
             else:
                 result[key] = self._parse_value_str(rest)
@@ -263,7 +256,7 @@ class _ToonDecoder:
             self.pos += 1
 
             if not rest:
-                # Multi-line dict item follows
+
                 items.append(self._parse_object(expected_indent + 1))
             else:
                 items.append(self._parse_value_str(rest))

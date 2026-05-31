@@ -3,10 +3,10 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
-# The verified working connection string
+
 DB_URL = "postgresql+psycopg://supabase_admin:iNzl5DdQK3F9AOsf@172.21.0.4:5432/postgres"
 
-# The missing columns (defaultOpen, autoCollapse) added for Chainlit compatibility
+
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, identifier TEXT UNIQUE NOT NULL, metadata JSONB NOT NULL, "createdAt" TEXT);""",
     """CREATE TABLE IF NOT EXISTS threads (id UUID PRIMARY KEY, "createdAt" TEXT, name TEXT, "userId" UUID, "userIdentifier" TEXT, tags TEXT[], metadata JSONB, FOREIGN KEY ("userId") REFERENCES users(id) ON DELETE CASCADE);""",

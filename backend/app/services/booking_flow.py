@@ -726,8 +726,7 @@ def _validate_and_commit_state(
         candidate_state.pop("guests", None)
         errors["guests"] = _occupancy_validation_message(occupancy_max)
 
-    # Cross-field checkout rule: use values from updates too when validate_field
-    # rejected check_out and it was not committed to candidate_state.
+
     check_in = candidate_state.get("check_in") or updates.get("check_in")
     check_out = candidate_state.get("check_out") or updates.get("check_out")
     if check_in and check_out:

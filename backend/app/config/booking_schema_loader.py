@@ -2,7 +2,7 @@
 Loads booking_schema.yaml at startup. Provides typed validators and prompt
 lookup helpers consumed by the policy router (Phase 3) and downstream tools.
  
-Keys that overlap with agent_config.yaml#booking remain in sync until full
+Keys that overlap with agent_config.yaml
 migration — see Phase 3 of the soft-coding roadmap.
 """
 from __future__ import annotations

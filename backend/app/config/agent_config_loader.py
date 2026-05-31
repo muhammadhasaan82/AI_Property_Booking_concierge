@@ -8,7 +8,7 @@ No value in this system needs to be changed in Python source code.
 Usage:
     from app.config.agent_config_loader import cfg
 
-    # All values accessed as dot-notation attributes
+
     cfg.session.cache_ttl_seconds
     cfg.booking.required_fields
     cfg.messages.resolution_unresolved_default
