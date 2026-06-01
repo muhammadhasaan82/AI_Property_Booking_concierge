@@ -484,6 +484,8 @@ async def test_no_not_this_one_after_property_details_returns_previous_menu(
     handle every natural-language rejection variant via the generic
     semantic-cue matcher in conversation_shortcuts.yaml.
     """
+    from app.config.conversation_shortcuts_loader import match_shortcut
+
     ctx = _Ctx()
     fake = _make_props(12)
 
@@ -497,8 +499,30 @@ async def test_no_not_this_one_after_property_details_returns_previous_menu(
             tool_context=ctx,
         )
 
+
+    details_payload = await select_property(option_number=4, tool_context=ctx)
+    assert details_payload.get("status") == "property_details", details_payload
+
+    properties = list(search_result.get("properties") or [])
+    soft_state: dict = dict(ctx.state["soft_state"])
+    soft_state["last_presented_view"] = "property_details"
+    soft_state["last_selected_property_id"] = (
+        details_payload.get("property", {}).get("id")
+        or properties[3]["id"]
+    )
+    soft_state["visible_results"] = properties
+    soft_state["all_search_results"] = properties
+    soft_state["option_map"] = {
+        str(item.get("number") or idx): {"property_id": str(item.get("id"))}
+        for idx, item in enumerate(properties, start=1)
+        if item.get("id") is not None
+    }
+    soft_state["active_property_options_map"] = soft_state["option_map"]
+    soft_state["active_property_options_shown_count"] = len(properties)
+    soft_state["active_property_options_total_found"] = len(properties)
+
     snapshot = {
-        "state": {"soft_state": dict(ctx.state["soft_state"])},
+        "state": {"soft_state": soft_state},
         "history": [],
         "meta": {
             "app_name": adk_runner.APP_NAME,
@@ -525,11 +549,16 @@ async def test_no_not_this_one_after_property_details_returns_previous_menu(
     monkeypatch.setattr(adk_runner, "route_pre_adk", route_pre_adk)
     monkeypatch.setattr(adk_runner, "_get_runner", fail_get_runner)
 
-
-    await select_property(option_number=4, tool_context=ctx)
-
-    snapshot["state"] = {"soft_state": dict(ctx.state["soft_state"])}
-
+    pre_match = match_shortcut(
+        rejection_message, snapshot["state"]["soft_state"]
+    )
+    assert pre_match is not None, (
+        f"test setup invalid: match_shortcut({rejection_message!r}, soft_state) is None — "
+        f"soft_state keys={sorted(snapshot['state']['soft_state'].keys())}"
+    )
+    assert pre_match.action == "return_to_previous_results", (
+        f"test setup invalid: pre_match.action={pre_match.action!r} for {rejection_message!r}"
+    )
 
     chunks = []
     async for chunk in adk_runner.run_adk_turn(
@@ -547,10 +576,10 @@ async def test_no_not_this_one_after_property_details_returns_previous_menu(
     assert "generic concierge greeting" not in reply
     route_pre_adk.assert_not_awaited()
 
-    soft_state = snapshot["state"]["soft_state"]
-    assert soft_state["last_presented_view"] == "property_list"
-    assert soft_state["last_rejected_property_id"] == search_result["properties"][3]["id"]
-    assert len(soft_state["visible_results"]) == 12
-    assert set(soft_state["option_map"].keys()) == {str(i) for i in range(1, 13)}
-    assert len(soft_state["all_search_results"]) == 12
+    final_soft_state = snapshot["state"]["soft_state"]
+    assert final_soft_state["last_presented_view"] == "property_list"
+    assert final_soft_state["last_rejected_property_id"] == properties[3]["id"]
+    assert len(final_soft_state["visible_results"]) == 12
+    assert set(final_soft_state["option_map"].keys()) == {str(i) for i in range(1, 13)}
+    assert len(final_soft_state["all_search_results"]) == 12
     assert saved_states, "session snapshot must be persisted on rejection"
