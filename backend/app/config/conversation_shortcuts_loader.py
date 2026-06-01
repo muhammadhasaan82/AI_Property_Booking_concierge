@@ -1,16 +1,19 @@
 """
 YAML-driven deterministic shortcut matcher.
 
-Phrase lists and pattern templates live in conversation_shortcuts.yaml. This
-module only normalizes text, compiles generic templates, checks required state,
-and returns a typed match for the tool executor.
+Phrase lists, pattern templates, and generic semantic-cue groups live in
+conversation_shortcuts.yaml. This module only normalizes text, compiles
+generic templates, checks required state, and returns a typed match for the
+tool executor. No shortcut-specific logic is encoded in Python: any new
+intent, phrase, pattern, or semantic cue can be added or removed by editing
+the YAML alone.
 """
 from __future__ import annotations
 
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import yaml
 from pydantic import BaseModel, Field
@@ -18,6 +21,46 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 _SHORTCUTS_PATH = Path(__file__).resolve().parent / "conversation_shortcuts.yaml"
+
+_CONTRACTIONS: Dict[str, str] = {
+    "don't": "dont",
+    "dont": "dont",
+    "doesn't": "doesnt",
+    "doesnt": "doesnt",
+    "didn't": "didnt",
+    "didnt": "didnt",
+    "won't": "wont",
+    "wont": "wont",
+    "can't": "cant",
+    "cant": "cant",
+    "couldn't": "couldnt",
+    "couldnt": "couldnt",
+    "shouldn't": "shouldnt",
+    "shouldnt": "shouldnt",
+    "wouldn't": "wouldnt",
+    "wouldnt": "wouldnt",
+    "isn't": "isnt",
+    "isnt": "isnt",
+    "aren't": "arent",
+    "arent": "arent",
+    "i'm": "im",
+    "im": "im",
+    "i'll": "ill",
+    "ill": "ill",
+    "i've": "ive",
+    "ive": "ive",
+    "we're": "were",
+    "we're": "were",
+    "let's": "lets",
+    "lets": "lets",
+    "that's": "thats",
+    "thats": "thats",
+    "it's": "its",
+    "its": "its",
+}
+
+_PUNCT_RE = re.compile(r"[^a-z0-9\s]+")
+_WS_RE = re.compile(r"\s+")
 
 
 class ShortcutMatch(BaseModel):
@@ -28,6 +71,7 @@ class ShortcutMatch(BaseModel):
     requires_state: List[str] = Field(default_factory=list)
     requires_any_state: List[str] = Field(default_factory=list)
     requires_context: Dict[str, Any] = Field(default_factory=dict)
+    semantic_cues: Dict[str, List[List[str]]] = Field(default_factory=dict)
 
 
 class ShortcutSpec(BaseModel):
@@ -40,6 +84,7 @@ class ShortcutSpec(BaseModel):
     examples: List[str] = Field(default_factory=list)
     patterns: List[str] = Field(default_factory=list)
     entity_schema: Dict[str, Any] = Field(default_factory=dict)
+    semantic_cues: Dict[str, List[List[str]]] = Field(default_factory=dict)
 
 
 def _as_str_list(value: Any) -> List[str]:
@@ -67,16 +112,146 @@ def _as_str_list(value: Any) -> List[str]:
 
 def _normalize(text: str) -> str:
     """
-    Produce a lowercase, whitespace-collapsed form of the input string.
-    
+    Produce a lowercase, whitespace-collapsed, contraction-canonical form of the input string.
+
+    Normalization rules (applied in order):
+      1. Lowercase.
+      2. Canonicalise common apostrophe forms (curly quotes, backticks) to `'`.
+      3. Expand common English contractions so both "don't" and "dont" map
+         to the same token ("don't want" vs "dont want").  This step must
+         run *before* punctuation stripping, otherwise the apostrophe is
+         gone before we can match the contraction.
+      4. Replace every remaining punctuation character with a single space.
+      5. Collapse runs of whitespace to a single space and trim.
+
     Parameters:
         text (str | None): Input text; `None` is treated as an empty string.
-    
-    Returns:
-        str: The input converted to lowercase with leading/trailing spaces removed and internal whitespace collapsed to single spaces.
-    """
-    return " ".join((text or "").strip().lower().split())
 
+    Returns:
+        str: The normalised, tokenisation-friendly form of `text`.
+    """
+    if not text:
+        return ""
+    lowered = str(text).lower()
+    
+    for src, dst in (
+        ("\u2019", "'"),
+        ("\u2018", "'"),
+        ("\u02bc", "'"),
+        ("`", "'"),
+    ):
+        lowered = lowered.replace(src, "'")
+   
+    for src, dst in _CONTRACTIONS.items():
+        lowered = re.sub(rf"\b{re.escape(src)}\b", dst, lowered)
+    
+    cleaned = _PUNCT_RE.sub(" ", lowered)
+    cleaned = _PUNCT_RE.sub(" ", cleaned)
+    return _WS_RE.sub(" ", cleaned).strip()
+
+
+def _tokenize(norm_text: str) -> List[str]:
+    """
+    Split a normalized text into a deterministic token list.
+
+    Parameters:
+        norm_text (str): Text produced by :func:`_normalize`.
+
+    Returns:
+        List[str]: Whitespace-separated tokens in their original order.
+    """
+    return [token for token in norm_text.split(" ") if token]
+
+
+def _group_matches(
+    group: Sequence[str],
+    token_set: Iterable[str],
+) -> bool:
+    """
+    Return True when every cue token in `group` is present in `token_set`.
+
+    Empty groups never match (degenerate cues are ignored).
+
+    Parameters:
+        group (Sequence[str]): Tokens that must all be present.
+        token_set (Iterable[str]): Token set derived from the message.
+
+    Returns:
+        bool: True iff `group` is non-empty and a subset of `token_set`.
+    """
+    if not group:
+        return False
+    tokens = set(token_set)
+    return all(str(token) in tokens for token in group)
+
+
+def _matches_semantic_cues(
+    norm_text: str,
+    cues: Optional[Dict[str, Any]],
+) -> bool:
+    """
+    Generic semantic-cue matcher.
+
+    The matcher itself is content-free: it knows nothing about property
+    details, booking flows, or any other domain concept.  The YAML is the
+    sole source of truth for which cues correspond to which shortcut.
+
+    Matching contract (deterministic, generic):
+
+      * `cues` empty / None  → no match.
+      * No non-empty `any` groups → no match (a positive cue is required).
+      * Otherwise, the cue matches when:
+          - no `none` group has all tokens present in the normalised
+            message, AND
+          - at least one `any` group has all tokens present in the
+            normalised message.
+
+    Parameters:
+        norm_text (str): Output of :func:`_normalize` for the user message.
+        cues (Optional[Dict[str, Any]]): Cue spec from the YAML shortcut.
+
+    Returns:
+        bool: True when the normalized message satisfies the cue spec.
+    """
+    if not isinstance(cues, dict) or not cues:
+        return False
+
+    tokens = set(_tokenize(norm_text))
+
+    any_groups = cues.get("any") or []
+    any_groups = [
+        group for group in any_groups
+        if isinstance(group, (list, tuple)) and group
+    ]
+    if not any_groups:
+        return False
+
+    none_groups = cues.get("none") or []
+    for group in none_groups:
+        if not isinstance(group, (list, tuple)) or not group:
+            continue
+        if _group_matches(group, tokens):
+            return False
+
+    tokens = set(_tokenize(norm_text))
+
+    none_groups = cues.get("none") or []
+    for group in none_groups:
+        if not isinstance(group, (list, tuple)):
+            continue
+        if _group_matches(group, tokens):
+            return False
+
+    any_groups = cues.get("any") or []
+    if not any_groups:
+        return True
+
+    for group in any_groups:
+        if not isinstance(group, (list, tuple)):
+            continue
+        if _group_matches(group, tokens):
+            return True
+    return False
 
 def _compile_pattern(template: str) -> re.Pattern:
     """
@@ -97,14 +272,14 @@ def _compile_pattern(template: str) -> re.Pattern:
 def _spec_body(body: Any) -> Dict[str, Any]:
     """
     Normalize a shortcut YAML "body" into a dict that guarantees canonical list fields.
-    
+
     Parameters:
         body (Any): The raw "body" value from a YAML shortcut entry; may be a dict or any other type.
-    
+
     Returns:
         Dict[str, Any]: A dict (copied from `body` when it is a dict, otherwise empty) with keys
         "requires_state", "requires_any_state", "examples", and "patterns" present and each mapped
-        to a list of cleaned strings.
+        to a list of cleaned strings, and a normalised "semantic_cues" mapping.
     """
     data = dict(body or {}) if isinstance(body, dict) else {}
     for key in ("requires_state", "requires_any_state", "examples", "patterns"):
@@ -113,7 +288,63 @@ def _spec_body(body: Any) -> Dict[str, Any]:
     data["requires_context"] = (
         dict(requires_context) if isinstance(requires_context, dict) else {}
     )
+    data["semantic_cues"] = _normalise_semantic_cues(data.get("semantic_cues"))
     return data
+
+
+def _normalise_semantic_cues(raw: Any) -> Dict[str, List[List[str]]]:
+    """
+    Normalise a YAML `semantic_cues` block into the canonical dict shape.
+
+    The accepted YAML shape is::
+
+        semantic_cues:
+          any:  - [token, token, ...]   
+          none: - [token, token, ...] 
+
+    Each group is normalised through :func:`_normalize` so YAML authors can
+    write phrases like ["don't", "want"] and have them match user messages
+    like "I don't want this property" without re-typing the apostrophe.
+
+    Parameters:
+        raw (Any): Raw YAML value for the `semantic_cues` key.
+
+    Returns:
+        Dict[str, List[List[str]]]: Normalised cue mapping (always has the
+        "any" and "none" keys, each an empty list when absent).
+    """
+    cues: Dict[str, List[List[str]]] = {"any": [], "none": []}
+    if not isinstance(raw, dict):
+        return cues
+    for key in ("any", "none"):
+        groups = raw.get(key)
+        if not isinstance(groups, list):
+            continue
+        normalised_groups: List[List[str]] = []
+        for group in groups:
+            if not isinstance(group, (list, tuple)):
+                text = str(group or "").strip()
+                if not text:
+                    continue
+                tokens = [tok for tok in _normalize(text).split(" ") if tok]
+                if tokens:
+                    normalised_groups.append(tokens)
+                continue
+            tokens = []
+            for token in group:
+                token_text = str(token or "").strip()
+                if not token_text:
+                    continue
+                
+                norm = _normalize(token_text)
+                if not norm:
+                    continue
+
+                tokens.extend(part for part in norm.split(" ") if part)
+            if tokens:
+                normalised_groups.append(tokens)
+        cues[key] = normalised_groups
+    return cues
 
 
 class _ShortcutRouter:
@@ -181,11 +412,22 @@ class _ShortcutRouter:
     ) -> Optional[ShortcutMatch]:
         """
         Finds the first shortcut that matches a normalized message and current conversational soft state.
-        
+
+        Matching is performed in the following order, all gated by the spec's
+        state/context requirements (so e.g. property-rejection cues only fire
+        when `last_presented_view == "property_details"`):
+
+          1. Compiled `patterns` (regex templates with `{number}` capture).
+          2. Exact `examples` (full normalised equality).
+          3. Generic `semantic_cues` (token-group matching, content-free in
+             Python — driven entirely by the YAML).
+
+        The first match wins, so order in the YAML file acts as priority.
+
         Parameters:
             message (str): Incoming user message to normalize and match against compiled shortcut patterns and examples.
             soft_state (Optional[Dict[str, Any]]): Current conversational state used to evaluate spec state requirements; treated as empty dict if not a mapping.
-        
+
         Returns:
             Optional[ShortcutMatch]: A ShortcutMatch populated with `intent`, `action`, optional `direction`, optional integer `selection_number` (if a `{number}` capture was present), and the spec's `requires_state` / `requires_any_state` lists if a matching spec is found; `None` if no spec matches.
         """
@@ -212,6 +454,7 @@ class _ShortcutRouter:
                     requires_state=spec.requires_state,
                     requires_any_state=spec.requires_any_state,
                     requires_context=spec.requires_context,
+                    semantic_cues=spec.semantic_cues,
                 )
 
             for example in spec.examples:
@@ -223,7 +466,19 @@ class _ShortcutRouter:
                         requires_state=spec.requires_state,
                         requires_any_state=spec.requires_any_state,
                         requires_context=spec.requires_context,
+                        semantic_cues=spec.semantic_cues,
                     )
+
+            if spec.semantic_cues and _matches_semantic_cues(norm, spec.semantic_cues):
+                return ShortcutMatch(
+                    intent=spec.intent,
+                    action=spec.action,
+                    direction=spec.direction,
+                    requires_state=spec.requires_state,
+                    requires_any_state=spec.requires_any_state,
+                    requires_context=spec.requires_context,
+                    semantic_cues=spec.semantic_cues,
+                )
 
         return None
 
