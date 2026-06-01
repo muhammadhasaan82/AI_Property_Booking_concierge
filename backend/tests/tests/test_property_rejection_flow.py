@@ -149,7 +149,6 @@ async def test_no_after_property_details_flat_state_compatibility(monkeypatch):
 
     assert selected["status"] == "property_details"
     
-    # Flat compatibility shape: the state dictionary itself has the soft_state fields directly
     flat_state = dict(ctx.state["soft_state"])
     snapshot = {
         "state": flat_state,
@@ -188,7 +187,6 @@ async def test_no_after_property_details_flat_state_compatibility(monkeypatch):
     assert "generic concierge greeting" not in reply
     route_pre_adk.assert_not_awaited()
 
-    # Verify that the mutated state has been persisted nested in "soft_state"
     assert "soft_state" in snapshot["state"]
     soft_state = snapshot["state"]["soft_state"]
     assert soft_state["last_presented_view"] == "property_list"
@@ -419,7 +417,6 @@ async def test_run_adk_turn_search_result_persists_visible_results_from_router_o
         snapshot["history"] = history
         snapshot["meta"].update(metadata or {})
 
-    # ADK session state has an empty soft_state -- simulates the live bug.
     adk_session_state = {
         "final_reply": "",
         "router_output": "",
@@ -455,7 +452,6 @@ async def test_run_adk_turn_search_result_persists_visible_results_from_router_o
 
     soft_state = snapshot["state"].get("soft_state", {})
 
-    # Core navigation context must be present.
     assert soft_state.get("visible_results"), "visible_results must be populated from router_output"
     assert len(soft_state["visible_results"]) == 15
     assert soft_state.get("all_search_results"), "all_search_results must be populated from router_output"
@@ -464,6 +460,97 @@ async def test_run_adk_turn_search_result_persists_visible_results_from_router_o
     assert set(soft_state["option_map"].keys()) == {str(i) for i in range(1, 16)}
     assert soft_state.get("last_presented_view") == "property_list"
 
-    # Confirm option_map values reference the correct property IDs.
     expected_id_1 = str(search_result["properties"][0].get("id") or "")
     assert soft_state["option_map"]["1"]["property_id"] == expected_id_1
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rejection_message",
+    [
+        "no, not this one",
+        "no not this one",
+        "nah this is not good",
+        "I don't want this property",
+        "show me another option",
+        "back to list",
+    ],
+)
+async def test_no_not_this_one_after_property_details_returns_previous_menu(
+    monkeypatch, rejection_message
+):
+    """End-to-end: the same shortcut that handled bare "no" must also
+    handle every natural-language rejection variant via the generic
+    semantic-cue matcher in conversation_shortcuts.yaml.
+    """
+    ctx = _Ctx()
+    fake = _make_props(12)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        search_result = await search_properties(
+            city="Seattle",
+            property_type="apartment",
+            tool_context=ctx,
+        )
+
+    snapshot = {
+        "state": {"soft_state": dict(ctx.state["soft_state"])},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": "u-seattle-reject",
+            "session_id": "s-seattle-reject",
+            "last_update_time": 1.0,
+        },
+    }
+    saved_states: list[dict] = []
+
+    async def fake_get_session_snapshot(_session_id):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        saved_states.append(state)
+        snapshot["state"] = state
+
+    def fail_get_runner():
+        raise AssertionError("ADK runner must not be invoked for property rejection")
+
+    route_pre_adk = AsyncMock(return_value={"reply": "generic concierge greeting"})
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(adk_runner, "route_pre_adk", route_pre_adk)
+    monkeypatch.setattr(adk_runner, "_get_runner", fail_get_runner)
+
+
+    await select_property(option_number=4, tool_context=ctx)
+
+    snapshot["state"] = {"soft_state": dict(ctx.state["soft_state"])}
+
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn(
+        "u-seattle-reject", "s-seattle-reject", rejection_message
+    ):
+        chunks.append(chunk)
+
+    reply = "".join(chunks)
+
+    for idx in range(1, 13):
+        assert f"Apartment {idx}" in reply, (
+            f"Apartment {idx} missing from reply for rejection={rejection_message!r}: {reply}"
+        )
+
+    assert "generic concierge greeting" not in reply
+    route_pre_adk.assert_not_awaited()
+
+    soft_state = snapshot["state"]["soft_state"]
+    assert soft_state["last_presented_view"] == "property_list"
+    assert soft_state["last_rejected_property_id"] == search_result["properties"][3]["id"]
+    assert len(soft_state["visible_results"]) == 12
+    assert set(soft_state["option_map"].keys()) == {str(i) for i in range(1, 13)}
+    assert len(soft_state["all_search_results"]) == 12
+    assert saved_states, "session snapshot must be persisted on rejection"

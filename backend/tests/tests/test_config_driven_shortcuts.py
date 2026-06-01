@@ -3,14 +3,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.config.conversation_shortcuts_loader import _ShortcutRouter, match_shortcut
+import pytest
+
+from app.config.conversation_shortcuts_loader import (
+    _ShortcutRouter,
+    _matches_semantic_cues,
+    _normalize,
+    match_shortcut,
+)
 from app.services.property_type_normalizer import normalize_property_type
 
+_REJECTION_STATE = {
+    "last_presented_view": "property_details",
+    "visible_results": [{"id": "apt-1"}],
+    "option_map": {"1": {"property_id": "apt-1"}},
+    "all_search_results": [{"id": "apt-1"}],
+}
 
 def test_pagination_shortcut_loaded_from_yaml_triggers_when_state_present():
     """
     Verify that the pagination shortcut defined in configuration matches when the conversation state contains required pagination data.
-    
+
     Calls match_shortcut with the phrase "show me more" and state containing `all_search_results`, and asserts the returned shortcut indicates `action == "paginate_results"` and `direction == "next"`.
     """
     m = match_shortcut("show me more", {"all_search_results": [1, 2, 3]})
@@ -20,7 +33,7 @@ def test_pagination_shortcut_loaded_from_yaml_triggers_when_state_present():
 
 
 def test_shortcut_requires_state_gating():
-    # No shortlist in state → must fall through to ADK/LLM (None).
+
     assert match_shortcut("show me more", {}) is None
 
 
@@ -67,7 +80,7 @@ def test_resume_booking_shortcut_requires_active_booking_context():
 
 
 def test_renaming_or_removing_shortcut_in_yaml_changes_behavior_without_python():
-    # Build a router from a custom dict (simulates an edited YAML) — no Python change.
+   
     custom = _ShortcutRouter(
         {
             "shortcuts": {
@@ -75,16 +88,16 @@ def test_renaming_or_removing_shortcut_in_yaml_changes_behavior_without_python()
                     "action": "paginate_results",
                     "direction": "next",
                     "requires_state": ["all_search_results"],
-                    "examples": ["advance"],  # renamed example set
+                    "examples": ["advance"],
                 }
             }
         }
     )
     state = {"all_search_results": [1]}
     assert custom.match("advance", state).action == "paginate_results"
-    # Old phrase no longer configured → no match.
+   
     assert custom.match("show me more", state) is None
-    # Empty config → nothing matches at all.
+
     assert _ShortcutRouter({}).match("advance", state) is None
 
 
@@ -98,3 +111,127 @@ def test_no_hardcoded_phrase_list_remains_in_adk_runner():
     assert "_extract_pagination_direction" not in src
     assert "_extract_option_selection" not in src
     assert "show me more" not in src
+
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("no, not this one", "no not this one"),
+        ("NO, NOT THIS ONE", "no not this one"),
+        ("  multiple   spaces\tand\ttabs ", "multiple spaces and tabs"),
+        ("end-of-line;with:punctuation!", "end of line with punctuation"),
+        ("I don't want this property", "i dont want this property"),
+        ("I dont want this property", "i dont want this property"),
+        ("don\u2019t want", "dont want"),
+        ("hello???world", "hello world"),
+    ],
+)
+def test_normalize_handles_punctuation_contractions_and_case(raw, expected):
+    assert _normalize(raw) == expected
+
+
+def test_matches_semantic_cues_is_content_free():
+    cues = {"any": [["not", "this"]], "none": [["book"], ["yes"]]}
+    assert _matches_semantic_cues("not this one", cues) is True
+    assert _matches_semantic_cues("yes book it", cues) is False
+    assert _matches_semantic_cues("something else", cues) is False
+   
+    assert _matches_semantic_cues("not this one", {}) is False
+    assert _matches_semantic_cues("not this one", None) is False
+
+
+def test_matches_semantic_cues_handles_single_token_groups():
+    cues = {"any": [["skip"]], "none": []}
+    assert _matches_semantic_cues("please skip this", cues) is True
+    assert _matches_semantic_cues("don't skip", cues) is True
+    assert _matches_semantic_cues("keep going", cues) is False
+
+
+
+
+def test_property_detail_rejection_matches_semantic_cues():
+    """YAML semantic cues must catch natural-language rejection variants
+    without any phrase being hardcoded in Python.
+    """
+    for msg in (
+        "no, not this one",
+        "no not this one",
+        "nah this is not good",
+        "I don't want this property",
+        "I dont want this property",
+        "show me another option",
+        "show me other options",
+        "back to list",
+        "back to menu",
+        "skip this one",
+        "next one",
+    ):
+        m = match_shortcut(msg, _REJECTION_STATE)
+        assert m is not None, f"expected rejection match for: {msg!r}"
+        assert m.action == "return_to_previous_results", f"wrong action for: {msg!r}"
+        assert m.intent == "property_detail_rejected"
+
+
+def test_semantic_cues_respect_negative_cues():
+    """The 'none' group must override 'any' so confirmation phrases don't
+    trigger the rejection flow.
+    """
+    
+    for msg in (
+        "yes book this one",
+        "book it please",
+        "yes please proceed",
+        "sure, let's confirm",
+    ):
+        m = match_shortcut(msg, _REJECTION_STATE)
+
+        assert m is None or m.action != "return_to_previous_results", (
+            f"negative cue ignored for: {msg!r}"
+        )
+
+
+def test_semantic_cues_are_context_gated():
+    """The same 'no' message in a different conversational context must
+    not be classified as property rejection.
+    """
+    other_state = {
+        "last_presented_view": "property_list",
+        "visible_results": [{"id": "x"}],
+    }
+    for msg in ("no, not this one", "nah", "I don't want this property"):
+        m = match_shortcut(msg, other_state)
+        assert m is None or m.action != "return_to_previous_results", (
+            f"context gate leaked for: {msg!r}"
+        )
+
+
+def test_semantic_cues_are_generic_no_property_specific_python():
+    """Guard: the loader must not contain any property-specific phrases
+    that would make semantic_cues a Python-encoded shortcut rather than a
+    generic config-driven mechanism.
+    """
+    src = Path("app/config/conversation_shortcuts_loader.py").read_text(
+        encoding="utf-8"
+    )
+    forbidden = [
+        "no, not this one",
+        "not this one",
+        "property_detail",
+        "return_to_previous_results",
+    ]
+    for phrase in forbidden:
+        assert phrase not in src, (
+            f"loader contains property-specific hardcoding: {phrase!r}"
+        )
+
+
+def test_property_rejection_shortcut_exposes_semantic_cues_in_match():
+    """ShortcutMatch must surface the semantic_cues block so downstream
+    consumers (and tests) can introspect which rules fired.
+    """
+    m = match_shortcut("no, not this one", _REJECTION_STATE)
+    assert m is not None
+    assert m.semantic_cues, "semantic_cues should be present in match result"
+    assert any(group in m.semantic_cues.get("any", []) for group in (["no"],))
+    assert any(group in m.semantic_cues.get("none", []) for group in (["book"],))

@@ -1,8 +1,35 @@
-version: "1.0"
+version: "1.2"
 
 # Phrase/pattern content lives ONLY here. Python is a generic matcher engine.
 # requires_state gates each shortcut: it fires only when those soft_state keys
 # are present. If nothing matches, the turn falls through to ADK/LLM.
+#
+# ---------------------------------------------------------------------------
+# Generic shortcut schema (all keys are optional except `action`):
+#
+#   action:           tool action emitted on match (consumed by adk_runner)
+#   direction:        optional direction tag (e.g. next/previous)
+#   requires_state:   ALL of these soft_state keys must be present and truthy
+#   requires_any_state: at least ONE of these soft_state keys must be present
+#                      and truthy
+#   requires_context: soft_state[key] == value for each (key, value) pair
+#   examples:         literal phrases matched on full normalised equality
+#   patterns:         regex templates using {number} for entity capture
+#   entity_schema:    declares typed entities for pattern capture groups
+#   semantic_cues:    generic token-based intent matching (no phrase lists
+#                     hardcoded in Python). Shape:
+#                       semantic_cues:
+#                         any:  - [token, token, ...]   # at least one any
+#                         none: - [token, token, ...]   # group must NOT match
+#                     A cue "matches" when every token in the group appears
+#                     as a token in the normalised message. A shortcut is
+#                     considered a semantic-cue match when:
+#                       - no "none" group matches, AND
+#                       - at least one "any" group matches.
+#                     The matcher itself is fully generic; the YAML is the
+#                     only source of truth for which cues correspond to which
+#                     shortcut intent.
+# ---------------------------------------------------------------------------
 shortcuts:
   available_cities_request:
     action: list_available_cities
@@ -130,3 +157,35 @@ shortcuts:
       - back to menu
       - back to list
       - show me other options
+    # Generic token-cue matcher.  This is the source of truth; Python does
+    # not hardcode "no not this one" or any other phrase variant.  A message
+    # is considered a rejection cue when at least one "any" group has every
+    # token present in the normalised text, AND no "none" group does.
+    semantic_cues:
+      any:
+        - ["no"]
+        - ["nah"]
+        - ["nope"]
+        - ["not", "this"]
+        - ["not", "one"]
+        - ["not", "property"]
+        - ["not", "good"]
+        - ["do", "not", "want"]
+        - ["don't", "want"]
+        - ["dont", "want"]
+        - ["other", "options"]
+        - ["other", "properties"]
+        - ["another", "option"]
+        - ["another", "property"]
+        - ["back", "list"]
+        - ["back", "menu"]
+        - ["back", "results"]
+        - ["different", "one"]
+        - ["skip"]
+        - ["next", "one"]
+      none:
+        - ["book"]
+        - ["confirm"]
+        - ["proceed"]
+        - ["yes"]
+        - ["sure"]
