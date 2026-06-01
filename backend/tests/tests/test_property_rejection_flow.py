@@ -486,33 +486,27 @@ async def test_no_not_this_one_after_property_details_returns_previous_menu(
     """
     from app.config.conversation_shortcuts_loader import match_shortcut
 
-    ctx = _Ctx()
     fake = _make_props(12)
 
+    properties = []
+    for idx, item in enumerate(fake, start=1):
+        prop = dict(item)
+        prop["number"] = idx
+        prop["id"] = str(prop.get("id") or f"apt-{idx}")
+        prop["title"] = prop.get("title") or f"Apartment {idx}"
+        prop["city"] = prop.get("city") or "Seattle"
+        prop["property_type"] = prop.get("property_type") or "Apartment"
+        properties.append(prop)
 
-    with patch("app.components.search._DATASET", fake), patch(
-        "app.agents.tools.rust_client.search_properties",
-        return_value={"fallback": True},
-    ):
-        search_result = await search_properties(
-            city="Seattle",
-            property_type="apartment",
-            tool_context=ctx,
-        )
-
-
-    properties = list(search_result.get("properties") or [])
     selected_property = properties[3]
     selected_id = str(selected_property["id"])
 
     option_map = {
-        str(item.get("number") or idx): {"property_id": str(item.get("id"))}
-        for idx, item in enumerate(properties, start=1)
-        if item.get("id") is not None
+        str(item["number"]): {"property_id": str(item["id"])}
+        for item in properties
     }
 
-    soft_state = dict(ctx.state.get("soft_state") or {})
-    soft_state.update({
+    soft_state = {
         "last_presented_view": "property_details",
         "last_selected_property_id": selected_id,
         "selected_property": selected_property,
@@ -528,7 +522,7 @@ async def test_no_not_this_one_after_property_details_returns_previous_menu(
             "shown_count": len(properties),
             "total_found": len(properties),
         },
-    })
+    }
 
     snapshot = {
         "state": {"soft_state": soft_state},
