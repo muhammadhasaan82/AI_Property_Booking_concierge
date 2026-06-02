@@ -11,6 +11,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
 
+try:
+    from app.services.observability.langfuse_observer import get_observer
+except Exception:
+
+    def get_observer() -> Any:
+        return None
+
+
 Operator = Literal["exact", "min", "max", "contains"]
 
 
@@ -32,7 +40,6 @@ class PropertySearchQuery:
     unresolved: List[str] = field(default_factory=list)
 
 
-# Backward compatibility for any older code that imported Constraint.
 Constraint = SearchConstraint
 
 
@@ -100,7 +107,6 @@ def extract_property_search_query(message: str) -> PropertySearchQuery:
     city = _existing_city(message)
     property_type = _existing_property_type(message)
 
-    # Bedrooms: min forms first so "at least 3 bedrooms" does not become exact.
     min_bed_match = re.search(
         r"\b(?:at\s+least|minimum|min)\s+(\d+)\s*(?:bedrooms?|beds?|br)\b",
         text,
@@ -140,7 +146,6 @@ def extract_property_search_query(message: str) -> PropertySearchQuery:
             source_text=max_bed_match.group(0),
         )
 
-    # Bathrooms exact.
     bath_match = re.search(r"\b(\d+)\s*(?:bathrooms?|baths?|ba)\b", text)
     if bath_match:
         _add(
@@ -152,7 +157,6 @@ def extract_property_search_query(message: str) -> PropertySearchQuery:
             source_text=bath_match.group(0),
         )
 
-    # Price max/min.
     price_max_match = re.search(
         r"\b(?:under|below|less\s+than|budget|within)\s+\$?\s*(\d+(?:\.\d+)?)\b",
         text,
@@ -181,7 +185,6 @@ def extract_property_search_query(message: str) -> PropertySearchQuery:
             source_text=price_min_match.group(0),
         )
 
-    # Occupancy/capacity.
     guest_match = re.search(r"\b(?:for\s+)?(\d+)\s*(?:guests?|people|persons?)\b", text)
     if guest_match:
         _add(
@@ -193,7 +196,6 @@ def extract_property_search_query(message: str) -> PropertySearchQuery:
             source_text=guest_match.group(0),
         )
 
-    # Amenities.
     amenity_aliases = {
         "pet friendly": "pet_friendly",
         "pets allowed": "pet_friendly",
@@ -246,11 +248,11 @@ def extract_constraints_with_tracing(
     try:
         obs = observer
         if obs is None:
-            from app.services.observability.langfuse_observer import get_observer
-
             obs = get_observer()
 
         trace_metadata = {
+            "extracted_city": city or result.city,
+            "extracted_property_type": property_type or result.property_type,
             "city": result.city,
             "property_type": result.property_type,
             "constraints": [
