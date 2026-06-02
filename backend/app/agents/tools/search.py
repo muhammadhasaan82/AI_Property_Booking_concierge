@@ -32,6 +32,7 @@ from .helpers import (
     NEW_SEARCH_ACTION_INTENTS,
 )
 from app.services.property_type_normalizer import normalize_property_type as _normalize_property_type
+from app.services.observability.langfuse_observer import get_observer, sanitize_for_observability, summarize_property_results
 logger = logging.getLogger(__name__)
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -920,6 +921,34 @@ async def search_properties(
     }
     payload["user_engagement_state"] = _classify_engagement_state(_get_unresolved_turns(soft_state))
     payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
+
+    try:
+        observer = get_observer()
+        with observer.trace(
+            name="search_tool",
+            metadata={
+                "city": city,
+                "property_type": normalized_property_type,
+                "budget": budget_value,
+                "beds": beds_value,
+                "amenities": amenity_list,
+            },
+        ) as trace:
+            trace.update(
+                metadata={
+                    "result_count": len(results) if results else 0,
+                    "filters_applied": {
+                        "city": city,
+                        "budget": budget_value,
+                        "beds": beds_value,
+                        "property_type": normalized_property_type,
+                    },
+                    "summary": summarize_property_results(results),
+                }
+            )
+    except Exception:
+        pass
+
     return _finalize_payload(payload, normalized_action or action_intent, context_flag)
 
 async def select_property(

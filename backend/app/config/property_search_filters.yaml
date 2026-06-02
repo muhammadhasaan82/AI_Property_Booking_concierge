@@ -1,0 +1,130 @@
+version: "1.0"
+
+filters:
+  city:
+    column: city
+    type: string
+    match: canonical
+    aliases:
+      new york city: New York
+      nyc: New York
+      la: Los Angeles
+
+  property_type:
+    column: property_type
+    type: taxonomy
+    taxonomy_ref: property_type_taxonomy.yaml
+
+  bedrooms:
+    column: bedrooms
+    type: integer
+    aliases:
+      - bedroom
+      - bedrooms
+      - bed
+      - beds
+      - br
+    operators:
+      exact:
+        patterns:
+          - "{number} bedroom"
+          - "{number} bedrooms"
+          - "{number} bed"
+          - "{number} beds"
+          - "{number}br"
+          - "{number} br"
+      min:
+        patterns:
+          - "at least {number} bedroom"
+          - "at least {number} bedrooms"
+          - "minimum {number} bedroom"
+          - "minimum {number} bedrooms"
+          - "{number}+ bedroom"
+          - "{number}+ bedrooms"
+      max:
+        patterns:
+          - "up to {number} bedroom"
+          - "up to {number} bedrooms"
+          - "maximum {number} bedroom"
+          - "maximum {number} bedrooms"
+
+  bathrooms:
+    column: bathrooms
+    type: integer
+    aliases:
+      - bathroom
+      - bathrooms
+      - bath
+      - baths
+      - ba
+    operators:
+      exact:
+        patterns:
+          - "{number} bathroom"
+          - "{number} bathrooms"
+          - "{number} bath"
+          - "{number} baths"
+          - "{number}ba"
+          - "{number} ba"
+      min:
+        patterns:
+          - "at least {number} bathroom"
+          - "at least {number} bathrooms"
+          - "minimum {number} bathroom"
+          - "minimum {number} bathrooms"
+          - "{number}+ bathroom"
+          - "{number}+ bathrooms"
+      max:
+        patterns:
+          - "up to {number} bathroom"
+          - "up to {number} bathrooms"
+          - "maximum {number} bathroom"
+          - "maximum {number} bathrooms"
+
+  price_per_night:
+    column: price_per_night
+    type: number
+    aliases:
+      - price
+      - budget
+      - per night
+    operators:
+      max:
+        patterns:
+          - "under {number}"
+          - "below {number}"
+          - "less than {number}"
+          - "budget {number}"
+      min:
+        patterns:
+          - "above {number}"
+          - "over {number}"
+      exact:
+        patterns:
+          - "{number} per night"
+
+  occupancy_max:
+    column: occupancy_max
+    type: integer
+    aliases:
+      - guests
+      - people
+      - persons
+    operators:
+      min:
+        patterns:
+          - "{number} guests"
+          - "for {number} guests"
+          - "{number} people"
+          - "{number} persons"
+
+  amenities:
+    column: amenities
+    type: list_contains
+    aliases:
+      pet friendly: pet_friendly
+      pets allowed: pet_friendly
+      wifi: wifi
+      parking: parking
+      pool: pool
+      gym: gym

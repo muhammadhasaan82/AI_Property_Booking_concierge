@@ -159,3 +159,37 @@ backend/backend/.mem0/
 backend/tests/backend/.mem0/
 frontend/backend/.mem0/
 
+
+# Local AI/editor tool state
+.commandcode/
+.junie/
+.cursor/
+.windsurf/
+.aider*
+.continue/
+
+# Runtime/cache files
+.mem0/
+**/.mem0/
+models_cache/
+backend/models_cache/
+.cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+env.local
+frontend/.env.bak
+
+# Logs and test outputs
+*.log
+test_results.txt
+backend/test_results.txt
+backend/v25*_test_results*.txt
+infrastructure/
