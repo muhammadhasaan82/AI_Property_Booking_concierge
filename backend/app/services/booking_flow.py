@@ -19,6 +19,7 @@ from app.agents.tools.helpers import _coerce_float, _coerce_int
 from app.agents.tools.search import get_all_available_cities, return_to_previous_results
 from app.agents.tools.support import check_faq
 from app.config.agent_config_loader import cfg
+from app.services.observability.langfuse_observer import get_observer, summarize_booking_state
 from app.config.booking_schema_loader import (
     get_ask_order,
     get_field_aliases,
@@ -533,6 +534,12 @@ def start_booking_for_selected_property(soft_state: Dict[str, Any]) -> Optional[
         clear_awaiting_field(soft_state)
         return _review_payload_from_state(soft_state, validated_state)
 
+    observer = get_observer()
+    observer.trace(name="booking_flow").update(metadata={
+        "previous_booking_stage": soft_state.get("booking_stage"),
+        "next_booking_stage": "collecting_details",
+        "missing_fields": list(cfg.booking_details_request_fields),
+    })
     soft_state["booking_stage"] = "collecting_details"
     soft_state["last_presented_view"] = "booking_details_request"
     set_awaiting_field(soft_state, [next_field])
@@ -554,7 +561,14 @@ def start_booking_for_selected_property(soft_state: Dict[str, Any]) -> Optional[
 
 
 def resume_booking_flow(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    stage = str(soft_state.get("booking_stage") or "").strip()
+    observer = get_observer()
+    previous_stage = str(soft_state.get("booking_stage") or "").strip()
+    
+    with observer.trace(name="booking_flow", metadata={
+        "previous_booking_stage": previous_stage,
+        "soft_state_summary": summarize_booking_state(soft_state)
+    }) as trace:
+        stage = str(soft_state.get("booking_stage") or "").strip()
     if stage not in _ACTIVE_BOOKING_STAGES:
         return None
     state = _ensure_property_seeded(soft_state)
@@ -685,6 +699,14 @@ async def confirm_booking_review(soft_state: Dict[str, Any]) -> Optional[Dict[st
     except Exception as exc:
         logger.warning("[booking_flow] Could not persist confirmed booking: %s", exc)
 
+    observer = get_observer()
+    observer.trace(name="booking_flow").update(metadata={
+        "previous_booking_stage": soft_state.get("booking_stage"),
+        "next_booking_stage": "confirmed",
+        "review_generated": True,
+        "receipt_generated": True,
+        "registration_id_present": bool(registration_id),
+    })
     soft_state["booking_stage"] = "confirmed"
     soft_state["booking_status"] = cfg.booking_confirmed_status
     soft_state["booking_registration_id"] = registration_id
@@ -784,7 +806,14 @@ async def handle_active_booking_turn(
     message: str,
     soft_state: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    stage = str(soft_state.get("booking_stage") or "").strip()
+    observer = get_observer()
+    previous_stage = str(soft_state.get("booking_stage") or "").strip()
+    
+    with observer.trace(name="booking_flow", metadata={
+        "previous_booking_stage": previous_stage,
+        "soft_state_summary": summarize_booking_state(soft_state)
+    }) as trace:
+        stage = str(soft_state.get("booking_stage") or "").strip()
     if stage not in _ACTIVE_BOOKING_STAGES:
         return None
 

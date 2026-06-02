@@ -17,6 +17,16 @@ from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.model_config_loader import get_model_config_snapshot
 from app.services.redis_store import get_session_snapshot
+from app.services.observability.langfuse_observer import (
+    LANGFUSE_ENABLED,
+    LANGFUSE_BASE_URL,
+    LANGFUSE_ENVIRONMENT,
+    LANGFUSE_RELEASE,
+    LANGFUSE_PROMPTS_ENABLED,
+    LANGFUSE_SAMPLE_RATE,
+    LANGFUSE_REDACT_INPUTS,
+    _is_configured
+)
 
 app = FastAPI(title="AI Concierge & Calling Agent")
 logger = logging.getLogger(__name__)
@@ -295,4 +305,32 @@ async def options_echo(request: Request):
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
 app.include_router(stripe_webhook.router, prefix="/api/v1", tags=["webhooks"])
+
+
+@app.get("/debug/langfuse", tags=["debug"])
+async def debug_langfuse():
+    """
+    Return Langfuse observability configuration status without exposing secrets.
+    """
+    from urllib.parse import urlparse
+    
+    base_url_host = "unknown"
+    if LANGFUSE_BASE_URL:
+        try:
+            parsed = urlparse(LANGFUSE_BASE_URL)
+            base_url_host = parsed.hostname or parsed.path or "unknown"
+        except Exception:
+            base_url_host = "unknown"
+
+    return {
+        "enabled": LANGFUSE_ENABLED,
+        "configured": _is_configured(),
+        "base_url_host": base_url_host,
+        "environment": LANGFUSE_ENVIRONMENT,
+        "release": LANGFUSE_RELEASE,
+        "prompts_enabled": LANGFUSE_PROMPTS_ENABLED,
+        "redaction_enabled": LANGFUSE_REDACT_INPUTS,
+        "sample_rate": LANGFUSE_SAMPLE_RATE,
+    }
+
 app.include_router(admin.router, tags=["admin"])

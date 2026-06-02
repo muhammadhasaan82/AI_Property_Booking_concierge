@@ -30,6 +30,11 @@ from ..observability import telemetry
 from ..security import anomaly
 from ..security.guardrails import sanitize_input, sanitize_output
 from ..security import policy_router
+from .observability.langfuse_observer import (
+    get_observer,
+    sanitize_for_observability,
+    summarize_soft_state,
+)
 from .config import (
     ADK_MAX_COGNITIVE_CONTEXT_CHARS,
     ADK_SESSION_MAX_CONTEXT_CHARS,
@@ -1171,12 +1176,45 @@ async def run_adk_turn(
     Yields:
         str: Partial or final text segments from the assistant (concierge_voice) or a deterministic render; each yielded value is a chunk of the reply.
     """
-    cleaned_message, is_safe = sanitize_input(message)
+    observer = get_observer()
+    trace = observer.trace(
+        name="chat_turn",
+        user_id=user_id,
+        session_id=session_id,
+        metadata={
+            "environment": os.getenv("LANGFUSE_ENVIRONMENT", "dev"),
+            "release": os.getenv("LANGFUSE_RELEASE", ""),
+            "input_length": len(message),
+            "sanitized_input_preview": sanitize_for_observability(message[:100]),
+            "dispatcher_model": getattr(_cfg, "dispatcher_model", "unknown"),
+            "voice_model": getattr(_cfg, "voice_model", "unknown"),
+            "pre_router_fast_model": getattr(_cfg, "pre_router_fast_model", "unknown"),
+            "mem0_llm_model": os.getenv("MEM0_LLM_MODEL", "unknown"),
+        }
+    )
+    
+    initial_soft_state = {}
+    try:
+        snapshot = await get_session_snapshot(session_id)
+        if isinstance(snapshot, dict):
+            initial_soft_state = snapshot.get("state", {}).get("soft_state", {})
+    except Exception:
+        pass
+        
+    trace.update(metadata={
+        "soft_state_summary": summarize_soft_state(initial_soft_state)
+    })
+
+    with trace.span(name="input_sanitization"):
+        cleaned_message, is_safe = sanitize_input(message)
+    
     if not is_safe:
         yield "I'm sorry, I can't process that request. Could you rephrase?"
+        trace.end()
         return
 
-    coverage_decision = evaluate_message_coverage(cleaned_message)
+    with trace.span(name="service_coverage_guard"):
+        coverage_decision = evaluate_message_coverage(cleaned_message)
     if coverage_decision.blocked and coverage_decision.message:
         await _maybe_record_unsupported_region(
             session_id=session_id,
@@ -1185,12 +1223,13 @@ async def run_adk_turn(
         yield coverage_decision.message
         return
 
-    direct_search_payload = await maybe_handle_direct_property_search(
-        cleaned_message,
-        session_id,
-        get_snapshot=get_session_snapshot,
-        save_snapshot=save_session_snapshot,
-    )
+    with trace.span(name="direct_property_search"):
+        direct_search_payload = await maybe_handle_direct_property_search(
+            cleaned_message,
+            session_id,
+            get_snapshot=get_session_snapshot,
+            save_snapshot=save_session_snapshot,
+        )
     if direct_search_payload:
         if (
             direct_search_payload.get("status") == "properties_found"
@@ -1205,10 +1244,11 @@ async def run_adk_turn(
             yield _render_no_results_from_search_payload(direct_search_payload)
             return
 
-    shortcut_payload = await _maybe_handle_search_state_shortcut(
-        session_id = session_id,
-        message=cleaned_message
-    )
+    with trace.span(name="semantic_shortcut"):
+        shortcut_payload = await _maybe_handle_search_state_shortcut(
+            session_id = session_id,
+            message=cleaned_message
+        )
     if shortcut_payload:
         deterministic_reply = shortcut_payload.get("deterministic_reply")
         if deterministic_reply:
@@ -1233,20 +1273,22 @@ async def run_adk_turn(
         if shortcut_text:
             yield shortcut_text
             return
-    booking_payload = await _maybe_handle_active_booking_turn(
-        session_id=session_id,
-        message=cleaned_message,
-    )
+    with trace.span(name="booking_flow"):
+        booking_payload = await _maybe_handle_active_booking_turn(
+            session_id=session_id,
+            message=cleaned_message,
+        )
     if booking_payload:
         deterministic_reply = booking_payload.get("deterministic_reply")
         if deterministic_reply:
             yield str(deterministic_reply)
             return
-    pre_routed = await route_pre_adk(
-        message=cleaned_message,
-        user_id=user_id,
-        session_id=session_id,
-    )
+    with trace.span(name="faq_retrieval"):
+        pre_routed = await route_pre_adk(
+            message=cleaned_message,
+            user_id=user_id,
+            session_id=session_id,
+        )
     if pre_routed and pre_routed.get("reply"):
         yield str(pre_routed["reply"])
         return
@@ -1288,6 +1330,7 @@ async def run_adk_turn(
                     break
                 tool_name, tool_params = _extract_tool_call(event)
                 if tool_name:
+                    tool_span = trace.span(name="search_tool" if "search" in tool_name.lower() else "tool_call")
                     if await anomaly.check_tool_loop(session_id, tool_name, tool_params):
                         anomaly_triggered = True
                         tool_calls_log.append({
@@ -1297,6 +1340,7 @@ async def run_adk_turn(
                             ).hexdigest()[:12],
                             "result_status": "anomaly_blocked",
                         })
+                        tool_span.end()
                         break
                     await anomaly.record_tool_call(session_id, tool_name, tool_params)
                     tool_calls_log.append({
@@ -1306,6 +1350,7 @@ async def run_adk_turn(
                         ).hexdigest()[:12],
                         "result_status": "ok",
                     })
+                    tool_span.end()
                     continue
 
                 author = getattr(event, "author", None)
@@ -1335,6 +1380,9 @@ async def run_adk_turn(
                             _det = _render_property_results_from_router_output(router_output_dict)
                             if _det:
                                 _deterministic_render = _det
+                                trace.update(metadata={"bypassed_voice_llm": True})
+                                with trace.span(name="deterministic_render"):
+                                    pass
                                 logger.info(
                                     "[ADK] Deterministic property render active — "
                                     "concierge_voice LLM output will be suppressed (%d properties)",
@@ -1353,10 +1401,11 @@ async def run_adk_turn(
                     if _deterministic_render is not None:
                         pass
                     elif event.content and event.content.parts:
-                        for part in event.content.parts:
-                            if hasattr(part, "text") and part.text:
-                                streamed_parts.append(part.text)
-                                yield part.text
+                        with trace.span(name="llm_generation"):
+                            for part in event.content.parts:
+                                if hasattr(part, "text") and part.text:
+                                    streamed_parts.append(part.text)
+                                    yield part.text
 
                 if event.is_final_response():
                     if author == "triage_router":
@@ -1591,6 +1640,8 @@ async def run_adk_turn(
         asyncio.create_task(log_chat(cleaned_message, logged_reply))
     except Exception:
         pass
+    
+    trace.end()
 
 
 def _extract_tool_call(event: Any) -> tuple:

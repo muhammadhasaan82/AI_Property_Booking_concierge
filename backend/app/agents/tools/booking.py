@@ -1,6 +1,4 @@
 """
-app/agents/tools/booking.py
-----------------------------
 Tools: request_booking_details, review_booking_details, process_v2_booking
 """
 from __future__ import annotations
@@ -30,6 +28,7 @@ from ..state.booking_state import (
     set_awaiting_field,
     update_booking_state,
 )
+from app.services.observability.langfuse_observer import get_observer, summarize_booking_state
 from app.config.agent_config_loader import cfg
 
 logger = logging.getLogger(__name__)
@@ -176,6 +175,14 @@ async def request_booking_details(
 
     if isinstance(soft_state, dict):
         set_awaiting_field(soft_state, resolved_fields)
+
+    observer = get_observer()
+    observer.trace(name="booking_flow").update(metadata={
+        "previous_booking_stage": soft_state.get("booking_stage") if isinstance(soft_state, dict) else None,
+        "next_booking_stage": "collecting_details",
+        "missing_fields": resolved_fields,
+        "soft_state_summary": summarize_booking_state(soft_state)
+    })
 
     return _finalize_payload(
         {"status": Status.GATHERING_INFO, "missing_fields": resolved_fields},
@@ -358,5 +365,14 @@ async def process_v2_booking(
         soft_state.pop("pending_booking", None)
         soft_state.pop("pending_booking_updated_at", None)
         clear_booking_state(soft_state)
+
+    observer = get_observer()
+    observer.trace(name="booking_flow").update(metadata={
+        "previous_booking_stage": soft_state.get("booking_stage") if isinstance(soft_state, dict) else None,
+        "next_booking_stage": "confirmed",
+        "receipt_generated": True,
+        "registration_id_present": bool(payload.get("receipt", {}).get("booking_id")),
+        "soft_state_summary": summarize_booking_state(soft_state)
+    })
 
     return _finalize_payload(payload, action_intent, context_flag)
