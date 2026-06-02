@@ -13,6 +13,11 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+try:
+    import langfuse
+except Exception:
+    langfuse = None
+
 LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "false").strip().lower() in ("true", "1", "yes")
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
@@ -35,13 +40,8 @@ def _is_configured() -> bool:
 def sanitize_for_observability(value: Any) -> Any:
     """
     Redact PII and secrets from a value for safe observability logging.
-    Truncates long text based on LANGFUSE_MAX_TEXT_CHARS.
+    Preserves safe keys while omitting or redacting sensitive ones.
     """
-    if not LANGFUSE_REDACT_INPUTS:
-        if isinstance(value, str) and len(value) > LANGFUSE_MAX_TEXT_CHARS:
-            return value[:LANGFUSE_MAX_TEXT_CHARS] + "..."
-        return value
-
     if value is None:
         return None
 
@@ -51,17 +51,22 @@ def sanitize_for_observability(value: Any) -> Any:
         
         value = re.sub(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[REDACTED_EMAIL]", value)
         value = re.sub(r"\+?\d[\d -]{8,12}\d", "[REDACTED_PHONE]", value)
-        value = re.sub(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[\w\-]+['\"]?", r"\1: [REDACTED]", value)
         value = re.sub(r"(?i)(postgres|mysql|mongodb|redis)://[^\s]+", "[REDACTED_DB_URL]", value)
         
         return value
 
     if isinstance(value, dict):
-        return {
-            k: sanitize_for_observability(v) 
-            for k, v in value.items() 
-            if not any(secret in k.lower() for secret in ["password", "secret", "token", "key", "auth", "cookie", "authorization"])
+        sensitive_keys = {
+            "password", "secret", "token", "api_key", "authorization", "cookie", 
+            "database_url", "db_url", "connection_string", "dsn", "email", "phone"
         }
+        sanitized = {}
+        for k, v in value.items():
+            k_lower = str(k).lower()
+            if any(sens in k_lower for sens in sensitive_keys):
+                continue
+            sanitized[k] = sanitize_for_observability(v)
+        return sanitized
 
     if isinstance(value, (list, tuple, set)):
         return [sanitize_for_observability(item) for item in value]
@@ -73,9 +78,6 @@ def sanitize_for_observability(value: Any) -> Any:
 
 
 def summarize_soft_state(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Summarize soft_state for observability without exposing full payloads.
-    """
     if not isinstance(soft_state, dict):
         return {}
 
@@ -94,7 +96,6 @@ def summarize_soft_state(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]
     all_search_results = soft_state.get("all_search_results")
     summary["all_search_results_count"] = len(all_search_results) if isinstance(all_search_results, list) else 0
 
-
     summary["booking_property_id_present"] = bool(soft_state.get("booking_property_id"))
     summary["booking_review_present"] = bool(soft_state.get("booking_review"))
     summary["booking_receipt_present"] = bool(soft_state.get("booking_receipt"))
@@ -103,9 +104,6 @@ def summarize_soft_state(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]
 
 
 def summarize_property_results(results: Any) -> Dict[str, Any]:
-    """
-    Summarize property search results without sending full lists.
-    """
     if not isinstance(results, list):
         return {"count": 0, "has_results": False}
 
@@ -117,9 +115,6 @@ def summarize_property_results(results: Any) -> Dict[str, Any]:
 
 
 def summarize_booking_state(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Summarize booking state for observability, redacting PII.
-    """
     if not isinstance(soft_state, dict):
         return {}
 
@@ -154,8 +149,6 @@ def summarize_booking_state(soft_state: Optional[Dict[str, Any]]) -> Dict[str, A
 
 
 class NoOpObserver:
-    """A no-op observer that safely ignores all tracing calls."""
-    
     def trace(self, name: str, **kwargs) -> "NoOpTrace":
         return NoOpTrace()
 
@@ -164,8 +157,6 @@ class NoOpObserver:
 
 
 class NoOpTrace:
-    """A no-op trace that safely ignores all span creation and updates."""
-    
     def span(self, name: str, **kwargs) -> "NoOpSpan":
         return NoOpSpan()
 
@@ -183,8 +174,6 @@ class NoOpTrace:
 
 
 class NoOpSpan:
-    """A no-op span that safely ignores all updates."""
-    
     def update(self, **kwargs) -> None:
         pass
 
@@ -199,8 +188,6 @@ class NoOpSpan:
 
 
 class LangfuseObserver:
-    """Wrapper around the Langfuse SDK with safe error handling."""
-    
     def __init__(self):
         self._langfuse = None
         self._is_active = False
@@ -213,8 +200,11 @@ class LangfuseObserver:
             logger.warning("[Langfuse] Enabled but missing PUBLIC_KEY or SECRET_KEY. Falling back to no-op.")
             return
             
+        if langfuse is None:
+            logger.warning("[Langfuse] SDK import failed. Falling back to no-op.")
+            return
+            
         try:
-            import langfuse
             self._langfuse = langfuse.Langfuse(
                 public_key=LANGFUSE_PUBLIC_KEY,
                 secret_key=LANGFUSE_SECRET_KEY,
@@ -222,8 +212,6 @@ class LangfuseObserver:
             )
             self._is_active = True
             logger.info("[Langfuse] Initialized successfully.")
-        except ImportError:
-            logger.warning("[Langfuse] 'langfuse' package not installed. Falling back to no-op.")
         except Exception as exc:
             logger.error("[Langfuse] Failed to initialize: %s. Falling back to no-op.", exc)
 
@@ -256,10 +244,6 @@ class LangfuseObserver:
 
 
 def get_observer() -> LangfuseObserver | NoOpObserver:
-    """
-    Get the global Langfuse observer instance.
-    Returns a NoOpObserver if Langfuse is disabled, misconfigured, or failed to import.
-    """
     global _observer
     if _observer is None:
         _observer = LangfuseObserver()

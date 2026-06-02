@@ -29,6 +29,7 @@ from app.config.service_coverage_loader import (
 from app.services.dynamic_config import get_vocabulary
 from app.services.property_type_normalizer import normalize_property_type
 from app.services.redis_store import get_session_snapshot, save_session_snapshot
+from app.services.observability.langfuse_observer import get_observer, sanitize_for_observability
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,15 @@ def extract_property_type_from_message(message: str) -> Optional[str]:
     return None
 
 
+def extract_bedrooms_from_message(message: str) -> Optional[int]:
+    """Extract exact bedroom count from message."""
+    normalized = _normalize(message)
+    match = re.search(r'\b(\d+)\s+(?:bedroom|bed|bd|br)\b', normalized)
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def _has_search_phrase(message: str) -> bool:
     normalized = _normalize(message)
     if not normalized:
@@ -210,8 +220,7 @@ async def maybe_handle_direct_property_search(
 ) -> Optional[Dict[str, Any]]:
     """
     Run search_properties for clear search intents and persist soft_state to Redis.
-
-    Returns the tool payload when handled; None when the message should fall through.
+    Applies deterministic post-filtering for exact bedroom constraints.
     """
     if get_snapshot is None:
         get_snapshot = get_session_snapshot
@@ -233,17 +242,65 @@ async def maybe_handle_direct_property_search(
         return None
 
     property_type = extract_property_type_from_message(message)
+    bedrooms_exact = extract_bedrooms_from_message(message)
+    
     tool_context = SimpleNamespace(state={"soft_state": dict(soft_state)})
 
     try:
         payload = await search_properties(
             city=city,
             property_type=property_type,
+            beds=bedrooms_exact,
             tool_context=tool_context,
         )
     except Exception as exc:
         logger.warning("[direct_search] search_properties failed: %s", exc)
         return None
+
+    if bedrooms_exact is not None and isinstance(payload, dict) and payload.get("status") == "properties_found":
+        original_props = payload.get("properties", [])
+        filtered_props = [
+            p for p in original_props 
+            if p.get("bedrooms") == bedrooms_exact
+        ]
+        
+        if len(filtered_props) < len(original_props):
+            payload["properties"] = filtered_props
+            payload["shown_count"] = len(filtered_props)
+            payload["total_found"] = len(filtered_props)
+            
+            new_soft_state = tool_context.state.get("soft_state", {})
+            if isinstance(new_soft_state, dict):
+                all_results = new_soft_state.get("all_search_results", [])
+                filtered_all = [
+                    r for r in all_results 
+                    if r.get("bedrooms") == bedrooms_exact or r.get("beds") == bedrooms_exact
+                ]
+                new_soft_state["all_search_results"] = filtered_all
+                new_soft_state["visible_results"] = filtered_props
+                new_soft_state["option_map"] = {
+                    str(i+1): {"property_id": p.get("id"), "title": p.get("title")} 
+                    for i, p in enumerate(filtered_props)
+                }
+                new_soft_state["active_property_options_map"] = new_soft_state["option_map"]
+                new_soft_state["active_property_options_shown_count"] = len(filtered_props)
+                new_soft_state["active_property_options_total_found"] = len(filtered_all)
+                new_soft_state["last_filters"] = {
+                    "city": city,
+                    "property_type": property_type,
+                    "bedrooms": bedrooms_exact,
+                    "bedrooms_operator": "exact"
+                }
+                
+            if not filtered_props:
+                type_part = f" {property_type}" if property_type else " apartment"
+                return {
+                    "status": "no_results",
+                    "deterministic_reply": f"I couldn't find any {bedrooms_exact}-bedroom{type_part} in {city}. I can show other {property_type or 'apartment'} options in {city} or help you relax the bedroom filter.",
+                    "city": city,
+                    "property_type": property_type,
+                    "bedrooms_exact": bedrooms_exact,
+                }
 
     new_soft_state = tool_context.state.get("soft_state")
     if not isinstance(new_soft_state, dict):
