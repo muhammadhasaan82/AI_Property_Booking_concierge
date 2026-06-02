@@ -29,7 +29,6 @@ from app.config.service_coverage_loader import (
 from app.services.dynamic_config import get_vocabulary
 from app.services.property_type_normalizer import normalize_property_type
 from app.services.redis_store import get_session_snapshot, save_session_snapshot
-from app.services.observability.langfuse_observer import get_observer, sanitize_for_observability
 
 logger = logging.getLogger(__name__)
 
@@ -236,19 +235,14 @@ async def maybe_handle_direct_property_search(
     property_type = extract_property_type_from_message(message)
     tool_context = SimpleNamespace(state={"soft_state": dict(soft_state)})
 
-    observer = get_observer()
-    with observer.trace(name="classified_search", metadata={
-        "extracted_city": city,
-        "extracted_property_type": property_type,
-    }) as trace:
-        try:
-            payload = await search_properties(
-                city=city,
-                property_type=property_type,
-                tool_context=tool_context,
-            )
+    try:
+        payload = await search_properties(
+            city=city,
+            property_type=property_type,
+            tool_context=tool_context,
+        )
     except Exception as exc:
-        logger.error("[direct_search] search_properties failed: %s", exc, exc_info=True)
+        logger.warning("[direct_search] search_properties failed: %s", exc)
         return None
 
     new_soft_state = tool_context.state.get("soft_state")
@@ -268,15 +262,11 @@ async def maybe_handle_direct_property_search(
             if key in meta
         },
     )
-        logger.debug(
-            "[direct_search] handled city=%r property_type=%r status=%s total_found=%s",
-            city,
-            property_type,
-            payload.get("status") if isinstance(payload, dict) else None,
-            payload.get("total_found") if isinstance(payload, dict) else None,
-        )
-        trace.update(metadata={
-            "result_count": len(payload.get("properties", [])) if isinstance(payload, dict) else 0,
-            "status": payload.get("status") if isinstance(payload, dict) else None,
-        })
-        return payload if isinstance(payload, dict) else None
+    logger.debug(
+        "[direct_search] handled city=%r property_type=%r status=%s total_found=%s",
+        city,
+        property_type,
+        payload.get("status") if isinstance(payload, dict) else None,
+        payload.get("total_found") if isinstance(payload, dict) else None,
+    )
+    return payload if isinstance(payload, dict) else None

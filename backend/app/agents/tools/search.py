@@ -808,15 +808,7 @@ async def search_properties(
     if resolved_city:
         city = resolved_city
 
-    observer = get_observer()
-    with observer.trace(name="search_tool", metadata={
-        "city": city,
-        "property_type": normalized_property_type,
-        "budget": budget_value,
-        "beds": beds_value,
-        "amenities": amenity_list,
-    }) as trace:
-        requested_limit = _coerce_int(max_results)
+    requested_limit = _coerce_int(max_results)
     search_limit = _resolve_result_limit(requested_limit)
     summary_threshold = max(PROPERTY_SUMMARY_THRESHOLD, 1)
 
@@ -927,20 +919,37 @@ async def search_properties(
         "written_to": "soft_state.last_search",
         "state_available": isinstance(soft_state, dict),
     }
-        payload["user_engagement_state"] = _classify_engagement_state(_get_unresolved_turns(soft_state))
-        payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
-        
-        trace.update(metadata={
-            "result_count": len(results) if results else 0,
-            "filters_applied": {
+    payload["user_engagement_state"] = _classify_engagement_state(_get_unresolved_turns(soft_state))
+    payload["unresolved_turns"] = _get_unresolved_turns(soft_state)
+
+    try:
+        observer = get_observer()
+        with observer.trace(
+            name="search_tool",
+            metadata={
                 "city": city,
+                "property_type": normalized_property_type,
                 "budget": budget_value,
                 "beds": beds_value,
-                "property_type": normalized_property_type,
+                "amenities": amenity_list,
             },
-            "summary": summarize_property_results(results)
-        })
-        return _finalize_payload(payload, normalized_action or action_intent, context_flag)
+        ) as trace:
+            trace.update(
+                metadata={
+                    "result_count": len(results) if results else 0,
+                    "filters_applied": {
+                        "city": city,
+                        "budget": budget_value,
+                        "beds": beds_value,
+                        "property_type": normalized_property_type,
+                    },
+                    "summary": summarize_property_results(results),
+                }
+            )
+    except Exception:
+        pass
+
+    return _finalize_payload(payload, normalized_action or action_intent, context_flag)
 
 async def select_property(
     option_number: Optional[int] = None,
