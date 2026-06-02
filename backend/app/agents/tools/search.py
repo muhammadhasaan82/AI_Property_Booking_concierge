@@ -32,6 +32,7 @@ from .helpers import (
     NEW_SEARCH_ACTION_INTENTS,
 )
 from app.services.property_type_normalizer import normalize_property_type as _normalize_property_type
+from app.services.property_query_constraints import PropertySearchQuery, SearchConstraint
 logger = logging.getLogger(__name__)
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -338,6 +339,107 @@ def _sort_results_for_display(results: List[Dict[str, Any]]) -> List[Dict[str, A
     return sorted_results
 
 
+def _coerce_constraint_operand(value: Any) -> Any:
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            numeric = float(stripped.replace("$", "").replace(",", ""))
+            return int(numeric) if numeric.is_integer() else numeric
+        except ValueError:
+            return stripped
+    return value
+
+
+def _row_values_for_constraint(row: Dict[str, Any], column: str) -> Any:
+    direct = row.get(column)
+    if direct is not None:
+        return direct
+
+    if column == "bedrooms":
+        return row.get("beds")
+    if column == "beds":
+        return row.get("bedrooms")
+    return None
+
+
+def _row_matches_constraint(row: Dict[str, Any], constraint: SearchConstraint) -> bool:
+    value = _row_values_for_constraint(row, constraint.column)
+    expected = constraint.value
+
+    if constraint.operator == "contains":
+        if isinstance(value, str):
+            items = [part.strip().lower() for part in value.replace(";", ",").split(",") if part.strip()]
+        elif isinstance(value, list):
+            items = [str(part).strip().lower() for part in value if str(part).strip()]
+        else:
+            items = []
+        return str(expected).strip().lower() in items
+
+    left = _coerce_constraint_operand(value)
+    right = _coerce_constraint_operand(expected)
+    if left is None or right is None:
+        return False
+
+    if constraint.operator == "exact":
+        return left == right
+    if constraint.operator == "min":
+        return left >= right
+    if constraint.operator == "max":
+        return left <= right
+    return False
+
+
+def _apply_structured_constraints(
+    results: List[Dict[str, Any]],
+    constraints: List[SearchConstraint],
+) -> List[Dict[str, Any]]:
+    if not constraints:
+        return list(results)
+    filtered: List[Dict[str, Any]] = []
+    for row in results:
+        if all(_row_matches_constraint(row, constraint) for constraint in constraints):
+            filtered.append(row)
+    return filtered
+
+
+def _filters_from_structured_query(
+    structured_query: Optional[PropertySearchQuery],
+    *,
+    city: Optional[str],
+    budget_value: Optional[float],
+    beds_value: Optional[int],
+    normalized_property_type: Optional[str],
+    amenity_list: Optional[List[str]],
+) -> Dict[str, Any]:
+    filters: Dict[str, Any] = {
+        "city": city,
+        "budget": budget_value,
+        "beds": beds_value,
+        "property_type": normalized_property_type,
+        "amenities": amenity_list or [],
+    }
+
+    if not structured_query:
+        return filters
+
+    for constraint in structured_query.constraints:
+        existing = filters.get(constraint.field)
+        if constraint.operator == "contains":
+            current_values = list(existing) if isinstance(existing, list) else []
+            if constraint.value not in current_values:
+                current_values.append(constraint.value)
+            filters[constraint.field] = current_values
+        else:
+            filters[constraint.field] = constraint.value
+            filters[f"{constraint.field}_operator"] = constraint.operator
+
+    return filters
+
+
 def _build_option_map_from_formatted(
     formatted:List[Dict[str, Any]],
 ) -> Dict[str, Dict[str, Any]]:
@@ -460,6 +562,15 @@ def _build_search_page_payload(
             "budget": filters.get("budget"),
             "beds": filters.get("beds"),
             "property_type": filters.get("property_type"),
+            "bedrooms": filters.get("bedrooms"),
+            "bedrooms_operator": filters.get("bedrooms_operator"),
+            "bathrooms": filters.get("bathrooms"),
+            "bathrooms_operator": filters.get("bathrooms_operator"),
+            "price_per_night": filters.get("price_per_night"),
+            "price_per_night_operator": filters.get("price_per_night_operator"),
+            "occupancy_max": filters.get("occupancy_max"),
+            "occupancy_max_operator": filters.get("occupancy_max_operator"),
+            "amenities": filters.get("amenities") or [],
         },
         "pagination": {
             "current_page": safe_page,
@@ -731,6 +842,7 @@ async def search_properties(
     amenities: Optional[str] = None,
     free_text: Optional[str] = None,
     max_results: Optional[int] = None,
+    structured_query: Optional[PropertySearchQuery] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
     tool_context: Optional[ToolContext] = None,
@@ -759,6 +871,12 @@ async def search_properties(
 
     normalized_action = _normalize_action_intent(action_intent, context_flag)
     soft_state = _get_soft_state(tool_context)
+
+    if structured_query:
+        if not city:
+            city = structured_query.city
+        if not property_type:
+            property_type = structured_query.property_type
 
     if normalized_action in NEW_SEARCH_ACTION_INTENTS and isinstance(soft_state, dict):
         soft_state.pop("last_search", None)
@@ -803,6 +921,7 @@ async def search_properties(
     budget_value = _coerce_float(budget)
     beds_value = _coerce_int(beds)
     normalized_property_type = _normalize_property_type(property_type)
+    structured_constraints = list(structured_query.constraints) if structured_query else []
     resolved_city = _resolve_city_from_catalog(city, _DATASET or None)
     if resolved_city:
         city = resolved_city
@@ -856,19 +975,27 @@ async def search_properties(
             == normalized_property_type
         ]
 
+    if structured_constraints:
+        results = _apply_structured_constraints(list(results or []), structured_constraints)
+
     results = _sort_results_for_display(list(results or []))
+
+    filters = _filters_from_structured_query(
+        structured_query,
+        city=city,
+        budget_value=budget_value,
+        beds_value=beds_value,
+        normalized_property_type=normalized_property_type,
+        amenity_list=amenity_list,
+    )
 
     if not results:
         unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
         payload = {
             "status": Status.NO_RESULTS,
             "city": city,
-            "filters_applied": {
-                "budget": budget_value,
-                "beds": beds_value,
-                "property_type": property_type,
-                "amenities": amenities,
-            },
+            "query_context": dict(filters),
+            "filters_applied": dict(filters),
             "user_engagement_state": _classify_engagement_state(unresolved_turns),
             "unresolved_turns": unresolved_turns,
         }
@@ -876,14 +1003,6 @@ async def search_properties(
 
     if should_rerank:
         results = await _rerank_properties_by_vibe(results, vibe_query)
-
-
-    filters = {
-        "city": city,
-        "budget": budget_value,
-        "beds": beds_value,
-        "property_type": normalized_property_type,
-    }
     page_size = _search_display_max_inline_results() or _resolve_page_size()
     payload, visible_results, option_map = _build_search_page_payload(
         results=results,

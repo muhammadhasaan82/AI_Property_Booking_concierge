@@ -661,10 +661,17 @@ def _render_property_results_from_router_output(router_output: Dict[str, Any]) -
     city: str = (qctx.get("city") or "").strip().title()
     prop_type: str = (qctx.get("property_type") or "").strip().lower()
     budget = qctx.get("budget")
+    bedrooms = qctx.get("bedrooms")
+    bedrooms_operator = str(qctx.get("bedrooms_operator") or "").strip().lower()
     pagination: Dict[str, Any] = router_output.get("pagination") or {}
     summary_mode: bool = bool(router_output.get("summary_mode", False))
 
-    type_label = f"{prop_type}s" if prop_type else "properties"
+    if prop_type:
+        type_label = f"{prop_type}s"
+    else:
+        type_label = "properties"
+    if bedrooms is not None and bedrooms_operator == "exact" and prop_type:
+        type_label = f"{int(bedrooms)}-bedroom {type_label}"
     city_part = f" in {city}" if city else ""
     budget_part = f" under ${int(budget)}" if budget else ""
 
@@ -732,6 +739,33 @@ def _render_property_results_from_router_output(router_output: Dict[str, Any]) -
         )
 
     return "\n".join(lines)
+
+
+def _render_no_results_from_search_payload(payload: Dict[str, Any]) -> str:
+    qctx: Dict[str, Any] = payload.get("query_context") or payload.get("filters_applied") or {}
+    city = str(qctx.get("city") or payload.get("city") or "").strip().title()
+    property_type = str(qctx.get("property_type") or "").strip().lower()
+    bedrooms = qctx.get("bedrooms")
+    bedrooms_operator = str(qctx.get("bedrooms_operator") or "").strip().lower()
+
+    subject = "matching properties"
+    if property_type:
+        subject = f"{property_type} options"
+    if property_type:
+        subject = f"{property_type}s"
+    if property_type and bedrooms is not None and bedrooms_operator == "exact":
+        subject = f"{int(bedrooms)}-bedroom {property_type}s"
+
+    city_part = f" in {city}" if city else ""
+    if property_type and bedrooms is not None and bedrooms_operator == "exact":
+        return (
+            f"I couldn't find any {int(bedrooms)}-bedroom {property_type}s{city_part}. "
+            f"I can show other {property_type} options{city_part} or help you relax the bedroom filter."
+        )
+    return (
+        f"I couldn't find any {subject}{city_part} with those filters. "
+        "Try adjusting the city, property type, or budget."
+    )
 
 
 def _render_property_details_from_router_output(router_output: Dict[str, Any]) -> str:
@@ -1168,12 +1202,7 @@ async def run_adk_turn(
                 return
         status = str(direct_search_payload.get("status") or "").lower()
         if status == "no_results":
-            city = (direct_search_payload.get("city") or "").strip()
-            city_part = f" in {city}" if city else ""
-            yield (
-                f"I couldn't find any matching properties{city_part} with those filters. "
-                "Try adjusting the city, property type, or budget."
-            )
+            yield _render_no_results_from_search_payload(direct_search_payload)
             return
 
     shortcut_payload = await _maybe_handle_search_state_shortcut(
