@@ -1,81 +1,256 @@
 """
-Property Query Constraints Extraction and Tracing
+Schema-aware deterministic extraction of property search constraints.
 
-This module handles the extraction of structured constraints from user messages
-and instruments the process with Langfuse observability.
+This module keeps extraction deterministic and independent from Langfuse runtime state.
+Langfuse tracing is optional and non-blocking through extract_constraints_with_tracing().
 """
 from __future__ import annotations
 
-import logging
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Literal, Optional
 
-from app.services.observability.langfuse_observer import get_observer, sanitize_for_observability
-from app.services.direct_property_search import extract_city_from_message, extract_property_type_from_message
 
-logger = logging.getLogger(__name__)
+Operator = Literal["exact", "min", "max", "contains"]
 
 
 @dataclass
-class Constraint:
+class SearchConstraint:
     field: str
-    operator: str
+    column: str
+    operator: Operator
     value: Any
+    source_text: str = ""
 
 
 @dataclass
 class PropertySearchQuery:
-    city: Optional[str]
-    property_type: Optional[str]
-    constraints: List[Constraint]
-    confidence: float
-    unresolved: List[str]
+    city: Optional[str] = None
+    property_type: Optional[str] = None
+    constraints: List[SearchConstraint] = field(default_factory=list)
+    confidence: float = 1.0
+    unresolved: List[str] = field(default_factory=list)
 
 
-def extract_constraints_with_tracing(
-    message: str, 
-    city: Optional[str] = None,
-    property_type: Optional[str] = None,
-    *, 
-    observer: Any = None, 
-    metadata: Optional[Dict[str, Any]] = None
-) -> PropertySearchQuery:
+# Backward compatibility for any older code that imported Constraint.
+Constraint = SearchConstraint
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def _existing_city(message: str) -> Optional[str]:
+    try:
+        from app.services.direct_property_search import extract_city_from_message
+
+        return extract_city_from_message(message)
+    except Exception:
+        return None
+
+
+def _existing_property_type(message: str) -> Optional[str]:
+    try:
+        from app.services.direct_property_search import extract_property_type_from_message
+
+        value = extract_property_type_from_message(message)
+        if value:
+            return str(value).title()
+    except Exception:
+        pass
+    return None
+
+
+def _has_constraint(constraints: List[SearchConstraint], field_name: str) -> bool:
+    return any(c.field == field_name for c in constraints)
+
+
+def _add(
+    constraints: List[SearchConstraint],
+    *,
+    field_name: str,
+    column: str,
+    operator: Operator,
+    value: Any,
+    source_text: str,
+) -> None:
+    constraints.append(
+        SearchConstraint(
+            field=field_name,
+            column=column,
+            operator=operator,
+            value=value,
+            source_text=source_text,
+        )
+    )
+
+
+def extract_property_search_query(message: str) -> PropertySearchQuery:
     """
-    Extract structured constraints and trace the process.
-    Compatibility wrapper that calls existing extractors and safely traces.
+    Extract structured property search constraints from natural language.
+
+    Examples:
+    - "show me some 2 bedrooms apartment in new york city"
+    - "2br apartment in New York under 300"
+    - "apartment in Seattle for 4 guests"
     """
-    if city is None:
-        city = extract_city_from_message(message)
-    if property_type is None:
-        property_type = extract_property_type_from_message(message)
-    
-    constraints = []
-    if city:
-        constraints.append(Constraint(field="city", operator="exact", value=city))
-    if property_type:
-        constraints.append(Constraint(field="property_type", operator="exact", value=property_type))
-        
-    normalized = " ".join((message or "").strip().lower().split())
-    beds_match = re.search(r'\b(\d+)\s+(?:bedroom|bed|bd|br)\b', normalized)
-    if beds_match:
-        beds_val = int(beds_match.group(1))
-        constraints.append(Constraint(field="bedrooms", operator="exact", value=beds_val))
-        
-    unresolved = []
-    confidence = 0.9 if constraints else 0.0
-    
-    result = PropertySearchQuery(
+    text = _norm(message)
+    constraints: List[SearchConstraint] = []
+
+    city = _existing_city(message)
+    property_type = _existing_property_type(message)
+
+    # Bedrooms: min forms first so "at least 3 bedrooms" does not become exact.
+    min_bed_match = re.search(
+        r"\b(?:at\s+least|minimum|min)\s+(\d+)\s*(?:bedrooms?|beds?|br)\b",
+        text,
+    )
+    if min_bed_match:
+        _add(
+            constraints,
+            field_name="bedrooms",
+            column="bedrooms",
+            operator="min",
+            value=int(min_bed_match.group(1)),
+            source_text=min_bed_match.group(0),
+        )
+    else:
+        exact_bed_match = re.search(r"\b(\d+)\s*(?:bedrooms?|beds?|br)\b", text)
+        if exact_bed_match:
+            _add(
+                constraints,
+                field_name="bedrooms",
+                column="bedrooms",
+                operator="exact",
+                value=int(exact_bed_match.group(1)),
+                source_text=exact_bed_match.group(0),
+            )
+
+    max_bed_match = re.search(
+        r"\b(?:up\s+to|maximum|max)\s+(\d+)\s*(?:bedrooms?|beds?|br)\b",
+        text,
+    )
+    if max_bed_match and not _has_constraint(constraints, "bedrooms"):
+        _add(
+            constraints,
+            field_name="bedrooms",
+            column="bedrooms",
+            operator="max",
+            value=int(max_bed_match.group(1)),
+            source_text=max_bed_match.group(0),
+        )
+
+    # Bathrooms exact.
+    bath_match = re.search(r"\b(\d+)\s*(?:bathrooms?|baths?|ba)\b", text)
+    if bath_match:
+        _add(
+            constraints,
+            field_name="bathrooms",
+            column="bathrooms",
+            operator="exact",
+            value=int(bath_match.group(1)),
+            source_text=bath_match.group(0),
+        )
+
+    # Price max/min.
+    price_max_match = re.search(
+        r"\b(?:under|below|less\s+than|budget|within)\s+\$?\s*(\d+(?:\.\d+)?)\b",
+        text,
+    )
+    if price_max_match:
+        _add(
+            constraints,
+            field_name="price_per_night",
+            column="price_per_night",
+            operator="max",
+            value=float(price_max_match.group(1)),
+            source_text=price_max_match.group(0),
+        )
+
+    price_min_match = re.search(
+        r"\b(?:above|over|more\s+than)\s+\$?\s*(\d+(?:\.\d+)?)\b",
+        text,
+    )
+    if price_min_match:
+        _add(
+            constraints,
+            field_name="price_per_night",
+            column="price_per_night",
+            operator="min",
+            value=float(price_min_match.group(1)),
+            source_text=price_min_match.group(0),
+        )
+
+    # Occupancy/capacity.
+    guest_match = re.search(r"\b(?:for\s+)?(\d+)\s*(?:guests?|people|persons?)\b", text)
+    if guest_match:
+        _add(
+            constraints,
+            field_name="occupancy_max",
+            column="occupancy_max",
+            operator="min",
+            value=int(guest_match.group(1)),
+            source_text=guest_match.group(0),
+        )
+
+    # Amenities.
+    amenity_aliases = {
+        "pet friendly": "pet_friendly",
+        "pets allowed": "pet_friendly",
+        "wifi": "wifi",
+        "wi fi": "wifi",
+        "parking": "parking",
+        "pool": "pool",
+        "gym": "gym",
+    }
+    for phrase, amenity in amenity_aliases.items():
+        if phrase in text:
+            _add(
+                constraints,
+                field_name="amenities",
+                column="amenities",
+                operator="contains",
+                value=amenity,
+                source_text=phrase,
+            )
+
+    return PropertySearchQuery(
         city=city,
         property_type=property_type,
         constraints=constraints,
-        confidence=confidence,
-        unresolved=unresolved
+        confidence=1.0,
+        unresolved=[],
     )
-    
+
+
+def extract_constraints_with_tracing(
+    message: str,
+    city: Optional[str] = None,
+    property_type: Optional[str] = None,
+    *,
+    observer: Any = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> PropertySearchQuery:
+    """
+    Compatibility wrapper around extract_property_search_query with optional tracing.
+
+    Tracing is best-effort only and must never affect runtime behavior.
+    """
+    result = extract_property_search_query(message)
+
+    if city and not result.city:
+        result.city = city
+    if property_type and not result.property_type:
+        result.property_type = property_type
+
     try:
-        obs = observer or get_observer()
-        with obs.trace(name="property_query_constraints", metadata={
+        obs = observer
+        if obs is None:
+            from app.services.observability.langfuse_observer import get_observer
+
+            obs = get_observer()
+
+        trace_metadata = {
             "city": result.city,
             "property_type": result.property_type,
             "constraints": [
@@ -84,10 +259,22 @@ def extract_constraints_with_tracing(
             ],
             "confidence": result.confidence,
             "unresolved": result.unresolved,
-            **(metadata or {}),
-        }):
+        }
+        if metadata:
+            trace_metadata.update(metadata)
+
+        with obs.trace(name="property_query_constraints", metadata=trace_metadata):
             pass
     except Exception:
         pass
-        
+
     return result
+
+
+__all__ = [
+    "SearchConstraint",
+    "Constraint",
+    "PropertySearchQuery",
+    "extract_property_search_query",
+    "extract_constraints_with_tracing",
+]
