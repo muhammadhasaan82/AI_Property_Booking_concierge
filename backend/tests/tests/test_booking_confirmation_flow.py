@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -9,6 +10,11 @@ from app.agents.state import booking_state as booking_state_module
 from app.agents.tools.search import search_properties, select_property
 from app.config.conversation_shortcuts_loader import match_shortcut
 from app.services import adk_runner
+
+
+@pytest.fixture(autouse=True)
+def stable_booking_reference_date(monkeypatch):
+    monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
 
 
 class _Ctx:
@@ -90,6 +96,36 @@ async def _run_booking_confirmation(monkeypatch, message: str, option_number: in
     return "".join(chunks), snapshot, saved_states, search_result, selected, route_pre_adk
 
 
+async def _run_booking_followup_turn(monkeypatch, snapshot: dict, saved_states: list[dict], message: str):
+    async def fake_get_session_snapshot(_session_id):
+        return copy.deepcopy(snapshot)
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        state_to_save = copy.deepcopy(state)
+        snapshot["state"] = state_to_save
+        snapshot["history"] = copy.deepcopy(history)
+        snapshot["meta"].update(copy.deepcopy(metadata or {}))
+        saved_states.append(state_to_save)
+
+    def fail_get_runner():
+        raise AssertionError("ADK runner must not be invoked for active booking shortcut turns")
+
+    route_pre_adk = AsyncMock(return_value={"reply": "generic concierge greeting"})
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(adk_runner, "maybe_handle_direct_property_search", AsyncMock(return_value=None))
+    monkeypatch.setattr(adk_runner, "route_pre_adk", route_pre_adk)
+    monkeypatch.setattr(adk_runner, "_get_runner", fail_get_runner)
+    monkeypatch.setattr(adk_runner, "sanitize_input", lambda msg: (msg, True))
+    monkeypatch.setattr(adk_runner, "sanitize_output", lambda msg: msg)
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn("u-booking-confirm", "s-booking-confirm", message):
+        chunks.append(chunk)
+
+    return "".join(chunks), route_pre_adk
+
+
 @pytest.mark.asyncio
 async def test_yes_after_property_details_starts_booking_details_collection(monkeypatch):
     reply, snapshot, saved_states, search_result, selected, route_pre_adk = (
@@ -115,6 +151,71 @@ async def test_yes_after_property_details_starts_booking_details_collection(monk
     assert soft_state["all_search_results"]
     assert soft_state["all_search_results"][2]["id"] == search_result["properties"][2]["id"]
     assert saved_states
+
+
+@pytest.mark.asyncio
+async def test_booking_confirmation_sequence_persists_correct_dates_across_invalid_fix_and_confirm(monkeypatch):
+    start_reply, snapshot, saved_states, _search_result, selected, route_pre_adk = (
+        await _run_booking_confirmation(monkeypatch, "yeah sure", option_number=7)
+    )
+
+    assert "Please provide" in start_reply
+    assert route_pre_adk.await_count == 0
+    assert snapshot["state"]["soft_state"]["booking_stage"] == "collecting_details"
+    assert snapshot["state"]["soft_state"]["booking_selected_property"]["id"] == selected["property"]["id"]
+
+    invalid_reply, route_pre_adk = await _run_booking_followup_turn(
+        monkeypatch,
+        snapshot,
+        saved_states,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in date would 2nd of june, 2026 and check out shall be around 11 june 2025, we are around 4 guests",
+    )
+
+    invalid_soft_state = saved_states[-1]["soft_state"]
+    invalid_booking_state = invalid_soft_state["booking_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert "cannot be earlier than your check-in date" in invalid_reply
+    assert invalid_soft_state["booking_stage"] == "collecting_details"
+    assert invalid_soft_state["awaiting_field"] == "check_out"
+    assert invalid_booking_state["check_in"] == "2026-06-02"
+    assert invalid_booking_state["guest_name"] == "Jane Doe"
+    assert invalid_booking_state["guest_email"] == "jane@example.com"
+    assert invalid_booking_state["guest_phone"] == "03001234567"
+    assert invalid_booking_state["guests"] == 4
+    assert "check_out" not in invalid_booking_state
+
+    review_reply, route_pre_adk = await _run_booking_followup_turn(
+        monkeypatch,
+        snapshot,
+        saved_states,
+        "11 june 2026",
+    )
+
+    review_soft_state = saved_states[-1]["soft_state"]
+    review = review_soft_state["booking_review"]
+
+    assert route_pre_adk.await_count == 0
+    assert "Please confirm if everything is correct." in review_reply
+    assert review_soft_state["booking_stage"] == "awaiting_confirmation"
+    assert review["check_in"] == "2026-06-02"
+    assert review["check_out"] == "2026-06-11"
+    assert review["guests"] == 4
+
+    receipt_reply, route_pre_adk = await _run_booking_followup_turn(
+        monkeypatch,
+        snapshot,
+        saved_states,
+        "yes",
+    )
+
+    confirmed_soft_state = saved_states[-1]["soft_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert "Your booking is confirmed." in receipt_reply
+    assert confirmed_soft_state["booking_stage"] == "confirmed"
+    assert confirmed_soft_state["booking_receipt"]["check_in"] == "2026-06-02"
+    assert confirmed_soft_state["booking_receipt"]["check_out"] == "2026-06-11"
 
 
 @pytest.mark.asyncio

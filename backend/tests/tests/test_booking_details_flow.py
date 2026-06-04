@@ -163,6 +163,32 @@ async def test_checkout_before_checkin_rejected(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_details_message_with_explicit_checkin_checkout_ignores_awaiting_field_fallback(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+    snapshot["state"]["soft_state"]["awaiting_field"] = "check_in"
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in date would 2nd of june, 2026 and check out shall be around 11 june 2025, we are around 4 guests",
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    booking_state = soft_state["booking_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert "cannot be earlier than your check-in date" in reply
+    assert soft_state["awaiting_field"] == "check_out"
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert booking_state["check_in"] == "2026-06-02"
+    assert booking_state["guest_name"] == "Jane Doe"
+    assert booking_state["guest_email"] == "jane@example.com"
+    assert booking_state["guest_phone"] == "03001234567"
+    assert booking_state["guests"] == 4
+    assert "check_out" not in booking_state
+
+
+@pytest.mark.asyncio
 async def test_active_booking_turn_persists_mutated_soft_state_to_saved_snapshot(monkeypatch):
     snapshot, _selected_property = await _seed_booking_snapshot()
     saved_states: list[dict] = []

@@ -59,6 +59,8 @@ _FAQ_KEYWORDS = (
     "accessibility",
     "allowed",
 )
+_CHECK_IN_DATE_PATTERN = r"\b(check[- ]?in(?: date)?|arrival(?: date)?)\b"
+_CHECK_OUT_DATE_PATTERN = r"\b(check[- ]?out(?: date)?|checkout(?: date)?|departure(?: date)?)\b"
 _MONTHS = {
     "january": 1,
     "february": 2,
@@ -324,8 +326,8 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
     if not dates_found:
         return None, None
         
-    check_in_matches = list(re.finditer(r"\b(check[- ]?in(?: date)?|arrival(?: date)?)\b", text, re.I))
-    check_out_matches = list(re.finditer(r"\b(check[- ]?out(?: date)?|checkout(?: date)?|departure(?: date)?)\b", text, re.I))
+    check_in_matches = list(re.finditer(_CHECK_IN_DATE_PATTERN, text, re.I))
+    check_out_matches = list(re.finditer(_CHECK_OUT_DATE_PATTERN, text, re.I))
     
     check_in_date = None
     check_out_date = None
@@ -519,19 +521,28 @@ def _extract_updates_from_message(
         mentioned_fields.append("guests")
 
     assoc_check_in, assoc_check_out = _extract_dates_by_association(normalized)
-    has_check_in_phrase = bool(re.search(r"\b(check[- ]?in(?: date)?|arrival(?: date)?)\b", normalized, re.I))
-    has_check_out_phrase = bool(re.search(r"\b(check[- ]?out(?: date)?|checkout(?: date)?|departure(?: date)?)\b", normalized, re.I))
+    check_in_segment = segments.get("check_in")
+    check_out_segment = segments.get("check_out")
+    has_check_in_phrase = "check_in" in segments or bool(re.search(_CHECK_IN_DATE_PATTERN, normalized, re.I))
+    has_check_out_phrase = "check_out" in segments or bool(re.search(_CHECK_OUT_DATE_PATTERN, normalized, re.I))
+    explicit_date_labels_present = has_check_in_phrase or has_check_out_phrase
 
     if has_check_in_phrase:
         mentioned_fields.append("check_in")
-        if assoc_check_in:
+        explicit_check_in = _parse_natural_date(check_in_segment or "")
+        if explicit_check_in:
+            updates["check_in"] = explicit_check_in
+        elif "check_in" not in segments and assoc_check_in:
             updates["check_in"] = assoc_check_in
         else:
             errors["check_in"] = _friendly_prompt_for_field("check_in")
 
     if has_check_out_phrase:
         mentioned_fields.append("check_out")
-        if assoc_check_out:
+        explicit_check_out = _parse_natural_date(check_out_segment or "")
+        if explicit_check_out:
+            updates["check_out"] = explicit_check_out
+        elif "check_out" not in segments and assoc_check_out:
             updates["check_out"] = assoc_check_out
         else:
             errors["check_out"] = _friendly_prompt_for_field("check_out")
@@ -558,11 +569,12 @@ def _extract_updates_from_message(
             if guest_count is not None:
                 updates[awaiting_field] = guest_count
         elif awaiting_field in {"check_in", "check_out"}:
-            parsed = _parse_natural_date(normalized)
-            if parsed:
-                updates[awaiting_field] = parsed
-            else:
-                errors[awaiting_field] = _friendly_prompt_for_field(awaiting_field)
+            if not explicit_date_labels_present:
+                parsed = _parse_natural_date(normalized)
+                if parsed:
+                    updates[awaiting_field] = parsed
+                else:
+                    errors[awaiting_field] = _friendly_prompt_for_field(awaiting_field)
         elif awaiting_field == "property_id":
             updates[awaiting_field] = normalized.strip()
     return updates, list(dict.fromkeys(mentioned_fields)), errors
