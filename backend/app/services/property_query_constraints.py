@@ -47,6 +47,14 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
+def _canonical_city(value: Optional[str]) -> Optional[str]:
+    """Return display-cased city text without changing search semantics."""
+    if not value:
+        return None
+    normalized = " ".join(str(value).strip().split())
+    return normalized.title()
+
+
 def _existing_city(message: str) -> Optional[str]:
     try:
         from app.services.direct_property_search import extract_city_from_message
@@ -104,7 +112,7 @@ def extract_property_search_query(message: str) -> PropertySearchQuery:
     text = _norm(message)
     constraints: List[SearchConstraint] = []
 
-    city = _existing_city(message)
+    city = _canonical_city(_existing_city(message))
     property_type = _existing_property_type(message)
 
     min_bed_match = re.search(

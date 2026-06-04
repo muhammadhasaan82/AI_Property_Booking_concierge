@@ -7,7 +7,8 @@ migration — see Phase 3 of the soft-coding roadmap.
 """
 from __future__ import annotations
 import logging 
-import re 
+import os
+import re
 from datetime import date, datetime 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -86,7 +87,20 @@ def next_field_to_ask(missing_fields: List[str]) -> Optional[str]:
         if field in missing_set:
             return field
     return missing_fields[0]
-
+def _reference_today() -> date:
+    """Return the reference date used by booking date validators.
++
++    Production default is the real current date.
++    Tests or deterministic smoke runs may set BOOKING_REFERENCE_DATE=YYYY-MM-DD.
+    This keeps production code explicit/config-driven instead of detecting pytest.
+    """
+    raw = os.getenv("BOOKING_REFERENCE_DATE", "").strip()
+    if raw:
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError:
+            logger.warning("[booking_schema] Invalid BOOKING_REFERENCE_DATE=%r; using date.today()", raw)
+    return date.today()
 def validate_field(field: str, value: Any, current_state: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
     """Validate a single field. Returns (ok, error_message)."""
     spec = booking_schema.booking.validators.get(field)
@@ -123,7 +137,7 @@ def validate_field(field: str, value: Any, current_state: Optional[Dict[str, Any
         elif spec.type == "date":
             fmt = spec.format or booking_schema.booking.date_format
             parsed = datetime.strptime(str(value).strip(), fmt).date()
-            if spec.not_before == "today" and parsed < date.today():
+            if spec.not_before == "today" and parsed < _reference_today():
                 return False, spec.message or f"{field} must be today or later"
             if spec.after_field and current_state:
                 other_raw = current_state.get(spec.after_field)

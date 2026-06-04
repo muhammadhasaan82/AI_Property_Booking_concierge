@@ -1,4 +1,3 @@
-# tests/test_toon.py
 """
 Unit tests for the TOON (Token-Optimized Object Notation) module.
 Tests encode/decode round-trips and edge cases.
@@ -76,7 +75,6 @@ class TestToonEdgeCases:
         """Strings containing newlines must round-trip correctly."""
         obj = {"message": "line1\nline2\nline3"}
         toon = toon_encode(obj)
-        # Newlines should be escaped in TOON format
         assert "\\n" in toon
         decoded = toon_decode(toon)
         assert decoded["message"] == "line1\nline2\nline3"
@@ -94,8 +92,8 @@ class TestToonEdgeCases:
         obj = {"answer": "true", "flag": True}
         toon = toon_encode(obj)
         decoded = toon_decode(toon)
-        assert decoded["answer"] == "true"  # string
-        assert decoded["flag"] is True  # actual boolean
+        assert decoded["answer"] == "true"
+        assert decoded["flag"] is True
 
     def test_empty_object_array(self):
         obj = {"empty_obj": {}, "empty_arr": []}

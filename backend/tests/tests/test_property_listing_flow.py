@@ -1,15 +1,10 @@
 import pytest
 from unittest.mock import patch
 from app.agents.tools.search import search_properties
-# ────────────────────────────────────────────────────────────────
-# Additional tests for strict property type filtering
-# ────────────────────────────────────────────────────────────────
-
 from app.services.property_type_normalizer import normalize_property_type
 class _Ctx:
     def __init__(self):
         self.state = {}
-# ---------- Normalizer unit tests ----------
 def test_normalizer_plural_to_canonical():
     assert normalize_property_type("apartments") == "apartment"
     assert normalize_property_type("flats")      == "apartment"
@@ -36,11 +31,8 @@ def test_normalizer_already_canonical():
     assert normalize_property_type("duplex")    == "duplex"
 
 def test_normalizer_unknown_returns_passthrough():
-    # With policy=pass_through, unknown type returns the raw key (lowercased)
     result = normalize_property_type("warehouse")
-    assert result == "warehouse"  # pass_through returns raw
-
-# ---------- Search integration tests ----------
+    assert result == "warehouse"
 @pytest.mark.asyncio
 async def test_apartments_only_returned_no_mixed():
     ctx = _Ctx()
@@ -121,7 +113,6 @@ async def test_flat_alias_resolves_to_apartment():
     with patch("app.components.search._DATASET", fake), \
          patch("app.agents.tools.rust_client.search_properties",
                return_value={"fallback": True}):
-        # User says "flats" → LLM might pass "flat" or "flats"
         result = await search_properties(city="London", property_type="flat", tool_context=ctx)
 
     returned_types = {p["property_type"].lower() for p in result["properties"]}

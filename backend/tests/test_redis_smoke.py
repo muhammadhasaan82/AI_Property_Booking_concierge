@@ -153,35 +153,28 @@ def test_anomaly_redis_integration():
             session_id = "redis-anomaly-test"
             await anomaly.clear_session(session_id)
 
-            # Record tool calls - should persist to Redis list
             await anomaly.record_tool_call(session_id, "search_properties", {"city": "Dubai"})
             await anomaly.record_tool_call(session_id, "check_faq", {"query": "cancellation"})
             await anomaly.record_tool_call(session_id, "search_properties", {"city": "Dubai"})
 
-            # Verify Redis list contains entries
             key = f"adk:anomaly:{session_id}"
             assert key in fake_redis.lists, "Anomaly history should be stored in Redis"
             assert len(fake_redis.lists[key]) == 3, "Should have 3 tool call entries"
 
-            # Check stats reflect Redis data
             stats = await anomaly.get_session_stats(session_id)
             assert stats["total_tool_calls"] == 3
             assert stats["tool_counts"]["search_properties"] == 2
             assert stats["tool_counts"]["check_faq"] == 1
 
-            # Not yet at threshold (need 5 identical calls within time window)
             assert await anomaly.check_tool_loop(session_id, "search_properties", {"city": "Dubai"}) is False
 
-            # Add more identical calls to hit threshold (5)
             await anomaly.record_tool_call(session_id, "search_properties", {"city": "Dubai"})
             await anomaly.record_tool_call(session_id, "search_properties", {"city": "Dubai"})
             await anomaly.record_tool_call(session_id, "search_properties", {"city": "Dubai"})
             assert await anomaly.check_tool_loop(session_id, "search_properties", {"city": "Dubai"}) is True
 
-            # Different params should not trigger anomaly
             assert await anomaly.check_tool_loop(session_id, "search_properties", {"city": "London"}) is False
 
-            # Clear and verify
             await anomaly.clear_session(session_id)
             assert key not in fake_redis.lists or len(fake_redis.lists.get(key, [])) == 0
 
@@ -207,25 +200,21 @@ def test_session_history_helpers():
         async def scenario():
             session_id = "history-helper-test"
 
-            # Save history directly
             history = [
                 {"author": "user", "content": {"parts": [{"text": "Book a hotel"}]}},
                 {"author": "model", "content": {"parts": [{"text": "Sure, which city?"}]}},
             ]
             await redis_store.save_session_history(session_id, history)
 
-            # Retrieve and verify
             retrieved = await redis_store.get_session_history(session_id)
             assert len(retrieved) == 2
             assert retrieved[0]["author"] == "user"
             assert retrieved[1]["author"] == "model"
 
-            # State should be preserved when updating history
             await redis_store.save_session_state(session_id, {"booking_step": "city_selection"})
             state = await redis_store.get_session_state(session_id)
             assert state["booking_step"] == "city_selection"
 
-            # Clear and verify default snapshot
             await redis_store.clear_session_snapshot(session_id)
             snapshot = await redis_store.get_session_snapshot(session_id)
             assert snapshot["history"] == []
@@ -244,7 +233,6 @@ def test_graceful_redis_failure_midstream():
     async def scenario():
         session_id = "fallback-midstream-test"
 
-        # First: save with working Redis (FakeRedis)
         fake_redis = FakeRedis()
 
         async def working_client():
@@ -257,29 +245,23 @@ def test_graceful_redis_failure_midstream():
             state={"step": 1},
         )
 
-        # Verify data is in FakeRedis
         assert "adk:session:" + session_id in fake_redis.values
 
-        # Now simulate Redis going down - return None (triggers local fallback)
         async def broken_client():
             return None
 
         redis_store._get_redis_client = broken_client
 
-        # Should fall back to local storage (returns default snapshot since local is empty)
         snapshot = await redis_store.get_session_snapshot(session_id)
         assert snapshot["session_id"] == session_id
-        # Local fallback returns default empty snapshot since we only saved to FakeRedis
         assert snapshot["history"] == []
 
-        # Save to local fallback
         await redis_store.save_session_snapshot(
             session_id=session_id,
             history=[{"author": "user", "content": "fallback data"}],
             state={"step": 2},
         )
 
-        # Verify local fallback works
         snapshot2 = await redis_store.get_session_snapshot(session_id)
         assert snapshot2["history"][0]["content"] == "fallback data"
         assert snapshot2["state"]["step"] == 2

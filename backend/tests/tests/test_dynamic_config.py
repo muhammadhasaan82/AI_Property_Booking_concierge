@@ -29,7 +29,6 @@ def test_guardrails_load():
 def test_legacy_mode_fallback(monkeypatch):
     monkeypatch.setenv("LEGACY_RULES", "1")
     reload_all()
-    # Vocabulary still works because LEGACY fallback is built-in
     vocab = get_vocabulary()
     res = vocab.fallback_cities
     assert len(res) > 0

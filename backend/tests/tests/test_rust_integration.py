@@ -1,12 +1,6 @@
-# tests/test_rust_integration.py
-# Integration tests for the Python ↔ Rust gateway round-trip.
-# Requires the Rust gateway to be running on localhost:3001.
-
 import asyncio
 import os
 import sys
-
-# Ensure project root is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx
@@ -141,7 +135,6 @@ async def test_safety_insufficient_booking_data():
         r = await client.post(f"{RUST_URL}/execute", json={
             "data": {
                 "property_id": "p1"
-                # Missing check_in and check_out
             }
         })
         assert r.status_code == 200
@@ -177,7 +170,6 @@ async def test_python_rust_client():
     """Test the Python rust_client.py wrapper."""
     from app.services import rust_client
 
-    # Search
     result = await rust_client.search_properties(
         location="Miami",
         budget=200,
@@ -198,7 +190,6 @@ async def main():
     print("=" * 60)
     print(f"Gateway URL: {RUST_URL}\n")
 
-    # Check if gateway is running
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             await client.get(f"{RUST_URL}/health")
