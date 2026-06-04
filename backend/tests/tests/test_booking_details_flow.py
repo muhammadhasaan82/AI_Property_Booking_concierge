@@ -9,6 +9,10 @@ from app.agents.status_codes import Status
 from app.agents.tools.search import search_properties, select_property
 from app.services import adk_runner, booking_flow
 
+@pytest.fixture(autouse=True)
+def stable_booking_reference_date(monkeypatch):
+    """Keep date-based booking tests deterministic without test-runner checks in app code."""
+    monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
 
 class _Ctx:
     def __init__(self):
