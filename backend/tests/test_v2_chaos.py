@@ -1,4 +1,4 @@
-# tests/test_v2_chaos.py
+
 """
 V2 Chaos Test Suite — Native Agentic Architecture
 
@@ -7,7 +7,7 @@ which tool the triage_router triggered and what arguments it extracted.
 
 Run from the backend/ directory:
     python -m pytest tests/test_v2_chaos.py -v
-    # or standalone:
+    
     python tests/test_v2_chaos.py
 """
 from __future__ import annotations
@@ -21,25 +21,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-# ---------------------------------------------------------------------------
-# Path bootstrap — allows running from backend/ or project root
-# ---------------------------------------------------------------------------
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _BACKEND = os.path.dirname(_HERE)
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
-# ---------------------------------------------------------------------------
-# Logging: suppress noisy library output, keep test output clean
-# ---------------------------------------------------------------------------
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("litellm").setLevel(logging.ERROR)
 logging.getLogger("google").setLevel(logging.ERROR)
 
-# ---------------------------------------------------------------------------
-# Colours (no external deps)
-# ---------------------------------------------------------------------------
 GREEN = "\033[92m"
 RED = "\033[91m"
 YELLOW = "\033[93m"
@@ -50,13 +41,6 @@ RESET = "\033[0m"
 PASS = f"{GREEN}{BOLD}PASS{RESET}"
 FAIL = f"{RED}{BOLD}FAIL{RESET}"
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# INTERCEPT LAYER
-# We monkey-patch the tool functions on the triage_router BEFORE the Runner
-# executes them, so we can capture exactly what the LLM decided to call
-# without hitting the database / Rust gateway / external APIs.
-# ═══════════════════════════════════════════════════════════════════════════
 
 @dataclass
 class ToolCapture:
@@ -118,13 +102,10 @@ def _install_stubs():
         }),
     }
 
-    # Patch the module-level functions so ADK picks them up via the agent's tool list
     for func_name, stub in stubs.items():
         if hasattr(adk_agents, func_name):
             setattr(adk_agents, func_name, stub)
 
-    # Also re-register tools on the live triage_router object
-    # ADK resolves tools via the agent's .tools list at call-time
     router = adk_agents.triage_router
     new_tools = []
     for t in router.tools:
@@ -135,10 +116,6 @@ def _install_stubs():
             new_tools.append(t)
     router.tools = new_tools
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TEST CASE DEFINITION
-# ═══════════════════════════════════════════════════════════════════════════
 
 @dataclass
 class ChaosTestCase:
@@ -151,18 +128,16 @@ class ChaosTestCase:
 
 
 CHAOS_CASES: List[ChaosTestCase] = [
-    # ── Test 1: Alias resolution ──────────────────────────────────────────
     ChaosTestCase(
         name="alias_apt_nyc_wifi",
         description="Alias Test — 'apt' → apartment, 'NYC' → New York",
         user_message="Find an apt in NYC with wifi",
         expected_tool="search_properties",
         expected_args={
-            "city": "new york",          # case-insensitive check
+            "city": "new york",          
             "property_type": "apartment",
         },
     ),
-    # ── Test 2: Alias — house synonym ────────────────────────────────────
     ChaosTestCase(
         name="alias_place_to_stay",
         description="Alias Test — 'place to stay' → search_properties",
@@ -170,7 +145,6 @@ CHAOS_CASES: List[ChaosTestCase] = [
         expected_tool="search_properties",
         expected_args={"city": "dubai"},
     ),
-    # ── Test 3: Off-Switch — missing data ────────────────────────────────
     ChaosTestCase(
         name="missing_data_partial_booking",
         description="Missing Data Test — partial intent must NOT trigger process_v2_booking",
@@ -178,7 +152,6 @@ CHAOS_CASES: List[ChaosTestCase] = [
         expected_tool="request_booking_details",
         expected_args={},
     ),
-    # ── Test 4: Off-Switch — intent with only email ───────────────────────
     ChaosTestCase(
         name="missing_data_email_only",
         description="Missing Data Test — email only, dates/phone still missing",
@@ -186,7 +159,6 @@ CHAOS_CASES: List[ChaosTestCase] = [
         expected_tool="request_booking_details",
         expected_args={},
     ),
-    # ── Test 5: Mind-change → full booking ───────────────────────────────
     ChaosTestCase(
         name="mind_change_full_booking",
         description="Mind-Change Test — name updated mid-sentence, all fields present → process_v2_booking",
@@ -198,12 +170,11 @@ CHAOS_CASES: List[ChaosTestCase] = [
         ),
         expected_tool="process_v2_booking",
         expected_args={
-            "guest_name": "jane doe",     # case-insensitive
+            "guest_name": "jane doe",    
             "guest_email": "jane@test.com",
             "guests": 1,
         },
     ),
-    # ── Test 6: FAQ intent ────────────────────────────────────────────────
     ChaosTestCase(
         name="faq_cancellation_policy",
         description="FAQ Test — cancellation policy question",
@@ -211,7 +182,6 @@ CHAOS_CASES: List[ChaosTestCase] = [
         expected_tool="check_faq",
         expected_args={},
     ),
-    # ── Test 7: Booking status lookup ────────────────────────────────────
     ChaosTestCase(
         name="booking_status_lookup",
         description="Status Test — user provides booking ID",
@@ -219,7 +189,6 @@ CHAOS_CASES: List[ChaosTestCase] = [
         expected_tool="check_booking_status",
         expected_args={},
     ),
-    # ── Test 8: City list request ─────────────────────────────────────────
     ChaosTestCase(
         name="city_list_request",
         description="City List Test — user asks what cities are available",
@@ -227,7 +196,6 @@ CHAOS_CASES: List[ChaosTestCase] = [
         expected_tool="get_all_available_cities",
         expected_args={},
     ),
-    # ── Test 9: Escalation ───────────────────────────────────────────────
     ChaosTestCase(
         name="escalation_frustrated_user",
         description="Escalation Test — user explicitly asks for human",
@@ -235,7 +203,6 @@ CHAOS_CASES: List[ChaosTestCase] = [
         expected_tool="escalate_to_human",
         expected_args={},
     ),
-    # ── Test 10: Typo + alias combo ───────────────────────────────────────
     ChaosTestCase(
         name="typo_alias_combo",
         description="Robustness Test — typos and informal phrasing",
@@ -248,10 +215,6 @@ CHAOS_CASES: List[ChaosTestCase] = [
     ),
 ]
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# RUNNER
-# ═══════════════════════════════════════════════════════════════════════════
 
 async def _run_single_case(
     case: ChaosTestCase,
@@ -275,14 +238,11 @@ async def _run_single_case(
         chunks.append(chunk)
     latency_ms = (time.monotonic() - t0) * 1000.0
 
-    # Inspect what was captured
     if not _captured:
         return False, "No tool was called (LLM may have responded without tool use)", latency_ms, None
 
-    # The FIRST tool call is what we assert on (triage_router fires tools in order)
     first_call = _captured[0]
 
-    # 1. Tool name check
     if first_call.name != case.expected_tool:
         reason = (
             f"Expected tool '{case.expected_tool}', "
@@ -290,7 +250,6 @@ async def _run_single_case(
         )
         return False, reason, latency_ms, first_call
 
-    # 2. Argument assertions (case-insensitive string comparison for robustness)
     for key, expected_val in case.expected_args.items():
         actual_val = first_call.args.get(key)
         if actual_val is None:
@@ -321,7 +280,6 @@ async def run_chaos_suite() -> bool:
     print(f"{BOLD}{CYAN}  V2 AGENTIC CHAOS TEST SUITE{RESET}")
     print(f"{BOLD}{CYAN}{'═' * 65}{RESET}\n")
 
-    # Install stubs ONCE before any test runs
     _install_stubs()
 
     results = []
@@ -344,7 +302,6 @@ async def run_chaos_suite() -> bool:
 
         results.append((case.name, passed, latency_ms))
 
-    # ── Summary ──────────────────────────────────────────────────────────
     total = len(results)
     passed_count = sum(1 for _, p, _ in results if p)
     failed_count = total - passed_count
@@ -363,13 +320,7 @@ async def run_chaos_suite() -> bool:
     return failed_count == 0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# pytest INTEGRATION
-# Each chaos case becomes an individual pytest test so failures are isolated.
-# ═══════════════════════════════════════════════════════════════════════════
-
-import pytest  # noqa: E402  (imported here to keep module usable without pytest)
-
+import pytest
 
 def pytest_configure(config):
     _install_stubs()
@@ -381,10 +332,6 @@ async def test_chaos_case(case: ChaosTestCase, idx: int):
     passed, reason, latency_ms, capture = await _run_single_case(case, idx + 100)
     assert passed, f"{case.name} FAILED — {reason}  (latency={latency_ms:.0f}ms, captured={capture})"
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STANDALONE ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     success = asyncio.run(run_chaos_suite())

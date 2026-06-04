@@ -52,7 +52,6 @@ def _make_router_output(
     }
 
 
-# ── Core correctness ─────────────────────────────────────────────────────────
 
 def test_header_says_i_found_n_apartments_in_new_york():
     ro = _make_router_output(titles=["A", "B", "C"])
@@ -122,7 +121,6 @@ def test_rating_from_payload():
     assert "4.7" in result
 
 
-# ── Empty / guard cases ───────────────────────────────────────────────────────
 
 def test_empty_properties_returns_empty_string():
     ro = _make_router_output(titles=[])
@@ -136,7 +134,6 @@ def test_missing_properties_key_returns_empty_string():
     assert result == ""
 
 
-# ── Pagination footer ─────────────────────────────────────────────────────────
 
 def test_footer_has_next_shows_next_hint():
     ro = _make_router_output(
@@ -166,8 +163,6 @@ def test_paginated_header_shows_range():
     assert "page 1 of 3" in result
 
 
-# ── Integration: run_adk_turn suppresses concierge_voice for properties_found ──
-
 @pytest.mark.asyncio
 async def test_run_adk_turn_suppresses_voice_when_properties_found(monkeypatch):
     """When the triage_router tool returns properties_found, the concierge_voice
@@ -182,7 +177,6 @@ async def test_run_adk_turn_suppresses_voice_when_properties_found(monkeypatch):
     async def fake_run_async(*args, **kwargs):
         from unittest.mock import MagicMock
 
-        # Emit one tool-response event from triage_router
         tr_event = MagicMock()
         tr_event.author = "triage_router"
         tr_event.content = MagicMock()
@@ -196,7 +190,6 @@ async def test_run_adk_turn_suppresses_voice_when_properties_found(monkeypatch):
         tr_event.is_final_response.return_value = False
         yield tr_event
 
-        # Emit one concierge_voice event with a HALLUCINATED name
         voice_event = MagicMock()
         voice_event.author = "concierge_voice"
         voice_event.content = MagicMock()
@@ -236,16 +229,13 @@ async def test_run_adk_turn_suppresses_voice_when_properties_found(monkeypatch):
     full_reply = "".join(chunks)
     full_reply_lower = full_reply.lower()
 
-    # Must include real titles
     for t in real_titles:
         assert t in full_reply, f"Real title '{t}' missing from reply"
 
-    # Must NOT include hallucinated names
     for fake in _HALLUCINATED_NAMES:
         assert fake not in full_reply_lower, (
             f"Hallucinated name '{fake}' leaked into reply via concierge_voice"
         )
 
-    # Must include the count
     assert "3" in full_reply
     assert "apartment" in full_reply_lower
