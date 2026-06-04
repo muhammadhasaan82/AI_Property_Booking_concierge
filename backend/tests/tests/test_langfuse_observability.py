@@ -440,3 +440,218 @@ class TestSDK471Compatibility:
             with t.span("child"):
                 pass
         trace.end()
+
+
+class TestShouldSample:
+    """Tests for the _should_sample() helper added in this PR."""
+
+    def test_sample_rate_1_0_always_returns_true(self):
+        from app.services.observability.langfuse_observer import _should_sample
+        with patch("app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE", 1.0):
+            for _ in range(20):
+                assert _should_sample() is True
+
+    def test_sample_rate_0_0_always_returns_false(self):
+        from app.services.observability.langfuse_observer import _should_sample
+        with patch("app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE", 0.0):
+            for _ in range(20):
+                assert _should_sample() is False
+
+    def test_sample_rate_above_1_treated_as_always_true(self):
+        """Sample rate >= 1.0 must always return True without calling random."""
+        from app.services.observability.langfuse_observer import _should_sample
+        with patch("app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE", 1.5):
+            assert _should_sample() is True
+
+    def test_sample_rate_fractional_calls_random(self):
+        """For fractional rates, _should_sample() compares against random.random()."""
+        from app.services.observability.langfuse_observer import _should_sample
+        with patch("app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE", 0.5):
+            with patch("app.services.observability.langfuse_observer.random") as mock_random:
+                mock_random.random.return_value = 0.3
+                assert _should_sample() is True
+
+                mock_random.random.return_value = 0.8
+                assert _should_sample() is False
+
+    def test_observer_trace_returns_noop_when_sampled_out(self):
+        """LangfuseObserver.trace() must return NoOpTrace when not sampled."""
+        obs = LangfuseObserver.__new__(LangfuseObserver)
+        obs._is_active = True
+        obs._langfuse = MagicMock()
+
+        with patch("app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE", 0.0), \
+             patch("app.services.observability.langfuse_observer.random") as mock_random:
+            mock_random.random.return_value = 0.999
+            result = obs.trace("should_sample_out")
+
+        assert isinstance(result, NoOpTrace)
+
+
+class TestNoOpObserver:
+    """Tests for the NoOpObserver class as a complete standalone implementation."""
+
+    def test_noop_observer_trace_returns_noop_trace(self):
+        """NoOpObserver.trace() must always return a NoOpTrace."""
+        observer = NoOpObserver()
+        trace = observer.trace("anything")
+        assert isinstance(trace, NoOpTrace)
+
+    def test_noop_observer_trace_with_kwargs_does_not_raise(self):
+        """NoOpObserver.trace() with arbitrary kwargs must not raise."""
+        observer = NoOpObserver()
+        trace = observer.trace("turn", metadata={"x": 1}, user_id="u1")
+        assert isinstance(trace, NoOpTrace)
+
+    def test_noop_observer_flush_does_not_raise(self):
+        """NoOpObserver.flush() must be a no-op without raising."""
+        observer = NoOpObserver()
+        observer.flush()  # must not raise
+
+    def test_noop_trace_span_returns_noop_span(self):
+        """NoOpTrace.span() must return a NoOpSpan."""
+        trace = NoOpTrace()
+        span = trace.span("step")
+        assert isinstance(span, NoOpSpan)
+
+    def test_noop_span_update_does_not_raise(self):
+        """NoOpSpan.update() must be silent."""
+        span = NoOpSpan()
+        span.update(metadata={"k": "v"})  # must not raise
+
+    def test_noop_span_end_does_not_raise(self):
+        """NoOpSpan.end() must be silent."""
+        span = NoOpSpan()
+        span.end()  # must not raise
+
+    def test_noop_span_enter_returns_self(self):
+        """NoOpSpan.__enter__ must return the span itself."""
+        span = NoOpSpan()
+        with span as s:
+            assert s is span
+
+
+class TestObservedTraceUpdateMerge:
+    """Tests for _ObservedTrace.update() merge semantics added in this PR."""
+
+    def _make_trace(self):
+        return _ObservedTrace(
+            name="test",
+            initial_payload={},
+            client=MagicMock(),
+        )
+
+    def test_update_sets_new_key(self):
+        trace = self._make_trace()
+        trace._in_context = True  # prevent immediate emit
+        trace.update(metadata={"source": "unit_test"})
+        assert trace._payload.get("metadata", {}).get("source") == "unit_test"
+
+    def test_update_merges_dict_metadata(self):
+        """Successive update() calls with dict metadata are merged, not overwritten."""
+        trace = self._make_trace()
+        trace._in_context = True
+        trace.update(metadata={"step": 1})
+        trace.update(metadata={"result": "ok"})
+        meta = trace._payload.get("metadata", {})
+        assert meta.get("step") == 1
+        assert meta.get("result") == "ok"
+
+    def test_update_overwrites_non_dict_with_new_value(self):
+        """If existing metadata is not a dict, it is replaced by the new value."""
+        trace = self._make_trace()
+        trace._in_context = True
+        trace._payload["metadata"] = "old_string"
+        trace.update(metadata={"new": "dict"})
+        assert isinstance(trace._payload["metadata"], dict)
+        assert trace._payload["metadata"]["new"] == "dict"
+
+    def test_update_sets_non_metadata_keys_directly(self):
+        """Non-metadata/input/output keys are set directly on payload."""
+        trace = self._make_trace()
+        trace._in_context = True
+        trace.update(user_id="u123", session="sess1")
+        assert trace._payload["user_id"] == "u123"
+        assert trace._payload["session"] == "sess1"
+
+    def test_emit_idempotent_after_first_fire(self):
+        """Once emitted (fire-and-forget), calling update again does not re-emit."""
+        emit_count = [0]
+
+        def _counting_observe(name):
+            def _dec(fn):
+                def _wrapper(*a, **kw):
+                    emit_count[0] += 1
+                    return fn(*a, **kw)
+                return _wrapper
+            return _dec
+
+        trace = _ObservedTrace(name="t", initial_payload={}, client=MagicMock())
+        with patch("app.services.observability.langfuse_observer.observe", _counting_observe):
+            trace.update(metadata={"step": 1})  # fires immediately (not in context)
+            trace.update(metadata={"step": 2})  # _sent=True, no second emit
+
+        assert emit_count[0] == 1
+
+
+class TestObservedSpan:
+    """Tests for _ObservedSpan added in this PR."""
+
+    def test_span_update_adds_to_parent_child_spans(self):
+        """_ObservedSpan.update() must append to the parent trace's _child_spans."""
+        parent = _ObservedTrace(name="parent", initial_payload={}, client=MagicMock())
+        span = _ObservedSpan(parent=parent, name="my_step")
+        span.update(metadata={"detail": "x"})
+        assert len(parent._child_spans) == 1
+        assert parent._child_spans[0]["span_name"] == "my_step"
+
+    def test_span_update_multiple_times_appends_each_time(self):
+        """Each call to span.update() appends a new entry to parent._child_spans."""
+        parent = _ObservedTrace(name="parent", initial_payload={}, client=MagicMock())
+        span = _ObservedSpan(parent=parent, name="step")
+        span.update(metadata={"k": 1})
+        span.update(metadata={"k": 2})
+        assert len(parent._child_spans) == 2
+
+    def test_span_end_does_not_raise(self):
+        """_ObservedSpan.end() is a no-op and must not raise."""
+        parent = _ObservedTrace(name="parent", initial_payload={}, client=MagicMock())
+        span = _ObservedSpan(parent=parent, name="step")
+        span.end()
+
+    def test_span_context_manager_safe(self):
+        """_ObservedSpan used as context manager must not raise."""
+        parent = _ObservedTrace(name="parent", initial_payload={}, client=MagicMock())
+        span = _ObservedSpan(parent=parent, name="step")
+        with span as s:
+            assert s is span
+            s.update(metadata={"inside": True})
+
+    def test_trace_span_returns_observed_span_when_active(self):
+        """_ObservedTrace.span() must return an _ObservedSpan instance."""
+        trace = _ObservedTrace(name="parent", initial_payload={}, client=MagicMock())
+        span = trace.span("my_step")
+        assert isinstance(span, _ObservedSpan)
+
+    def test_child_spans_included_in_emitted_payload(self):
+        """When trace emits, child span data is merged into the final payload."""
+        received_payloads = []
+
+        def _capturing_observe(name):
+            def _dec(fn):
+                def _wrapper(payload, *a, **kw):
+                    received_payloads.append(payload)
+                    return fn(payload, *a, **kw)
+                return _wrapper
+            return _dec
+
+        trace = _ObservedTrace(name="with_spans", initial_payload={}, client=MagicMock())
+        span = trace.span("child_step")
+        span.update(metadata={"result": "pass"})
+
+        with patch("app.services.observability.langfuse_observer.observe", _capturing_observe):
+            trace._emit()
+
+        assert any("child_spans" in p for p in received_payloads)
+        child_spans = received_payloads[0]["child_spans"]
+        assert any(s["span_name"] == "child_step" for s in child_spans)
