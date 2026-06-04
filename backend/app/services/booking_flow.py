@@ -274,6 +274,131 @@ def _parse_natural_date(text: str) -> Optional[str]:
     return None
 
 
+def _find_all_dates(text: str) -> List[Tuple[str, int, int]]:
+    if not text:
+        return []
+    results = []
+    
+    iso_pat = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
+    for m in iso_pat.finditer(text):
+        try:
+            parsed = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            results.append((parsed.strftime(cfg.date_format), m.start(), m.end()))
+        except ValueError:
+            pass
+
+    pat1 = re.compile(r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>[a-z]+)\s*,?\s*(?P<year>\d{4})\b", re.I)
+    for m in pat1.finditer(text):
+        month_raw = m.group("month").lower()
+        month = _MONTHS.get(month_raw)
+        if month is not None:
+            try:
+                parsed = date(int(m.group("year")), month, int(m.group("day")))
+                results.append((parsed.strftime(cfg.date_format), m.start(), m.end()))
+            except ValueError:
+                pass
+
+    pat2 = re.compile(r"\b(?P<month>[a-z]+)\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(?P<year>\d{4})\b", re.I)
+    for m in pat2.finditer(text):
+        month_raw = m.group("month").lower()
+        month = _MONTHS.get(month_raw)
+        if month is not None:
+            try:
+                parsed = date(int(m.group("year")), month, int(m.group("day")))
+                results.append((parsed.strftime(cfg.date_format), m.start(), m.end()))
+            except ValueError:
+                pass
+
+    results.sort(key=lambda x: (x[1], -(x[2] - x[1])))
+    filtered = []
+    last_end = -1
+    for p_date, start, end in results:
+        if start >= last_end:
+            filtered.append((p_date, start, end))
+            last_end = end
+    return filtered
+
+
+def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[str]]:
+    dates_found = _find_all_dates(text)
+    if not dates_found:
+        return None, None
+        
+    check_in_matches = list(re.finditer(r"\b(check[- ]?in(?: date)?|arrival(?: date)?)\b", text, re.I))
+    check_out_matches = list(re.finditer(r"\b(check[- ]?out(?: date)?|checkout(?: date)?|departure(?: date)?)\b", text, re.I))
+    
+    check_in_date = None
+    check_out_date = None
+    
+    if len(dates_found) == 1:
+        d_val, d_start, d_end = dates_found[0]
+        best_type = None
+        min_dist = 999999
+        for m in check_in_matches:
+            if m.end() <= d_start:
+                dist = d_start - m.end()
+            else:
+                dist = (m.start() - d_end) * 5
+            if dist < min_dist:
+                min_dist = dist
+                best_type = "check_in"
+        for m in check_out_matches:
+            if m.end() <= d_start:
+                dist = d_start - m.end()
+            else:
+                dist = (m.start() - d_end) * 5
+            if dist < min_dist:
+                min_dist = dist
+                best_type = "check_out"
+        if best_type == "check_in":
+            check_in_date = d_val
+        elif best_type == "check_out":
+            check_out_date = d_val
+        return check_in_date, check_out_date
+
+    for d_val, d_start, d_end in dates_found:
+        best_type = None
+        min_dist = 999999
+        for m in check_in_matches:
+            if m.end() <= d_start:
+                dist = d_start - m.end()
+            else:
+                dist = (m.start() - d_end) * 5
+            if dist < min_dist:
+                min_dist = dist
+                best_type = "check_in"
+        for m in check_out_matches:
+            if m.end() <= d_start:
+                dist = d_start - m.end()
+            else:
+                dist = (m.start() - d_end) * 5
+            if dist < min_dist:
+                min_dist = dist
+                best_type = "check_out"
+        
+        if best_type == "check_in" and not check_in_date:
+            check_in_date = d_val
+        elif best_type == "check_out" and not check_out_date:
+            check_out_date = d_val
+
+    if len(dates_found) >= 2:
+        if not check_in_date and not check_out_date:
+            check_in_date = dates_found[0][0]
+            check_out_date = dates_found[1][0]
+        elif check_in_date and not check_out_date:
+            for d_val, _, _ in dates_found:
+                if d_val != check_in_date:
+                    check_out_date = d_val
+                    break
+        elif check_out_date and not check_in_date:
+            for d_val, _, _ in dates_found:
+                if d_val != check_out_date:
+                    check_in_date = d_val
+                    break
+                    
+    return check_in_date, check_out_date
+
+
 def _field_segments(message: str) -> Dict[str, str]:
     normalized_message = message or ""
     alias_map = _field_alias_map()
@@ -393,16 +518,23 @@ def _extract_updates_from_message(
     elif "guests" in segments:
         mentioned_fields.append("guests")
 
-    for field in ("check_in", "check_out"):
-        segment = segments.get(field)
-        if segment is None:
-            continue
-        mentioned_fields.append(field)
-        parsed = _parse_natural_date(segment)
-        if parsed:
-            updates[field] = parsed
+    assoc_check_in, assoc_check_out = _extract_dates_by_association(normalized)
+    has_check_in_phrase = bool(re.search(r"\b(check[- ]?in(?: date)?|arrival(?: date)?)\b", normalized, re.I))
+    has_check_out_phrase = bool(re.search(r"\b(check[- ]?out(?: date)?|checkout(?: date)?|departure(?: date)?)\b", normalized, re.I))
+
+    if has_check_in_phrase:
+        mentioned_fields.append("check_in")
+        if assoc_check_in:
+            updates["check_in"] = assoc_check_in
         else:
-            errors[field] = _friendly_prompt_for_field(field)
+            errors["check_in"] = _friendly_prompt_for_field("check_in")
+
+    if has_check_out_phrase:
+        mentioned_fields.append("check_out")
+        if assoc_check_out:
+            updates["check_out"] = assoc_check_out
+        else:
+            errors["check_out"] = _friendly_prompt_for_field("check_out")
 
     if awaiting_field and awaiting_field not in updates:
         mentioned_fields.append(awaiting_field)
