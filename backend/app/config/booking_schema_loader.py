@@ -92,14 +92,14 @@ def _reference_today() -> date:
 +
 +    Production default is the real current date.
 +    Tests or deterministic smoke runs may set BOOKING_REFERENCE_DATE=YYYY-MM-DD.
-+    This keeps production code explicit/config-driven instead of detecting pytest.
+    This keeps production code explicit/config-driven instead of detecting pytest.
     """
     raw = os.getenv("BOOKING_REFERENCE_DATE", "").strip()
     if raw:
         try:
             return datetime.strptime(raw, "%Y-%m-%d").date()
         except ValueError:
-            logger.warning("[booking_schema] Invalid BOOKING_REFERENCE_DATE=%r; using data.today()", raw)
+            logger.warning("[booking_schema] Invalid BOOKING_REFERENCE_DATE=%r; using date.today()", raw)
     return date.today()
 def validate_field(field: str, value: Any, current_state: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
     """Validate a single field. Returns (ok, error_message)."""
