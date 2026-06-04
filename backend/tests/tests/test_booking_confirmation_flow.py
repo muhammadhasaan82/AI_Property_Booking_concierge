@@ -14,11 +14,21 @@ from app.services import adk_runner
 
 @pytest.fixture(autouse=True)
 def stable_booking_reference_date(monkeypatch):
+    """
+    Set the BOOKING_REFERENCE_DATE environment variable to 2026-06-01 to make booking-date handling deterministic in tests.
+    
+    This pytest fixture ensures booking-related logic that depends on the current/reference date behaves consistently across test runs by fixing the reference date to June 1, 2026.
+    """
     monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
 
 
 class _Ctx:
     def __init__(self):
+        """
+        Initialize the context with an empty soft-state container.
+        
+        Sets `self.state` to a dictionary with a single key `"soft_state"` initialized to an empty dictionary.
+        """
         self.state = {"soft_state": {}}
 
 
@@ -42,6 +52,22 @@ def _make_props(count: int) -> list[dict]:
 
 
 async def _run_booking_confirmation(monkeypatch, message: str, option_number: int = 3):
+    """
+    Run a simulated booking-confirmation ADK turn against a patched test environment and return the reply and captured state.
+    
+    Parameters:
+        message (str): User utterance to send to the ADK turn.
+        option_number (int): 1-based index of the search result to select before starting the booking flow.
+    
+    Returns:
+        tuple: A 6-tuple containing:
+            - full_reply_text (str): Concatenated assistant reply produced by the ADK turn.
+            - snapshot (dict): In-memory session snapshot used and updated during the turn.
+            - saved_states (list[dict]): Sequence of `state` objects that were passed to the fake save_session_snapshot.
+            - search_result (dict): The mocked search results returned by the patched search.
+            - selected (dict): The property selection result produced before starting the booking flow.
+            - route_pre_adk (AsyncMock): The AsyncMock used for `route_pre_adk` so callers can inspect await count and return value.
+    """
     ctx = _Ctx()
     fake = _make_props(8)
 
@@ -97,10 +123,33 @@ async def _run_booking_confirmation(monkeypatch, message: str, option_number: in
 
 
 async def _run_booking_followup_turn(monkeypatch, snapshot: dict, saved_states: list[dict], message: str):
+    """
+    Run a follow-up booking shortcut turn using a provided session snapshot and record any saved soft-state mutations.
+    
+    Parameters:
+        monkeypatch: pytest monkeypatch fixture used to patch adk_runner behaviors for the test.
+        snapshot (dict): The session snapshot to be returned by patched `get_session_snapshot` (will be deep-copied).
+        saved_states (list[dict]): Mutable list to which each saved `state` deep-copy will be appended when `save_session_snapshot` is called.
+        message (str): The user message to send to `adk_runner.run_adk_turn`.
+    
+    Returns:
+        tuple:
+            - full_reply_text (str): The concatenated reply chunks produced by the turn.
+            - route_pre_adk (AsyncMock): The AsyncMock instance patched in for `adk_runner.route_pre_adk` (useful for await-count assertions).
+    """
     async def fake_get_session_snapshot(_session_id):
         return copy.deepcopy(snapshot)
 
     async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        """
+        Save a deep-copied session snapshot into the shared in-memory test structures.
+        
+        Parameters:
+            session_id (str): Ignored by this fake; included to match the real API.
+            history (list): Conversation history to deep-copy into snapshot["history"].
+            state (dict): Session state to deep-copy into snapshot["state"] and to append to `saved_states`.
+            metadata (dict): Metadata to deep-copy and merge into snapshot["meta"].
+        """
         state_to_save = copy.deepcopy(state)
         snapshot["state"] = state_to_save
         snapshot["history"] = copy.deepcopy(history)
@@ -108,6 +157,12 @@ async def _run_booking_followup_turn(monkeypatch, snapshot: dict, saved_states: 
         saved_states.append(state_to_save)
 
     def fail_get_runner():
+        """
+        Prevent accidental invocation of the ADK runner during active booking shortcut turns.
+        
+        Raises:
+            AssertionError: always raised with the message "ADK runner must not be invoked for active booking shortcut turns".
+        """
         raise AssertionError("ADK runner must not be invoked for active booking shortcut turns")
 
     route_pre_adk = AsyncMock(return_value={"reply": "generic concierge greeting"})

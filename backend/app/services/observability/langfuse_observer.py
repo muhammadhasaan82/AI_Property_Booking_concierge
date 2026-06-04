@@ -67,12 +67,24 @@ _observer: Optional["LangfuseObserver"] = None
 
 
 def _is_configured() -> bool:
-    """Return True when both API credentials are present."""
+    """
+    Check whether Langfuse API credentials are configured.
+    
+    Returns:
+        `true` if both the public and secret keys are non-empty, `false` otherwise.
+    """
     return bool(LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
 
 
 def _should_sample() -> bool:
-    """Honour LANGFUSE_SAMPLE_RATE (0.0–1.0).  1.0 always traces."""
+    """
+    Decides whether the current event should be sampled according to LANGFUSE_SAMPLE_RATE.
+    
+    If LANGFUSE_SAMPLE_RATE is greater than or equal to 1.0 sampling always occurs.
+    
+    Returns:
+        `True` if the event should be sampled according to LANGFUSE_SAMPLE_RATE, `False` otherwise.
+    """
     if LANGFUSE_SAMPLE_RATE >= 1.0:
         return True
     return random.random() < LANGFUSE_SAMPLE_RATE
@@ -80,8 +92,19 @@ def _should_sample() -> bool:
 
 def sanitize_for_observability(value: Any) -> Any:
     """
-    Redact PII and secrets from a value for safe observability logging.
-    Preserves safe keys while omitting or redacting sensitive ones.
+    Sanitize a value for observability by redacting PII and sensitive secrets.
+    
+    Strings are truncated to the configured maximum and have email addresses, phone-like
+    numbers, and common database URLs redacted. Dicts are copied with entries removed
+    when the key name contains sensitive substrings (e.g., password, secret, token,
+    api_key, authorization, cookie, database_url, email, phone); remaining values are
+    recursively sanitized. Lists, tuples, and sets are returned as lists with each
+    element sanitized. Integers, floats, and booleans are returned unchanged; other
+    types are converted to their string representation.
+    
+    Returns:
+        A sanitized version of the input suitable for observability output, preserving
+        the input's general structure while omitting or redacting sensitive data.
     """
     if value is None:
         return None
@@ -124,6 +147,26 @@ def sanitize_for_observability(value: Any) -> Any:
 
 
 def summarize_soft_state(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Produce a compact summary of a soft-state dictionary for observability.
+    
+    Parameters:
+        soft_state (Optional[Dict[str, Any]]): The soft state to summarize; expected to be a dict representing UI/booking-related transient state.
+    
+    Returns:
+        Dict[str, Any]: A summary dictionary containing:
+            - `keys`: list of keys present in `soft_state`
+            - `last_presented_view`: value of `soft_state.get("last_presented_view")`
+            - `booking_stage`: value of `soft_state.get("booking_stage")`
+            - `visible_results_count`: length of `soft_state["visible_results"]` if it is a list, otherwise 0
+            - `option_map_count`: length of `soft_state["option_map"]` if it is a dict, otherwise 0
+            - `all_search_results_count`: length of `soft_state["all_search_results"]` if it is a list, otherwise 0
+            - `booking_property_id_present`: `True` if `soft_state.get("booking_property_id")` is truthy, otherwise `False`
+            - `booking_review_present`: `True` if `soft_state.get("booking_review")` is truthy, otherwise `False`
+            - `booking_receipt_present`: `True` if `soft_state.get("booking_receipt")` is truthy, otherwise `False`
+    
+        Returns an empty dict if `soft_state` is not a dict.
+    """
     if not isinstance(soft_state, dict):
         return {}
 
@@ -154,6 +197,17 @@ def summarize_soft_state(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]
 
 
 def summarize_property_results(results: Any) -> Dict[str, Any]:
+    """
+    Summarizes a list of property result items.
+    
+    If `results` is not a list it is treated as empty.
+    
+    Returns:
+        A dict containing:
+        - `count` (int): number of items in `results`.
+        - `has_results` (bool): `true` if `count` is greater than zero, `false` otherwise.
+        - `first_property_id` (Any | None): the `"id"` value from the first item if the first item is a dict, otherwise `None`.
+    """
     if not isinstance(results, list):
         return {"count": 0, "has_results": False}
 
@@ -167,6 +221,26 @@ def summarize_property_results(results: Any) -> Dict[str, Any]:
 
 
 def summarize_booking_state(soft_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Produce a privacy-aware summary of booking-related fields extracted from a soft-state dictionary.
+    
+    Parameters:
+        soft_state (Optional[Dict[str, Any]]): The soft state to summarize; expected to contain a nested
+            "booking_state" dict and optionally "booking_stage". If not a dict, an empty dict is returned.
+    
+    Returns:
+        Dict[str, Any]: A summary dictionary with the following keys:
+          - "stage": the value of `soft_state["booking_stage"]` (or None if absent).
+          - "property_id_present": `True` if `booking_state["property_id"]` is present and truthy, `False` otherwise.
+          - "guest_name_present": `True` if `booking_state["guest_name"]` is present and truthy, `False` otherwise.
+          - "guest_email_present": `True` if `booking_state["guest_email"]` is present and truthy, `False` otherwise.
+          - "guest_phone_present": `True` if `booking_state["guest_phone"]` is present and truthy, `False` otherwise.
+          - "check_in_present": `True` if `booking_state["check_in"]` is present and truthy, `False` otherwise.
+          - "check_out_present": `True` if `booking_state["check_out"]` is present and truthy, `False` otherwise.
+          - "guests": the raw value of `booking_state["guests"]` (may be None).
+          - "guest_name", "guest_email", "guest_phone": either the actual values from `booking_state` or the literal
+            string "[REDACTED]" when `LANGFUSE_REDACT_INPUTS` is enabled and the corresponding field is present.
+    """
     if not isinstance(soft_state, dict):
         return {}
 
@@ -203,15 +277,42 @@ class NoOpSpan:
     """Silent no-op span — returned when Langfuse is disabled or unavailable."""
 
     def update(self, **kwargs: Any) -> None:
+        """
+        Record an update for this child span into the parent trace's accumulated child_spans.
+        
+        Only the `metadata` entry from `**kwargs` is used: it is sanitized for observability and appended to the parent trace as
+        {"span_name": <span name>, "metadata": <sanitized metadata>}. Any exceptions raised during sanitization or append are caught
+        and logged; this method never propagates errors.
+        
+        Parameters:
+            kwargs (Any): Optional keyword arguments; recognized key:
+                - metadata (Any): Metadata to associate with the child span (will be sanitized).
+        """
         pass
 
     def end(self) -> None:
+        """
+        End the span.
+        
+        Signal that the span is finished. Implementations may perform cleanup or be a no-op; this method does not raise exceptions.
+        """
         pass
 
     def __enter__(self) -> "NoOpSpan":
+        """
+        Enter the no-op span context and return the span instance.
+        
+        Returns:
+            NoOpSpan: The same span object to be used as the context manager.
+        """
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """
+        Context manager exit hook that performs no action and does not suppress exceptions.
+        
+        The parameters mirror the standard context manager protocol and are ignored; any exception raised inside the context will propagate normally because this method returns None.
+        """
         pass
 
 
@@ -227,18 +328,55 @@ class NoOpTrace:
     """
 
     def span(self, name: str, **kwargs: Any) -> NoOpSpan:
+        """
+        Create a child span compatible with the tracing API that performs no operations.
+        
+        Parameters:
+            name (str): Span name (accepted for API compatibility; ignored).
+            **kwargs: Additional span options (accepted but ignored).
+        
+        Returns:
+            NoOpSpan: A span-like object whose methods are no-ops and that can be used as a context manager.
+        """
         return NoOpSpan()
 
     def update(self, **kwargs: Any) -> None:
+        """
+        Record an update for this child span into the parent trace's accumulated child_spans.
+        
+        Only the `metadata` entry from `**kwargs` is used: it is sanitized for observability and appended to the parent trace as
+        {"span_name": <span name>, "metadata": <sanitized metadata>}. Any exceptions raised during sanitization or append are caught
+        and logged; this method never propagates errors.
+        
+        Parameters:
+            kwargs (Any): Optional keyword arguments; recognized key:
+                - metadata (Any): Metadata to associate with the child span (will be sanitized).
+        """
         pass
 
     def end(self) -> None:
+        """
+        End the span.
+        
+        Signal that the span is finished. Implementations may perform cleanup or be a no-op; this method does not raise exceptions.
+        """
         pass
 
     def __enter__(self) -> "NoOpTrace":
+        """
+        Enter the context for a NoOpTrace and provide the trace object for use within the with-block.
+        
+        Returns:
+            The `NoOpTrace` instance to be used as the context manager target.
+        """
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """
+        Context manager exit hook that performs no action and does not suppress exceptions.
+        
+        The parameters mirror the standard context manager protocol and are ignored; any exception raised inside the context will propagate normally because this method returns None.
+        """
         pass
 
 
@@ -246,20 +384,38 @@ class NoOpObserver:
     """Observer returned when Langfuse is fully disabled."""
 
     def trace(self, name: str, **kwargs: Any) -> NoOpTrace:
+        """
+        Create a no-op trace object with the given name.
+        
+        Parameters:
+            name (str): The trace name (ignored by the no-op implementation).
+        
+        Returns:
+            NoOpTrace: A trace-like object whose `span`, `update`, `end`, and context-manager methods are no-ops.
+        """
         return NoOpTrace()
 
     def flush(self) -> None:
+        """
+        Flushes any buffered observations to Langfuse if the observer is active.
+        
+        If a Langfuse client is available, calls its `flush()` method. Any exceptions raised by the client are caught and logged; this method does not raise.
+        """
         pass
 
 def _emit_langfuse_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Target function wrapped by ``@observe`` at call-time.
-
-    Langfuse intercepts this call and records a named observation.
-    We also try to attach the payload as span metadata via the client
-    helpers, but every call is guarded so no exception can escape.
-
-    Returns a minimal summary dict (becomes the span ``output`` in Langfuse).
+    Emit an observation payload to Langfuse and return a minimal acknowledgement.
+    
+    Attempts to attach the given payload to the current Langfuse trace/span when a client is available; exceptions during attachment are suppressed so the function does not raise.
+    
+    Parameters:
+    	payload (Dict[str, Any]): Metadata and optional `input`/`output` fields to attach to the observation.
+    
+    Returns:
+    	result (Dict[str, Any]): A summary dict with keys:
+    		- `"status"`: `"ok"` indicating the emit attempt completed.
+    		- `"metadata_keys"`: list of keys present in `payload`.
     """
     try:
         from langfuse import get_client as _get_client 
@@ -293,12 +449,30 @@ class _ObservedSpan:
     """
 
     def __init__(self, parent: "_ObservedTrace", name: str, metadata: Any = None) -> None:
+        """
+        Initialize an observed child span tied to a parent trace.
+        
+        Parameters:
+        	parent ("_ObservedTrace"): Parent trace that will receive this span's metadata when updated.
+        	name (str): Name of the child span.
+        	metadata (Any, optional): Optional initial metadata associated with the span; stored for later use.
+        """
         self._parent = parent
         self._name = name
         self._metadata = metadata
 
     def update(self, **kwargs: Any) -> None:
-        """Merge span metadata into the parent trace payload."""
+        """
+        Record span metadata into the parent trace's accumulated child spans.
+        
+        Sanitizes the provided `metadata` (via `sanitize_for_observability`) and appends a dictionary
+        with `span_name` and `metadata` to the parent trace's internal `_child_spans` list. Any
+        exceptions raised during sanitization or append are caught and logged at debug level; no
+        exception is propagated.
+        
+        Parameters:
+            kwargs: Supports a `metadata` key whose value will be sanitized and recorded.
+        """
         try:
             meta = sanitize_for_observability(kwargs.get("metadata", {}))
             self._parent._child_spans.append(
@@ -308,12 +482,28 @@ class _ObservedSpan:
             logger.debug("[Langfuse] Span update failed (non-fatal): %s", exc)
 
     def end(self) -> None:
+        """
+        End the span.
+        
+        Signal that the span is finished. Implementations may perform cleanup or be a no-op; this method does not raise exceptions.
+        """
         pass
 
     def __enter__(self) -> "_ObservedSpan":
+        """
+        Enter the span context and return the span instance.
+        
+        Returns:
+            _ObservedSpan: The same span instance to be used as the context manager value.
+        """
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """
+        Context manager exit hook that performs no action and does not suppress exceptions.
+        
+        The parameters mirror the standard context manager protocol and are ignored; any exception raised inside the context will propagate normally because this method returns None.
+        """
         pass
 
 class _ObservedTrace:
@@ -340,6 +530,16 @@ class _ObservedTrace:
         initial_payload: Dict[str, Any],
         client: Any,
     ) -> None:
+        """
+        Initialize an observed trace and prepare its internal state for eventual emission.
+        
+        The provided `initial_payload` is sanitized with `sanitize_for_observability` and stored (empty dict if falsy). The trace tracks collected child spans, whether it is currently used as a context manager (`_in_context`), and an idempotent `_sent` flag to ensure the trace is emitted at most once. The `client` is retained for optional flushing/emission.
+        
+        Parameters:
+            name (str): Human-readable trace name.
+            initial_payload (Dict[str, Any]): Initial event data; will be sanitized and stored.
+            client (Any): Langfuse client (or client-like object) used for emission/flush; may be None.
+        """
         self._name = name
         self._payload: Dict[str, Any] = sanitize_for_observability(initial_payload) or {}
         self._client = client
@@ -349,16 +549,28 @@ class _ObservedTrace:
 
 
     def span(self, name: str, **kwargs: Any) -> _ObservedSpan:
-        """Return a child span that records locally into this trace."""
+        """
+        Create a child span that records its metadata into the parent trace's collected child spans.
+        
+        Parameters:
+            name (str): Human-readable name for the child span.
+            metadata (Any, optional): Initial metadata for the span (passed via `metadata` in kwargs).
+        
+        Returns:
+            _ObservedSpan: A span object that appends its metadata to the parent trace's payload when updated.
+        """
         meta = kwargs.get("metadata")
         return _ObservedSpan(parent=self, name=name, metadata=meta)
 
     def update(self, **kwargs: Any) -> None:
         """
-        Merge sanitized kwargs into the accumulated payload.
-
-        If we are NOT inside a ``with`` block (fire-and-forget pattern),
-        emit immediately so the trace reaches Langfuse.
+        Merge provided keyword update data into the trace's accumulated payload.
+        
+        For the keys "metadata", "input", and "output" the values are sanitized for observability; if an existing value is a dict and the sanitized value is also a dict, the sanitized entries are merged into the existing dict, otherwise the value is replaced. Other keys are stored as-is. If this trace is not being used as a context manager, the trace is emitted immediately after the update. Exceptions during the merge are caught and logged; they do not propagate.
+        
+        Parameters:
+            **kwargs: Mapping of fields to merge into the trace payload. Special handling applies to
+                "metadata", "input", and "output" as described above.
         """
         try:
             for k, v in kwargs.items():
@@ -378,25 +590,35 @@ class _ObservedTrace:
             self._emit()
 
     def end(self) -> None:
-        """Explicitly end the trace (called by adk_runner on early returns)."""
+        """
+        Finalize and emit the accumulated trace payload to the observer; safe to call multiple times.
+        """
         self._emit()
 
     def __enter__(self) -> "_ObservedTrace":
+        """
+        Enter the trace context and mark the trace as active for context-managed emission.
+        
+        Returns:
+            _ObservedTrace: The trace instance (`self`) to be used as the context manager value.
+        """
         self._in_context = True
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """
+        Exit the trace context and finalize emission of the accumulated observation.
+        
+        Sets the trace out of context and triggers a one-time emit of the trace payload. Exceptions raised inside the context are not suppressed.
+        """
         self._in_context = False
         self._emit()
 
     def _emit(self) -> None:
         """
-        Send exactly one observation to Langfuse.
-
-        Idempotent — subsequent calls after the first are silently ignored.
-        Uses ``@observe(name=…)`` applied dynamically to ``_emit_langfuse_event``
-        so that Langfuse registers a named trace/span without needing
-        ``start_as_current_span`` or the old ``client.trace()`` API.
+        Emit the accumulated trace payload to Langfuse exactly once.
+        
+        This method is idempotent: subsequent calls after the first do nothing. If a module-level Langfuse observer is unavailable it returns silently. Before sending, child spans collected on the trace are added to the final payload under the "child_spans" key. Any errors during emission or during an optional client flush are caught and logged at debug level; no exception is raised.
         """
         if self._sent:
             return
@@ -438,6 +660,16 @@ class LangfuseObserver:
     """
 
     def __init__(self) -> None:
+        """
+        Initialize a LangfuseObserver by attempting to construct a Langfuse client from environment configuration.
+        
+        Performs these steps and sets instance state accordingly:
+        - Initializes internal attributes `_langfuse` to `None` and `_is_active` to `False`.
+        - If `LANGFUSE_ENABLED` is false, leaves the observer inactive.
+        - If required credentials are missing, the Langfuse SDK is unavailable, or the SDK's `observe` helper is unavailable, leaves the observer inactive.
+        - On success, constructs a Langfuse client using `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL`, stores it in `_langfuse`, and sets `_is_active` to `True`.
+        - On any initialization error, leaves the observer inactive and keeps `_langfuse` as `None`.
+        """
         self._langfuse: Any = None
         self._is_active: bool = False
 
@@ -481,27 +713,22 @@ class LangfuseObserver:
             )
 
     def is_active(self) -> bool:
+        """
+        Indicates whether the observer is currently active.
+        
+        Returns:
+            True if the observer is active, False otherwise.
+        """
         return self._is_active
 
     def trace(self, name: str, **kwargs: Any) -> "_ObservedTrace | NoOpTrace":
         """
-        Start a new trace.  Returns an ``_ObservedTrace`` when active or a
-        ``NoOpTrace`` when disabled/misconfigured.
-
-        Supported call patterns
-        -----------------------
-        ::
-
-            with observer.trace("chat_turn", metadata={…}) as t:
-                t.update(metadata={…})
-                with t.span("step"):
-                    …
-
-            observer.trace("booking_flow").update(metadata={…})
-
-            t = observer.trace("chat_turn", user_id=uid)
-            t.update(metadata={…})
-            t.end()
+        Create a trace context for recording observability data.
+        
+        Sanitizes any provided `metadata`, `input`, and `output` kwargs and applies sampling and configuration checks; if observability is disabled, misconfigured, or the trace is not sampled, the returned object is a no-op that ignores updates.
+        
+        Returns:
+            A trace-like object that records and emits observations when the observer is active and sampling allows emission; otherwise a no-op trace that ignores updates.
         """
         if not self._is_active or self._langfuse is None:
             return NoOpTrace()
@@ -523,7 +750,11 @@ class LangfuseObserver:
         )
 
     def flush(self) -> None:
-        """Flush pending events to the Langfuse server (best-effort)."""
+        """
+        Flush any buffered observations to the Langfuse client.
+        
+        This is best-effort: failures during flush are logged and not raised.
+        """
         if self._is_active and self._langfuse is not None:
             try:
                 self._langfuse.flush()
@@ -533,10 +764,11 @@ class LangfuseObserver:
 
 def get_observer() -> "LangfuseObserver | NoOpObserver":
     """
-    Return the singleton ``LangfuseObserver``.
-
-    Initialises the observer on first call.  Always returns an object with
-    ``trace()`` and ``flush()`` — never raises.
+    Get the module-level Langfuse observer singleton.
+    
+    Initializes the singleton on first call and returns an object exposing `trace()` and `flush()`.
+    Returns:
+        The singleton `LangfuseObserver` (or an inactive/no-op observer) providing `.trace()` and `.flush()`.
     """
     global _observer
     if _observer is None:

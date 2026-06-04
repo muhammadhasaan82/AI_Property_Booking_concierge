@@ -4,6 +4,11 @@ from app.agents.tools.search import search_properties
 from app.services.property_type_normalizer import normalize_property_type
 class _Ctx:
     def __init__(self):
+        """
+        Initialize a minimal tool context.
+        
+        Creates an instance attribute `state` as an empty dictionary for storing transient context data.
+        """
         self.state = {}
 def test_normalizer_plural_to_canonical():
     assert normalize_property_type("apartments") == "apartment"
@@ -35,6 +40,11 @@ def test_normalizer_unknown_returns_passthrough():
     assert result == "warehouse"
 @pytest.mark.asyncio
 async def test_apartments_only_returned_no_mixed():
+    """
+    Verifies that filtering by "apartments" for a city returns only apartment listings.
+    
+    Asserts that the response status is "properties_found", that all returned properties have `property_type` equal to "apartment" (case-insensitive), and that `total_found` equals 2.
+    """
     ctx = _Ctx()
     fake = [
         {"id":"a1","city":"New York","price_per_night":100.0,"property_type":"Apartment","bedrooms":1,"bathrooms":1,"rating":4.5,"amenities":["wifi"],"title":"Apt 1","description":""},
