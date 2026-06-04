@@ -106,6 +106,18 @@ def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
     target.update(updates)
 
 
+def _state_with_persisted_soft_state(state: Any, soft_state: Any) -> Dict[str, Any]:
+    persisted_state = _filter_persistent_state(state)
+    persisted_state.pop("soft_state", None)
+
+    normalized_soft_state = _jsonable(soft_state if isinstance(soft_state, dict) else {})
+    if not isinstance(normalized_soft_state, dict):
+        normalized_soft_state = {}
+
+    persisted_state["soft_state"] = normalized_soft_state
+    return persisted_state
+
+
 def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, Any]:
     """Extract navigable search/selection context from a triage_router tool payload.
 
@@ -1143,12 +1155,12 @@ async def _maybe_handle_active_booking_turn(
     if not payload:
         return None
 
-    state["soft_state"] = soft_state
+    persisted_state = _state_with_persisted_soft_state(state, soft_state)
     meta = snapshot.get("meta") or {}
     await save_session_snapshot(
         session_id=session_id,
         history=snapshot.get("history", []),
-        state=state,
+        state=persisted_state,
         metadata={
             key: meta[key]
             for key in ("app_name", "user_id", "last_update_time")

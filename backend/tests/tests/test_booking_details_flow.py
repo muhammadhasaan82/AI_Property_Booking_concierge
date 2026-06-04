@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 from unittest.mock import AsyncMock, patch
 
@@ -67,14 +68,27 @@ async def _seed_booking_snapshot(option_number: int = 10) -> tuple[dict, dict]:
     return snapshot, selected["property"]
 
 
-async def _run_turn(monkeypatch, snapshot: dict, message: str, *, faq_answer: str | None = None):
+async def _run_turn(
+    monkeypatch,
+    snapshot: dict,
+    message: str,
+    *,
+    faq_answer: str | None = None,
+    deepcopy_session_io: bool = False,
+    saved_states: list[dict] | None = None,
+):
     async def fake_get_session_snapshot(_session_id):
-        return snapshot
+        return copy.deepcopy(snapshot) if deepcopy_session_io else snapshot
 
     async def fake_save_session_snapshot(*, session_id, history, state, metadata):
-        snapshot["state"] = state
-        snapshot["history"] = history
-        snapshot["meta"].update(metadata or {})
+        state_to_save = copy.deepcopy(state) if deepcopy_session_io else state
+        history_to_save = copy.deepcopy(history) if deepcopy_session_io else history
+        metadata_to_save = copy.deepcopy(metadata or {}) if deepcopy_session_io else (metadata or {})
+        snapshot["state"] = state_to_save
+        snapshot["history"] = history_to_save
+        snapshot["meta"].update(metadata_to_save)
+        if saved_states is not None and isinstance(state_to_save, dict):
+            saved_states.append(copy.deepcopy(state_to_save))
 
     route_pre_adk = AsyncMock(return_value={"reply": "generic fallback"})
     monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
@@ -146,6 +160,52 @@ async def test_checkout_before_checkin_rejected(monkeypatch):
     assert booking_state["guests"] == 4
     assert booking_state["check_in"] == "2026-06-02"
     assert "check_out" not in booking_state
+
+
+@pytest.mark.asyncio
+async def test_active_booking_turn_persists_mutated_soft_state_to_saved_snapshot(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+    saved_states: list[dict] = []
+
+    invalid_reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in date would 2nd of june, 2026 and check out shall be around 11 june 2025, we are around 4 guests",
+        deepcopy_session_io=True,
+        saved_states=saved_states,
+    )
+
+    persisted_soft_state = saved_states[-1]["soft_state"]
+    persisted_booking_state = persisted_soft_state["booking_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert "cannot be earlier than your check-in date" in invalid_reply
+    assert persisted_soft_state["booking_stage"] == "collecting_details"
+    assert persisted_soft_state["awaiting_field"] == "check_out"
+    assert persisted_booking_state["guest_name"] == "Jane Doe"
+    assert persisted_booking_state["guest_email"] == "jane@example.com"
+    assert persisted_booking_state["guest_phone"] == "03001234567"
+    assert persisted_booking_state["check_in"] == "2026-06-02"
+    assert persisted_booking_state["guests"] == 4
+    assert "check_out" not in persisted_booking_state
+
+    review_reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "11 june 2026",
+        deepcopy_session_io=True,
+        saved_states=saved_states,
+    )
+
+    review_soft_state = saved_states[-1]["soft_state"]
+    review = review_soft_state["booking_review"]
+
+    assert route_pre_adk.await_count == 0
+    assert "Please confirm if everything is correct." in review_reply
+    assert review_soft_state["booking_stage"] == "awaiting_confirmation"
+    assert review["check_in"] == "2026-06-02"
+    assert review["check_out"] == "2026-06-11"
+    assert review["guests"] == 4
 
 
 @pytest.mark.asyncio
