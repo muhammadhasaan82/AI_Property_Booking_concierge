@@ -96,6 +96,15 @@ def _merge_soft_state(existing: Any, updates: Any) -> Dict[str, Any]:
     return base
 
 def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
+    """
+    Merge keys from `updates` into `target` in place, with special merging behavior for the `soft_state` key.
+    
+    If either `target` or `updates` is not a dict, the function does nothing. When `updates` contains a `soft_state` mapping, that mapping is merged with `target`'s existing `soft_state` (preserving and combining entries rather than replacing the whole `soft_state`) and the merged `soft_state` is stored under the `soft_state` key. All other keys from `updates` are applied to `target` via an in-place update.
+     
+    Parameters:
+        target (Dict[str, Any]): The dictionary to be mutated with the merged values.
+        updates (Dict[str, Any]): The dictionary of updates to apply; may include a `soft_state` dict which will be merged rather than replaced.
+    """
     if not isinstance(target, dict) or not isinstance(updates, dict):
         return
     soft_updates = updates.get("soft_state")
@@ -107,6 +116,16 @@ def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
 
 
 def _state_with_persisted_soft_state(state: Any, soft_state: Any) -> Dict[str, Any]:
+    """
+    Build a JSON-safe persisted state payload that guarantees a dictionary `soft_state` and filters out non-persistent keys.
+    
+    Parameters:
+        state (Any): Existing session state (may be dict or other). If a dict, keys whose names start with "temp:" are excluded from the persisted result.
+        soft_state (Any): In-memory soft state to persist; will be normalized into a JSON-serializable dict. Non-dict or non-serializable inputs become an empty dict.
+    
+    Returns:
+        Dict[str, Any]: A new state dictionary suitable for persistence that contains the filtered persistent keys from `state` and a `soft_state` key whose value is a JSON-safe dict.
+    """
     persisted_state = _filter_persistent_state(state)
     persisted_state.pop("soft_state", None)
 
@@ -1138,6 +1157,18 @@ async def _maybe_handle_active_booking_turn(
     session_id: str,
     message: str,
 ) -> Optional[Dict[str, Any]]:
+    """
+    Handle a deterministic booking step for an active booking flow and persist any updated soft state.
+    
+    Attempts to load the session snapshot for session_id, derives a mutable soft_state (from state["soft_state"] when present or a compatibility copy), and delegates handling to the booking flow handler. If that handler returns a payload, the function persists the session state with a normalized, JSON-safe `soft_state` and returns the payload. If the snapshot is missing or the handler produces no payload, nothing is persisted and the function returns None.
+    
+    Parameters:
+        session_id (str): Identifier of the session whose snapshot will be read and updated.
+        message (str): The user's message to process for the active booking turn.
+    
+    Returns:
+        payload (Optional[Dict[str, Any]]): The booking handler's payload when a deterministic action was produced; `None` if no action was taken or the snapshot was invalid.
+    """
     snapshot = await get_session_snapshot(session_id)
     if not isinstance(snapshot, dict):
         return None

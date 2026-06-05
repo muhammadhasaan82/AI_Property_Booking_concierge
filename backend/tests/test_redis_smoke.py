@@ -150,6 +150,11 @@ def test_anomaly_redis_integration():
 
     try:
         async def scenario():
+            """
+            Exercise anomaly tool-call recording, stats aggregation, and loop detection using a FakeRedis-backed session.
+            
+            Performs: clearing the session, recording a sequence of tool calls, asserting the Redis-backed anomaly list length, validating aggregated session statistics, verifying loop detection flips from false to true after repeated identical tool calls, ensuring a different input does not trigger a loop, and finally clearing the session.
+            """
             session_id = "redis-anomaly-test"
             await anomaly.clear_session(session_id)
 
@@ -198,6 +203,11 @@ def test_session_history_helpers():
 
     try:
         async def scenario():
+            """
+            Exercise session history and state helpers: save and retrieve session history, save and retrieve session state, and clear the session snapshot to verify history and state are reset.
+            
+            This scenario saves a two-entry history and a session state, asserts they round-trip via the Redis-backed helpers, then clears the snapshot and asserts the resulting history is empty and state is an empty mapping.
+            """
             session_id = "history-helper-test"
 
             history = [
@@ -236,6 +246,12 @@ def test_graceful_redis_failure_midstream():
         fake_redis = FakeRedis()
 
         async def working_client():
+            """
+            Provide a working FakeRedis client for use by test code.
+            
+            Returns:
+                fake_redis (FakeRedis): The FakeRedis instance to use as the Redis client.
+            """
             return fake_redis
 
         redis_store._get_redis_client = working_client
@@ -248,6 +264,11 @@ def test_graceful_redis_failure_midstream():
         assert "adk:session:" + session_id in fake_redis.values
 
         async def broken_client():
+            """
+            Simulate an unavailable Redis client for tests.
+            
+            Used as a client factory that returns None to force local-fallback behavior.
+            """
             return None
 
         redis_store._get_redis_client = broken_client

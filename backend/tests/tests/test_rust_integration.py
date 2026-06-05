@@ -185,6 +185,11 @@ async def test_python_rust_client():
 
 
 async def main():
+    """
+    Run the integration test suite against the configured Rust gateway and print a summary.
+    
+    Performs a connectivity check to the configured gateway and returns early with instructions if the gateway is unreachable. Executes each asynchronous test in sequence, prints any test failures as they occur, and prints a final pass/fail summary.
+    """
     print("=" * 60)
     print("RUST GATEWAY INTEGRATION TESTS")
     print("=" * 60)

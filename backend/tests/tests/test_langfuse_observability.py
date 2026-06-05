@@ -33,8 +33,19 @@ from app.services.observability.prompt_registry import get_prompt
 
 def _make_active_observer(mock_langfuse_cls=None, mock_observe_fn=None):
     """
-    Return a LangfuseObserver that believes it is active, using supplied mocks.
-    Patches module-level symbols used inside LangfuseObserver.__init__.
+    Create a LangfuseObserver configured as active using provided test doubles.
+    
+    Patches module-level Langfuse configuration and helpers so the constructed observer behaves as if Langfuse is enabled and available.
+    
+    Parameters:
+        mock_langfuse_cls (callable | None): Optional mock/factory that returns a fake Langfuse client; if None, a MagicMock that returns the internal fake client is used.
+        mock_observe_fn (callable | None): Optional mock for the module-level `observe` decorator; if None, a no-op decorator that forwards calls is used.
+    
+    Returns:
+        tuple: (observer, fake_client, mock_observe_fn)
+            observer: a LangfuseObserver instance with `_is_active = True`.
+            fake_client: the MagicMock client injected into the observer.
+            mock_observe_fn: the observe function that was patched into the module (either provided or the default no-op).
     """
     fake_client = MagicMock()
     fake_client.flush = MagicMock()
@@ -45,6 +56,15 @@ def _make_active_observer(mock_langfuse_cls=None, mock_observe_fn=None):
 
     if mock_observe_fn is None:
         def _fake_observe(name):
+            """
+            Create a no-op observe decorator that preserves the wrapped function's behavior.
+            
+            Parameters:
+                name (str): Label for the observed operation (accepted but not used).
+            
+            Returns:
+                decorator (callable): A decorator that wraps a function and returns its result unchanged.
+            """
             def _decorator(fn):
                 def _wrapper(*args, **kwargs):
                     return fn(*args, **kwargs)
@@ -136,7 +156,11 @@ class TestLangfuseObservability:
         assert "visible_results" not in summary
 
     def test_property_result_summary_does_not_include_full_128_results(self):
-        """Property result summary must not expose the raw list."""
+        """
+        Verifies that summarizing a list of property results exposes only minimal metadata and not the full results list.
+        
+        Asserts the summary contains the total `count`, a boolean `has_results`, and a `first_property_id`, and that no additional keys (i.e., the raw list) are included.
+        """
         results = [{"id": i, "title": f"Prop {i}"} for i in range(128)]
         summary = summarize_property_results(results)
         assert summary["count"] == 128
@@ -265,6 +289,15 @@ class TestSDK471Compatibility:
         def _recording_observe(name):
             """Fake ``observe`` that records invocations."""
             def _decorator(fn):
+                """
+                Create a decorator that records each invocation's metadata and forwards the call to the wrapped function.
+                
+                Parameters:
+                    fn (callable): The function to wrap.
+                
+                Returns:
+                    callable: A wrapper function that appends a dictionary with keys `"name"`, `"args"`, and `"kwargs"` to the enclosing `observe_calls` list for each call, then returns the original function's result.
+                """
                 def _wrapper(*args, **kwargs):
                     observe_calls.append({"name": name, "args": args, "kwargs": kwargs})
                     return fn(*args, **kwargs)
@@ -302,6 +335,15 @@ class TestSDK471Compatibility:
         emit_count = [0]
 
         def _counting_observe(name):
+            """
+            Create a decorator that increments the external `emit_count[0]` each time the wrapped function is called.
+            
+            Parameters:
+                name (str): Identifier for the observed event (unused aside from naming in tests).
+            
+            Returns:
+                decorator (callable): A decorator which, when applied to a function, returns a wrapper that increments `emit_count[0]` and then calls the original function, returning its result.
+            """
             def _decorator(fn):
                 def _wrapper(*args, **kwargs):
                     emit_count[0] += 1
@@ -358,6 +400,15 @@ class TestSDK471Compatibility:
         emit_count = [0]
 
         def _counting_observe(name):
+            """
+            Create a decorator that increments the external `emit_count[0]` each time the wrapped function is called.
+            
+            Parameters:
+                name (str): Identifier for the observed event (unused aside from naming in tests).
+            
+            Returns:
+                decorator (callable): A decorator which, when applied to a function, returns a wrapper that increments `emit_count[0]` and then calls the original function, returning its result.
+            """
             def _decorator(fn):
                 def _wrapper(*args, **kwargs):
                     emit_count[0] += 1
@@ -405,6 +456,15 @@ class TestSDK471Compatibility:
         emit_count = [0]
 
         def _counting_observe(name):
+            """
+            Create a decorator that increments the test-local emit counter each time the wrapped function is invoked.
+            
+            Parameters:
+                name (str): Identifier for the observed name (unused by the wrapper but kept for compatibility with observe-style APIs).
+            
+            Returns:
+                decorator (callable): A decorator which, when applied to a function, increments `emit_count[0]` on each call and then invokes the original function with the same arguments.
+            """
             def _decorator(fn):
                 def _wrapper(*a, **kw):
                     emit_count[0] += 1
