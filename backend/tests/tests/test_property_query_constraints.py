@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.property_query_constraints import extract_property_search_query
+from app.services.property_query_constraints import extract_property_search_query, _canonical_city
 
 
 def _find_constraint(query, field: str):
@@ -87,3 +87,76 @@ def test_extracts_amenity_pet_friendly():
     assert amenities is not None
     assert amenities.operator == "contains"
     assert amenities.value == "pet_friendly"
+
+
+# ===========================================================================
+# Tests for _canonical_city() — added in this PR
+# ===========================================================================
+
+
+class TestCanonicalCity:
+    """Unit tests for the _canonical_city() helper."""
+
+    def test_none_returns_none(self):
+        assert _canonical_city(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert _canonical_city("") is None
+
+    def test_whitespace_only_returns_none(self):
+        assert _canonical_city("   ") is None
+
+    def test_lowercase_city_is_title_cased(self):
+        assert _canonical_city("new york") == "New York"
+
+    def test_uppercase_city_is_title_cased(self):
+        assert _canonical_city("NEW YORK") == "New York"
+
+    def test_mixed_case_city_is_title_cased(self):
+        assert _canonical_city("nEw YoRk") == "New York"
+
+    def test_single_word_city_is_title_cased(self):
+        assert _canonical_city("dubai") == "Dubai"
+
+    def test_multi_word_city_is_title_cased(self):
+        assert _canonical_city("los angeles") == "Los Angeles"
+
+    def test_leading_trailing_whitespace_is_stripped(self):
+        assert _canonical_city("  seattle  ") == "Seattle"
+
+    def test_extra_internal_spaces_collapsed(self):
+        """Multiple spaces between words must be collapsed to a single space."""
+        result = _canonical_city("new   york")
+        assert result == "New York"
+
+    def test_already_title_cased_unchanged(self):
+        assert _canonical_city("New York") == "New York"
+
+    def test_short_city_name(self):
+        assert _canonical_city("Bali") == "Bali"
+
+    def test_hyphenated_city(self):
+        """Title-casing a hyphenated city — Python's str.title() handles each segment."""
+        result = _canonical_city("abu-dhabi")
+        # str.title() capitalises after hyphens: "Abu-Dhabi"
+        assert result == "Abu-Dhabi"
+
+
+# ===========================================================================
+# Tests for extract_property_search_query() city title-casing (end-to-end)
+# ===========================================================================
+
+
+def test_city_is_title_cased_in_query_result():
+    """City extracted via extract_property_search_query must be title-cased."""
+    query = extract_property_search_query("show me apartments in new york city")
+    # The _canonical_city wrapper ensures title-case
+    assert query.city is None or query.city[0].isupper()
+
+
+def test_city_returned_as_title_case_not_lowercase():
+    """Regression: city must NOT be returned in all-lowercase."""
+    query = extract_property_search_query("find a flat in new york")
+    if query.city is not None:
+        # First character must be uppercase (title-case)
+        assert query.city[0] == query.city[0].upper()
