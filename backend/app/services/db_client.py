@@ -30,14 +30,34 @@ _POOL_MIN_SIZE = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
 _POOL_MAX_SIZE = int(os.getenv("DB_POOL_MAX_SIZE", "10"))
 _POOL_OPEN_TIMEOUT_SECONDS = float(os.getenv("DB_POOL_OPEN_TIMEOUT_SECONDS", "3"))
 
+def _to_psycopg_conninfo(value: str) -> str:
+    """
+    Normalize DB URLs for direct psycopg/psycopg_pool usage.
+    SQLAlchemy accepts URLs like:
+
+        postgresql+psycopg://user:pass@host:port/db
+    psycopg_pool expects:
+
+        postgresql://user:pass@host:port/db
+    """
+    if value.startswith("postgresql+psycopg://"):
+        return "postgresql://" + value.removeprefix("postgresql+psycopg://")
+    if value.startswith("postgresql+psycopg2://"):
+        return "postgres://" + value.removeprefix("postgresql+psycopg2://")
+    return value
 
 def build_conninfo(conninfo: Optional[str] = None) -> str:
     if conninfo:
         return conninfo
 
-    db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or os.getenv("POSTGRES_URL")
+    db_url = (
+        os.getenv("PSYCOPG_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or os.getenv("SUPABASE_DB_URL")
+        or os.getenv("POSTGRES_URL")
+    )
     if db_url and db_url != "your_supabase_connection_string_here":
-        return db_url
+        return _to_psycopg_conninfo(db_url)
 
     host = os.getenv("SUPABASE_DB_HOST", "127.0.0.1")
     port = os.getenv("SUPABASE_DB_PORT", "54322")

@@ -12,11 +12,20 @@ from app.services import adk_runner, booking_flow
 
 @pytest.fixture(autouse=True)
 def stable_booking_reference_date(monkeypatch):
-    """Keep date-based booking tests deterministic without test-runner checks in app code."""
+    """
+    Set a fixed booking reference date for tests.
+    
+    This fixture forces the BOOKING_REFERENCE_DATE environment variable to "2026-06-01" so date-dependent booking tests run deterministically.
+    """
     monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
 
 class _Ctx:
     def __init__(self):
+        """
+        Initialize a mutable context container used by booking-related tools.
+        
+        Creates the `state` attribute initialized to `{"soft_state": {}}` for holding transient booking soft-state data.
+        """
         self.state = {"soft_state": {}}
 
 
@@ -41,6 +50,20 @@ def _make_props(count: int) -> list[dict]:
 
 
 async def _seed_booking_snapshot(option_number: int = 10) -> tuple[dict, dict]:
+    """
+    Create a deterministic session snapshot for a seeded booking flow and return it alongside the selected property.
+    
+    Parameters:
+        option_number (int): 1-based index of the property option to select from the generated fake results.
+    
+    Returns:
+        tuple:
+            snapshot (dict): Session snapshot with keys:
+                - state: {'soft_state': ...} representing the booking tool's soft state.
+                - history: list, initially empty.
+                - meta: dict containing 'app_name', 'user_id', and 'last_update_time'.
+            selected_property (dict): The `property` dictionary chosen from the synthetic dataset.
+    """
     ctx = _Ctx()
     fake = _make_props(12)
 
@@ -77,10 +100,38 @@ async def _run_turn(
     deepcopy_session_io: bool = False,
     saved_states: list[dict] | None = None,
 ):
+    """
+    Run a single booking ADK turn with session IO and ADK runner interactions stubbed for tests.
+    
+    Parameters:
+        monkeypatch: pytest monkeypatch fixture used to replace ADK and booking_flow callables.
+        snapshot (dict): Mutable session snapshot that will be used as the source of truth for the turn; it may be mutated in-place when the turn saves state/history/metadata.
+        message (str): User message to feed into the ADK turn.
+        faq_answer (str | None): If provided, `booking_flow.check_faq` is mocked to return this answer with a status of `Status.ANSWERED`.
+        deepcopy_session_io (bool): If true, the helper will deep-copy session state/history/metadata when returning or saving snapshots to simulate isolated IO; otherwise references are used.
+        saved_states (list[dict] | None): Optional list that, when provided, will receive deep-copied snapshots of the saved `state` each time `save_session_snapshot` is called.
+    
+    Returns:
+        tuple[str, AsyncMock]: A tuple where the first element is the concatenated reply produced by streaming ADK output chunks, and the second element is the `route_pre_adk` AsyncMock used (so tests can assert whether it was awaited).
+    """
     async def fake_get_session_snapshot(_session_id):
         return copy.deepcopy(snapshot) if deepcopy_session_io else snapshot
 
     async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        """
+        Persist the provided session pieces into the shared test snapshot and optionally record a saved copy of the state.
+        
+        This function updates the outer `snapshot` mapping in-place by setting `snapshot["state"]` to the provided `state`, `snapshot["history"]` to `history`, and merging `metadata` into `snapshot["meta"]`. When the module-level flag `deepcopy_session_io` is true, the inputs are deep-copied before being stored. If a `saved_states` list is available and the saved state is a dict, a deep copy of the saved state is appended to that list.
+        
+        Parameters:
+            session_id: The session identifier (not used by this test helper).
+            history: The session history to save into `snapshot["history"]`.
+            state: The session state to save into `snapshot["state"]`.
+            metadata: Optional metadata to merge into `snapshot["meta"]`.
+        
+        Side effects:
+            Mutates the external `snapshot` dictionary and, if present, appends to the external `saved_states` list.
+        """
         state_to_save = copy.deepcopy(state) if deepcopy_session_io else state
         history_to_save = copy.deepcopy(history) if deepcopy_session_io else history
         metadata_to_save = copy.deepcopy(metadata or {}) if deepcopy_session_io else (metadata or {})
@@ -164,6 +215,11 @@ async def test_checkout_before_checkin_rejected(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_details_message_with_explicit_checkin_checkout_ignores_awaiting_field_fallback(monkeypatch):
+    """
+    Verifies that explicit check-in and check-out dates in a user message override any pre-existing awaiting_field and that an invalid check-out is rejected.
+    
+    Sends a single combined details message while the soft state initially awaits `check_in`. The message includes explicit check-in (June 2, 2026) and a check-out date that is earlier (June 11, 2025). Asserts that the flow validates the provided dates (rejecting the earlier check-out), updates `awaiting_field` to `"check_out"`, keeps the booking stage at `"collecting_details"`, and persists parsed guest fields and `check_in` while leaving `check_out` absent.
+    """
     snapshot, _selected_property = await _seed_booking_snapshot()
     snapshot["state"]["soft_state"]["awaiting_field"] = "check_in"
 
@@ -413,3 +469,77 @@ async def test_booking_details_e2e_smoke(monkeypatch):
     receipt_reply, _route_pre_adk = await _run_turn(monkeypatch, snapshot, "yes")
     assert "Registration ID:" in receipt_reply
     assert snapshot["state"]["soft_state"]["booking_stage"] == "confirmed"
+
+@pytest.mark.asyncio
+async def test_shared_checkin_checkout_date_list_maps_first_and_second_dates(monkeypatch):
+    """When both check-in and check-out labels precede a shared date list like
+    "check-in and check-out are 2 june 2026 and 11 june 2026", the first date
+    maps to check_in and the second to check_out.  The awaiting_field fallback
+    must not override explicit labels."""
+    snapshot, _selected_property = await _seed_booking_snapshot()
+    soft_state = snapshot["state"]["soft_state"]
+    soft_state["awaiting_field"] = "check_in"
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in and check-out are 2 june 2026 and 11 june 2026, we are around 4 guests",
+    )
+
+    review = soft_state["booking_review"]
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert review["check_in"] == "2026-06-02"
+    assert review["check_out"] == "2026-06-11"
+    assert "Please confirm if everything is correct." in reply
+
+
+@pytest.mark.asyncio
+async def test_invalid_checkin_takes_priority_over_checkout_order(monkeypatch):
+    """When check-in is before today, it must be reported even if check-out is also invalid."""
+    monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-10")
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in date would 2nd of june, 2026 and check out shall be around 11 june 2025, we are around 4 guests",
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    booking_state = soft_state["booking_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert "Check-in date must be today or later" in reply
+    assert soft_state["awaiting_field"] == "check_in"
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert booking_state["guest_name"] == "Jane Doe"
+    assert booking_state["guest_email"] == "jane@example.com"
+    assert booking_state["guest_phone"] == "03001234567"
+    assert booking_state["guests"] == 4
+    assert "check_in" not in booking_state
+    assert "check_out" not in booking_state
+
+
+@pytest.mark.asyncio
+async def test_valid_checkin_invalid_checkout_preserves_checkin(monkeypatch):
+    """When check-in is valid but check-out is before check-in, preserve check-in and ask for check-out."""
+    monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in date would 2nd of june, 2026 and check out shall be around 11 june 2025, we are around 4 guests",
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    booking_state = soft_state["booking_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert "cannot be earlier than your check-in date" in reply
+    assert soft_state["awaiting_field"] == "check_out"
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert booking_state["check_in"] == "2026-06-02"
+    assert "check_out" not in booking_state

@@ -25,6 +25,26 @@ def _make_router_output(
     budget: int | None = None,
     pagination: dict | None = None,
 ) -> dict:
+    """
+    Build a fake router output dictionary representing a successful property search, intended for tests.
+    
+    Parameters:
+        city (str): City name to include in each property's `city` and in `query_context`. Defaults to "New York".
+        prop_type (str): Property type to include in `query_context`. Defaults to "apartment".
+        titles (list[str] | None): List of property titles to use; when None a default list of three titles is used.
+        budget (int | None): Optional budget value placed into `query_context`.
+        pagination (dict | None): Optional pagination dict; when None a default of {"total_pages": 1, "has_next": False, "has_prev": False} is used.
+    
+    Returns:
+        dict: A router output with the following keys:
+            - "status": "properties_found"
+            - "total_found": number of properties
+            - "shown_count": number of properties included
+            - "properties": list of property dicts, each containing keys like "number", "id", "title", "city", "property_type", "price_per_night", "bedrooms", "bathrooms", and "rating"
+            - "query_context": dict with "city", "property_type", and "budget"
+            - "pagination": pagination dict
+            - "summary_mode": False
+    """
     if titles is None:
         titles = ["Brooklyn Heights Apt", "Midtown Walk-Up", "East Village Flat"]
     props = [
@@ -175,6 +195,14 @@ async def test_run_adk_turn_suppresses_voice_when_properties_found(monkeypatch):
     voice_was_called = []
 
     async def fake_run_async(*args, **kwargs):
+        """
+        Yield two mocked runner events simulating a router response followed by a final concierge voice event.
+        
+        First yielded event ("triage_router") contains a single content part whose `function_response.response` is `fake_router_output` and whose `is_final_response()` returns False. Second yielded event ("concierge_voice") contains a single content part with `text` set to "The Grand is a lovely option!" and whose `is_final_response()` returns True. As a side effect, appends the string "hallucinated chunk" to the external list `voice_was_called`.
+        
+        Returns:
+        	A sequence of two MagicMock event objects representing the described events, yielded in order.
+        """
         from unittest.mock import MagicMock
 
         tr_event = MagicMock()

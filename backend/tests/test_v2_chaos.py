@@ -1,4 +1,3 @@
-
 """
 V2 Chaos Test Suite — Native Agentic Architecture
 
@@ -62,7 +61,11 @@ def _make_stub(tool_name: str, return_value: dict):
 
 
 def _install_stubs():
-    """Replace every tool on the triage_router with a recording stub."""
+    """
+    Install recording stubs for known triage tools so test runs capture which tool is invoked and with what arguments.
+    
+    This mutates the adk_agents module by overwriting any matching tool callables with stubs and replaces entries in adk_agents.triage_router.tools with those stubs where names match. Tools or attributes that are not present are left unchanged.
+    """
     from app.agents import adk_agents
 
     stubs = {
@@ -221,9 +224,20 @@ async def _run_single_case(
     session_offset: int,
 ) -> tuple[bool, str, float, Optional[ToolCapture]]:
     """
-    Execute one chaos test case.
-
-    Returns (passed, failure_reason, latency_ms, captured_call).
+    Run a single chaos test case through the ADK agent and validate the first intercepted tool call.
+    
+    This clears the global capture buffer, invokes the agent with a synthetic user and session id derived from session_offset, records round-trip latency in milliseconds, and inspects the first captured tool invocation. It verifies the tool name matches case.expected_tool and that each key/value in case.expected_args is present and matches (string expected values are matched case-insensitively as substrings; integer expected values require numeric equality). Early failures return a descriptive reason and the captured call when available.
+    
+    Parameters:
+        case (ChaosTestCase): The test scenario containing user_message, expected_tool, and expected_args.
+        session_offset (int): Numeric offset used to derive deterministic user_id and session_id for this run.
+    
+    Returns:
+        tuple[bool, str, float, Optional[ToolCapture]]: 
+            - `True` if the intercepted first tool and its arguments match expectations, `False` otherwise.
+            - A failure reason string (empty on success).
+            - Latency in milliseconds measured for the agent turn.
+            - The first captured ToolCapture object, or `None` if no tool was captured.
     """
     from app.services.adk_runner import run_adk_turn
 
@@ -275,7 +289,15 @@ async def _run_single_case(
 
 
 async def run_chaos_suite() -> bool:
-    """Run all chaos test cases and print a formatted report. Returns True if all pass."""
+    """
+    Execute the V2 Agentic chaos test suite and print a formatted CLI report.
+    
+    This function runs every case in CHAOS_CASES, prints per-case results (tool invoked, pass/fail status, latency)
+    and a final summary to stdout.
+    
+    Returns:
+        bool: `True` if all test cases passed, `False` otherwise.
+    """
     print(f"\n{BOLD}{CYAN}{'═' * 65}{RESET}")
     print(f"{BOLD}{CYAN}  V2 AGENTIC CHAOS TEST SUITE{RESET}")
     print(f"{BOLD}{CYAN}{'═' * 65}{RESET}\n")
@@ -323,6 +345,15 @@ async def run_chaos_suite() -> bool:
 import pytest
 
 def pytest_configure(config):
+    """
+    Hook invoked by pytest at configuration time to install tool-intercepting stubs.
+    
+    Ensures ADK agent tools are replaced with recording stubs so tests can capture which tool is called and with what arguments.
+    
+    Parameters:
+        config: pytest.Config
+            The pytest configuration object provided by pytest (not used by this hook).
+    """
     _install_stubs()
 
 

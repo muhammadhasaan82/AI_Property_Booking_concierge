@@ -44,11 +44,28 @@ Constraint = SearchConstraint
 
 
 def _norm(text: str) -> str:
+    """
+    Normalize a text string by trimming, lowercasing, and collapsing consecutive whitespace.
+    
+    Parameters:
+    	text (str): Input text; falsy values (e.g., None or empty string) are treated as empty.
+    
+    Returns:
+    	str: Normalized string with leading/trailing whitespace removed, converted to lowercase, and consecutive internal whitespace collapsed to single spaces. Returns an empty string for falsy input.
+    """
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
 def _canonical_city(value: Optional[str]) -> Optional[str]:
-    """Return display-cased city text without changing search semantics."""
+    """
+    Normalize a city string for display by collapsing internal whitespace and applying title case.
+    
+    Parameters:
+        value (Optional[str]): Input city value; may be None or empty.
+    
+    Returns:
+        Optional[str]: Title-cased city string with collapsed whitespace, or `None` if `value` is falsy.
+    """
     if not value:
         return None
     normalized = " ".join(str(value).strip().split())
@@ -56,6 +73,15 @@ def _canonical_city(value: Optional[str]) -> Optional[str]:
 
 
 def _existing_city(message: str) -> Optional[str]:
+    """
+    Extract the city name from a user message using the project's direct search extractor.
+    
+    Parameters:
+        message (str): Free-form user message to analyze for a city name.
+    
+    Returns:
+        Optional[str]: The extracted city string, or `None` if extraction fails or no city could be determined.
+    """
     try:
         from app.services.direct_property_search import extract_city_from_message
 
@@ -102,12 +128,21 @@ def _add(
 
 def extract_property_search_query(message: str) -> PropertySearchQuery:
     """
-    Extract structured property search constraints from natural language.
-
-    Examples:
-    - "show me some 2 bedrooms apartment in new york city"
-    - "2br apartment in New York under 300"
-    - "apartment in Seattle for 4 guests"
+    Parse a user's natural-language message into a structured property search query.
+    
+    Extracts schema-aware, deterministic constraints (bedrooms, bathrooms, price per night,
+    occupancy/guests, and common amenities) plus optional city and property type inferred
+    from the message. Constraint source substrings are preserved in each constraint's
+    `source_text`; extraction is based on local regex and best-effort city/property-type
+    extractors.
+    
+    Returns:
+        PropertySearchQuery: Parsed query containing:
+            - `city`: optional canonicalized city display string or None
+            - `property_type`: optional property type display string or None
+            - `constraints`: list of extracted SearchConstraint entries
+            - `confidence`: float (initialized to 1.0)
+            - `unresolved`: list (initialized empty)
     """
     text = _norm(message)
     constraints: List[SearchConstraint] = []

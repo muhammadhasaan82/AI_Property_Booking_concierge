@@ -96,6 +96,15 @@ def _merge_soft_state(existing: Any, updates: Any) -> Dict[str, Any]:
     return base
 
 def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
+    """
+    Merge keys from `updates` into `target` in place, with special merging behavior for the `soft_state` key.
+    
+    If either `target` or `updates` is not a dict, the function does nothing. When `updates` contains a `soft_state` mapping, that mapping is merged with `target`'s existing `soft_state` (preserving and combining entries rather than replacing the whole `soft_state`) and the merged `soft_state` is stored under the `soft_state` key. All other keys from `updates` are applied to `target` via an in-place update.
+     
+    Parameters:
+        target (Dict[str, Any]): The dictionary to be mutated with the merged values.
+        updates (Dict[str, Any]): The dictionary of updates to apply; may include a `soft_state` dict which will be merged rather than replaced.
+    """
     if not isinstance(target, dict) or not isinstance(updates, dict):
         return
     soft_updates = updates.get("soft_state")
@@ -107,6 +116,16 @@ def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
 
 
 def _state_with_persisted_soft_state(state: Any, soft_state: Any) -> Dict[str, Any]:
+    """
+    Build a JSON-safe persisted state payload that guarantees a dictionary `soft_state` and filters out non-persistent keys.
+    
+    Parameters:
+        state (Any): Existing session state (may be dict or other). If a dict, keys whose names start with "temp:" are excluded from the persisted result.
+        soft_state (Any): In-memory soft state to persist; will be normalized into a JSON-serializable dict. Non-dict or non-serializable inputs become an empty dict.
+    
+    Returns:
+        Dict[str, Any]: A new state dictionary suitable for persistence that contains the filtered persistent keys from `state` and a `soft_state` key whose value is a JSON-safe dict.
+    """
     persisted_state = _filter_persistent_state(state)
     persisted_state.pop("soft_state", None)
 
@@ -1138,6 +1157,18 @@ async def _maybe_handle_active_booking_turn(
     session_id: str,
     message: str,
 ) -> Optional[Dict[str, Any]]:
+    """
+    Handle a deterministic booking step for an active booking flow and persist any updated soft state.
+    
+    Attempts to load the session snapshot for session_id, derives a mutable soft_state (from state["soft_state"] when present or a compatibility copy), and delegates handling to the booking flow handler. If that handler returns a payload, the function persists the session state with a normalized, JSON-safe `soft_state` and returns the payload. If the snapshot is missing or the handler produces no payload, nothing is persisted and the function returns None.
+    
+    Parameters:
+        session_id (str): Identifier of the session whose snapshot will be read and updated.
+        message (str): The user's message to process for the active booking turn.
+    
+    Returns:
+        payload (Optional[Dict[str, Any]]): The booking handler's payload when a deterministic action was produced; `None` if no action was taken or the snapshot was invalid.
+    """
     snapshot = await get_session_snapshot(session_id)
     if not isinstance(snapshot, dict):
         return None
@@ -1232,6 +1263,7 @@ async def run_adk_turn(
             session_id=session_id,
             country=coverage_decision.country,
         )
+        trace.end()
         yield coverage_decision.message
         return
 
@@ -1249,10 +1281,12 @@ async def run_adk_turn(
         ):
             deterministic = _render_property_results_from_router_output(direct_search_payload)
             if deterministic:
+                trace.end()
                 yield deterministic
                 return
         status = str(direct_search_payload.get("status") or "").lower()
         if status == "no_results":
+            trace.end()
             yield _render_no_results_from_search_payload(direct_search_payload)
             return
 
@@ -1264,16 +1298,19 @@ async def run_adk_turn(
     if shortcut_payload:
         deterministic_reply = shortcut_payload.get("deterministic_reply")
         if deterministic_reply:
+            trace.end()
             yield str(deterministic_reply)
             return
         if shortcut_payload.get("status") == "properties_found" and shortcut_payload.get("properties"):
             deterministic = _render_property_results_from_router_output(shortcut_payload)
             if deterministic:
+                trace.end()
                 yield deterministic
                 return
         if str(shortcut_payload.get("status") or "").lower() == "property_details":
             details = _render_property_details_from_router_output(shortcut_payload)
             if details:
+                trace.end()
                 yield details
                 return
 
@@ -1283,6 +1320,7 @@ async def run_adk_turn(
             "",
         )
         if shortcut_text:
+            trace.end()
             yield shortcut_text
             return
     with trace.span(name="booking_flow"):
@@ -1293,6 +1331,7 @@ async def run_adk_turn(
     if booking_payload:
         deterministic_reply = booking_payload.get("deterministic_reply")
         if deterministic_reply:
+            trace.end()
             yield str(deterministic_reply)
             return
     with trace.span(name="faq_retrieval"):
@@ -1302,9 +1341,11 @@ async def run_adk_turn(
             session_id=session_id,
         )
     if pre_routed and pre_routed.get("reply"):
+        trace.end()
         yield str(pre_routed["reply"])
         return
     if not cleaned_message.strip():
+        trace.end()
         yield "I didn't catch that. Could you repeat your question?"
         return
 

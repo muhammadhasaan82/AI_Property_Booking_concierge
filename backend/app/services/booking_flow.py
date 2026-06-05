@@ -245,6 +245,17 @@ def _seed_property_fields(soft_state: Dict[str, Any], state: Dict[str, Any]) -> 
 
 
 def _parse_natural_date(text: str) -> Optional[str]:
+    """
+    Parse an ISO or common natural-language date from `text` and return it formatted using `cfg.date_format`.
+    
+    Searches for an ISO `YYYY-M-D` token or natural forms like "1st of January, 2025" and "January 1, 2025". If a valid date is found it is returned as a string formatted with `cfg.date_format`; otherwise `None` is returned.
+    
+    Parameters:
+        text (str): Input text to scan for a date.
+    
+    Returns:
+        Optional[str]: A date string formatted per `cfg.date_format` if parsing succeeds, `None` otherwise.
+    """
     if not text:
         return None
     cleaned = re.sub(r"[\n\r]", " ", text).strip(" ,.;:")
@@ -277,6 +288,15 @@ def _parse_natural_date(text: str) -> Optional[str]:
 
 
 def _find_all_dates(text: str) -> List[Tuple[str, int, int]]:
+    """
+    Extract all dates mentioned in `text` and produce normalized date strings paired with their character spans.
+    
+    Parameters:
+        text (str): Input text to scan for dates. An empty or falsy value yields an empty list.
+    
+    Returns:
+        List[Tuple[str, int, int]]: A list of tuples `(date_str, start_index, end_index)` where `date_str` is formatted using `cfg.date_format`, and `start_index`/`end_index` are the character span of the matched date in the original text. The results are ordered by earliest start position and filtered so matches do not overlap. Recognizes ISO `YYYY-M-D` and common natural-language forms such as "1st of January, 2025" and "January 1, 2025".
+    """
     if not text:
         return []
     results = []
@@ -322,6 +342,17 @@ def _find_all_dates(text: str) -> List[Tuple[str, int, int]]:
 
 
 def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Associate one or two date mentions in `text` with `check_in` and `check_out`.
+    
+    Attempts to identify date tokens in the input and assign them to check-in and check-out by proximity to explicit check-in/check-out phrases; when two or more dates are present it will prefer the closest matches and fall back to using the first two dates. If no dates are found, both return values are None.
+    
+    Parameters:
+        text (str): Input text containing zero or more date mentions.
+    
+    Returns:
+        Tuple[Optional[str], Optional[str]]: A tuple `(check_in_date, check_out_date)` where each element is a normalized date string (as produced by the module's date-extraction helpers) or `None` when no appropriate date could be associated.
+    """
     dates_found = _find_all_dates(text)
     if not dates_found:
         return None, None
@@ -402,6 +433,17 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
 
 
 def _field_segments(message: str) -> Dict[str, str]:
+    """
+    Extracts text segments following detected field mentions in the message.
+    
+    Searches for whole-word, case-insensitive aliases for known booking fields (from _field_alias_map()). For each field found (first match only) returns the substring from the end of that match up to the start of the next detected field (or the end of the message), with surrounding punctuation and whitespace removed.
+    
+    Parameters:
+    	message (str): The user message to scan for field aliases.
+    
+    Returns:
+    	Dict[str, str]: Mapping from canonical field name to the extracted text segment (may be an empty string if no text follows the match).
+    """
     normalized_message = message or ""
     alias_map = _field_alias_map()
     matches: List[Tuple[int, int, str]] = []
@@ -487,6 +529,21 @@ def _extract_updates_from_message(
     message: str,
     awaiting_field: Optional[str],
 ) -> Tuple[Dict[str, Any], List[str], Dict[str, str]]:
+    """
+    Extract booking-related field values from a user's message and identify which fields were mentioned or failed to parse.
+    
+    Parses the input text for guest_name, guest_email, guest_phone, guests (count), check_in, check_out, and property_id. For check-in/check-out the function recognizes explicit date labels in the text and uses proximity-based association when explicit labels are not present. If an awaiting_field is provided, the function will attempt field-specific extraction from the full message as a fallback. Fields that are mentioned but could not be parsed are reported in the errors mapping with a user-facing prompt.
+    
+    Parameters:
+        message (str): The user's raw message text.
+        awaiting_field (Optional[str]): A single field name the system is currently awaiting (e.g., "guest_name", "check_in"); used to drive targeted extraction/fallback parsing.
+    
+    Returns:
+        Tuple[Dict[str, Any], List[str], Dict[str, str]]:
+            - updates: Mapping of fields to extracted values for fields successfully parsed.
+            - mentioned_fields: Ordered list of unique field names that were detected or targeted (preserves first-seen order).
+            - errors: Mapping of field names to user-friendly prompt strings for fields that were referenced but could not be parsed.
+    """
     updates: Dict[str, Any] = {}
     mentioned_fields: List[str] = []
     errors: Dict[str, str] = {}
@@ -546,6 +603,15 @@ def _extract_updates_from_message(
             updates["check_out"] = assoc_check_out
         else:
             errors["check_out"] = _friendly_prompt_for_field("check_out")
+
+    if has_check_in_phrase and has_check_out_phrase:
+        if "check_in" not in updates or "check_out" not in updates:
+            all_dates = _find_all_dates(normalized)
+            if len(all_dates) >= 2:
+                updates["check_in"] = all_dates[0][0]
+                updates["check_out"] = all_dates[1][0]
+                errors.pop("check_in", None)
+                errors.pop("check_out", None)
 
     if awaiting_field and awaiting_field not in updates:
         mentioned_fields.append(awaiting_field)
@@ -679,11 +745,13 @@ def start_booking_for_selected_property(soft_state: Dict[str, Any]) -> Optional[
         return _review_payload_from_state(soft_state, validated_state)
 
     observer = get_observer()
-    observer.trace(name="booking_flow").update(metadata={
+    trace = observer.trace(name="booking_flow")
+    trace.update(metadata={
         "previous_booking_stage": soft_state.get("booking_stage"),
         "next_booking_stage": "collecting_details",
         "missing_fields": list(cfg.booking_details_request_fields),
     })
+    trace.end()
     soft_state["booking_stage"] = "collecting_details"
     soft_state["last_presented_view"] = "booking_details_request"
     set_awaiting_field(soft_state, [next_field])
@@ -844,13 +912,15 @@ async def confirm_booking_review(soft_state: Dict[str, Any]) -> Optional[Dict[st
         logger.warning("[booking_flow] Could not persist confirmed booking: %s", exc)
 
     observer = get_observer()
-    observer.trace(name="booking_flow").update(metadata={
+    trace = observer.trace(name="booking_flow")
+    trace.update(metadata={
         "previous_booking_stage": soft_state.get("booking_stage"),
         "next_booking_stage": "confirmed",
         "review_generated": True,
         "receipt_generated": True,
         "registration_id_present": bool(registration_id),
     })
+    trace.end()
     soft_state["booking_stage"] = "confirmed"
     soft_state["booking_status"] = cfg.booking_confirmed_status
     soft_state["booking_registration_id"] = registration_id
@@ -892,27 +962,33 @@ def _validate_and_commit_state(
         candidate_state.pop("guests", None)
         errors["guests"] = _occupancy_validation_message(occupancy_max)
 
-
-    check_in = candidate_state.get("check_in") or updates.get("check_in")
-    check_out = candidate_state.get("check_out") or updates.get("check_out")
-    if check_in and check_out:
-        try:
-            check_in_dt = datetime.strptime(str(check_in), cfg.date_format)
-            check_out_dt = datetime.strptime(str(check_out), cfg.date_format)
-            if check_out_dt <= check_in_dt:
-                candidate_state.pop("check_out", None)
-                errors["check_out"] = (
-                    _checkout_validation_message(str(check_in))
-                    or "Check-out must be after check-in."
-                )
-        except Exception:
-            pass
+    if "check_in" in errors:
+        candidate_state.pop("check_in", None)
+        candidate_state.pop("check_out", None)
+        errors.pop("check_out", None)
+    else:
+        check_in = candidate_state.get("check_in") or updates.get("check_in")
+        check_out = candidate_state.get("check_out") or updates.get("check_out")
+        if check_in and check_out:
+            try:
+                check_in_dt = datetime.strptime(str(check_in), cfg.date_format)
+                check_out_dt = datetime.strptime(str(check_out), cfg.date_format)
+                if check_out_dt <= check_in_dt:
+                    candidate_state.pop("check_out", None)
+                    errors["check_out"] = (
+                        _checkout_validation_message(str(check_in))
+                        or "Check-out must be after check-in."
+                    )
+            except Exception:
+                pass
 
     committed = _replace_booking_state(soft_state, candidate_state)
     missing_field = _next_missing_field(committed)
     error_field = None
     if errors:
-        if "check_out" in errors:
+        if "check_in" in errors:
+            error_field = "check_in"
+        elif "check_out" in errors:
             error_field = "check_out"
         else:
             for field in get_ask_order():

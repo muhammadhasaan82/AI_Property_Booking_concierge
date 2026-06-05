@@ -79,7 +79,15 @@ def get_field_aliases() -> Dict[str, List[str]]:
     }
 
 def next_field_to_ask(missing_fields: List[str]) -> Optional[str]:
-    """Return the first field in ask_order that is also in missing_fields."""
+    """
+    Selects which missing booking field should be asked next.
+    
+    Parameters:
+    	missing_fields (List[str]): Sequence of field names that are currently missing.
+    
+    Returns:
+    	selected_field (Optional[str]): The first field from the schema's ask order that appears in `missing_fields`; if none of the ask-order fields are missing, returns the first entry of `missing_fields`. Returns `None` when `missing_fields` is empty.
+    """
     if not missing_fields:
         return None
     missing_set = set(missing_fields)
@@ -88,11 +96,13 @@ def next_field_to_ask(missing_fields: List[str]) -> Optional[str]:
             return field
     return missing_fields[0]
 def _reference_today() -> date:
-    """Return the reference date used by booking date validators.
-+
-+    Production default is the real current date.
-+    Tests or deterministic smoke runs may set BOOKING_REFERENCE_DATE=YYYY-MM-DD.
-    This keeps production code explicit/config-driven instead of detecting pytest.
+    """
+    Provide the reference date used by booking date validators.
+    
+    If the environment variable BOOKING_REFERENCE_DATE is set to a valid YYYY-MM-DD string, that date is returned; on parse failure or if the variable is unset/empty, the current local date is returned (and a warning is logged on parse failure).
+    
+    Returns:
+        date: The parsed reference date from BOOKING_REFERENCE_DATE when valid, otherwise date.today().
     """
     raw = os.getenv("BOOKING_REFERENCE_DATE", "").strip()
     if raw:
@@ -102,7 +112,17 @@ def _reference_today() -> date:
             logger.warning("[booking_schema] Invalid BOOKING_REFERENCE_DATE=%r; using date.today()", raw)
     return date.today()
 def validate_field(field: str, value: Any, current_state: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
-    """Validate a single field. Returns (ok, error_message)."""
+    """
+    Validate a single booking field against the schema-defined validator for that field.
+    
+    Parameters:
+        field (str): The name of the booking field to validate.
+        value (Any): The candidate value for the field.
+        current_state (Optional[Dict[str, Any]]): Optional mapping of other field values used for cross-field checks (for example, comparing dates).
+    
+    Returns:
+        tuple: A two-element tuple where the first element is `True` if the value satisfies the field's validator (or no validator exists), `False` otherwise; the second element is an error message string when invalid, or `None` when valid.
+    """
     spec = booking_schema.booking.validators.get(field)
     if spec is None:
         return True, None
