@@ -20,11 +20,11 @@ def test_build_conninfo_prefers_psycopg_database_url(monkeypatch):
     monkeypatch.setenv("PSYCOPG_DATABASE_URL", "postgresql://direct:pass@127.0.0.1:54322/postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://sqlalchemy:pass@127.0.0.1:54322/postgres")
 
-    assert db_client._build_conninfo() == "postgresql://direct:pass@127.0.0.1:54322/postgres"
+    assert db_client.build_conninfo() == "postgresql://direct:pass@127.0.0.1:54322/postgres"
 
 
 def test_build_conninfo_converts_database_url_for_psycopg_pool(monkeypatch):
     monkeypatch.delenv("PSYCOPG_DATABASE_URL", raising=False)
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@127.0.0.1:54322/postgres")
 
-    assert db_client._build_conninfo() == "postgresql://user:pass@127.0.0.1:54322/postgres"
+    assert db_client.build_conninfo() == "postgresql://user:pass@127.0.0.1:54322/postgres"
