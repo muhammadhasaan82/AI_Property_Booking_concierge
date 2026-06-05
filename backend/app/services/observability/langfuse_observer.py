@@ -518,10 +518,9 @@ class _ObservedTrace:
 
     * **Context manager** (``with observer.trace(…) as t:``) — ``_emit``
       fires on ``__exit__``.
-    * **Fire-and-forget** (``observer.trace(…).update(…)``) — ``_emit``
-      fires immediately inside ``update()`` because ``_in_context`` is False.
     * **Explicit lifecycle** (``t = observer.trace(…); t.end()``) — ``_emit``
       fires on ``end()``.
+    * ``update()`` never emits — all call-sites must use ``end()`` or context-manager.
     """
 
     def __init__(
@@ -586,8 +585,7 @@ class _ObservedTrace:
         except Exception as exc:
             logger.debug("[Langfuse] Trace update merge failed: %s", exc)
 
-        if not self._in_context:
-            self._emit()
+
 
     def end(self) -> None:
         """

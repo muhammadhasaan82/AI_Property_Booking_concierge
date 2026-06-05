@@ -469,3 +469,28 @@ async def test_booking_details_e2e_smoke(monkeypatch):
     receipt_reply, _route_pre_adk = await _run_turn(monkeypatch, snapshot, "yes")
     assert "Registration ID:" in receipt_reply
     assert snapshot["state"]["soft_state"]["booking_stage"] == "confirmed"
+
+@pytest.mark.asyncio
+async def test_shared_checkin_checkout_date_list_maps_first_and_second_dates(monkeypatch):
+    """When both check-in and check-out labels precede a shared date list like
+    "check-in and check-out are 2 june 2026 and 11 june 2026", the first date
+    maps to check_in and the second to check_out.  The awaiting_field fallback
+    must not override explicit labels."""
+    snapshot, _selected_property = await _seed_booking_snapshot()
+    soft_state = snapshot["state"]["soft_state"]
+    soft_state["awaiting_field"] = "check_in"
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in and check-out are 2 june 2026 and 11 june 2026, we are around 4 guests",
+    )
+
+    review = soft_state["booking_review"]
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert review["check_in"] == "2026-06-02"
+    assert review["check_out"] == "2026-06-11"
+    assert "Please confirm if everything is correct." in reply
+

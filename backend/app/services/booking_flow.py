@@ -604,6 +604,15 @@ def _extract_updates_from_message(
         else:
             errors["check_out"] = _friendly_prompt_for_field("check_out")
 
+    if has_check_in_phrase and has_check_out_phrase:
+        if "check_in" not in updates or "check_out" not in updates:
+            all_dates = _find_all_dates(normalized)
+            if len(all_dates) >= 2:
+                updates["check_in"] = all_dates[0][0]
+                updates["check_out"] = all_dates[1][0]
+                errors.pop("check_in", None)
+                errors.pop("check_out", None)
+
     if awaiting_field and awaiting_field not in updates:
         mentioned_fields.append(awaiting_field)
         if awaiting_field == "guest_name":
@@ -736,11 +745,13 @@ def start_booking_for_selected_property(soft_state: Dict[str, Any]) -> Optional[
         return _review_payload_from_state(soft_state, validated_state)
 
     observer = get_observer()
-    observer.trace(name="booking_flow").update(metadata={
+    trace = observer.trace(name="booking_flow")
+    trace.update(metadata={
         "previous_booking_stage": soft_state.get("booking_stage"),
         "next_booking_stage": "collecting_details",
         "missing_fields": list(cfg.booking_details_request_fields),
     })
+    trace.end()
     soft_state["booking_stage"] = "collecting_details"
     soft_state["last_presented_view"] = "booking_details_request"
     set_awaiting_field(soft_state, [next_field])
@@ -901,13 +912,15 @@ async def confirm_booking_review(soft_state: Dict[str, Any]) -> Optional[Dict[st
         logger.warning("[booking_flow] Could not persist confirmed booking: %s", exc)
 
     observer = get_observer()
-    observer.trace(name="booking_flow").update(metadata={
+    trace = observer.trace(name="booking_flow")
+    trace.update(metadata={
         "previous_booking_stage": soft_state.get("booking_stage"),
         "next_booking_stage": "confirmed",
         "review_generated": True,
         "receipt_generated": True,
         "registration_id_present": bool(registration_id),
     })
+    trace.end()
     soft_state["booking_stage"] = "confirmed"
     soft_state["booking_status"] = cfg.booking_confirmed_status
     soft_state["booking_registration_id"] = registration_id

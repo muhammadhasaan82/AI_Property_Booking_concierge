@@ -1263,6 +1263,7 @@ async def run_adk_turn(
             session_id=session_id,
             country=coverage_decision.country,
         )
+        trace.end()
         yield coverage_decision.message
         return
 
@@ -1280,10 +1281,12 @@ async def run_adk_turn(
         ):
             deterministic = _render_property_results_from_router_output(direct_search_payload)
             if deterministic:
+                trace.end()
                 yield deterministic
                 return
         status = str(direct_search_payload.get("status") or "").lower()
         if status == "no_results":
+            trace.end()
             yield _render_no_results_from_search_payload(direct_search_payload)
             return
 
@@ -1295,16 +1298,19 @@ async def run_adk_turn(
     if shortcut_payload:
         deterministic_reply = shortcut_payload.get("deterministic_reply")
         if deterministic_reply:
+            trace.end()
             yield str(deterministic_reply)
             return
         if shortcut_payload.get("status") == "properties_found" and shortcut_payload.get("properties"):
             deterministic = _render_property_results_from_router_output(shortcut_payload)
             if deterministic:
+                trace.end()
                 yield deterministic
                 return
         if str(shortcut_payload.get("status") or "").lower() == "property_details":
             details = _render_property_details_from_router_output(shortcut_payload)
             if details:
+                trace.end()
                 yield details
                 return
 
@@ -1314,6 +1320,7 @@ async def run_adk_turn(
             "",
         )
         if shortcut_text:
+            trace.end()
             yield shortcut_text
             return
     with trace.span(name="booking_flow"):
@@ -1324,6 +1331,7 @@ async def run_adk_turn(
     if booking_payload:
         deterministic_reply = booking_payload.get("deterministic_reply")
         if deterministic_reply:
+            trace.end()
             yield str(deterministic_reply)
             return
     with trace.span(name="faq_retrieval"):
@@ -1333,9 +1341,11 @@ async def run_adk_turn(
             session_id=session_id,
         )
     if pre_routed and pre_routed.get("reply"):
+        trace.end()
         yield str(pre_routed["reply"])
         return
     if not cleaned_message.strip():
+        trace.end()
         yield "I didn't catch that. Could you repeat your question?"
         return
 

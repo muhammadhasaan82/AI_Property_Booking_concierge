@@ -320,7 +320,9 @@ class TestSDK471Compatibility:
         obs._langfuse = fake_client
 
         with patch('app.services.observability.langfuse_observer.observe', _recording_observe):
-            obs.trace("chat_turn").update(metadata={"x": 1})
+            t = obs.trace("chat_turn")
+            t.update(metadata={"x": 1})
+            t.end()
 
         assert len(observe_calls) == 1, (
             f"Expected exactly 1 observe call, got {len(observe_calls)}"
@@ -393,9 +395,8 @@ class TestSDK471Compatibility:
 
     def test_fire_and_forget_does_not_emit_twice(self):
         """
-        ``observer.trace("x").update(metadata=…)`` followed by another
-        ``.update()`` on the same object must still emit only once because
-        ``_sent`` is True after the first emission.
+        ``trace.update(metadata=…)`` never emits; only ``trace.end()`` emits.
+        Multiple ``end()`` calls are idempotent.
         """
         emit_count = [0]
 
@@ -428,9 +429,13 @@ class TestSDK471Compatibility:
         with patch('app.services.observability.langfuse_observer.observe', _counting_observe):
             trace.update(metadata={"step": 1})
             trace.update(metadata={"step": 2})
+            assert emit_count[0] == 0, (
+                f"Expected 0 emissions before end(), got {emit_count[0]}"
+            )
+            trace.end()
 
         assert emit_count[0] == 1, (
-            f"Expected exactly 1 emission, got {emit_count[0]}"
+            f"Expected exactly 1 emission after end(), got {emit_count[0]}"
         )
 
     def test_noop_trace_returned_when_observe_is_none(self):
@@ -500,3 +505,52 @@ class TestSDK471Compatibility:
             with t.span("child"):
                 pass
         trace.end()
+
+    def test_explicit_lifecycle_trace_does_not_emit_until_end(self):
+        """Explicit lifecycle trace must NOT emit on update(); only on end().  All
+        metadata from multiple update() calls, including child spans, must be
+        present in the single emission."""
+        emit_count = [0]
+        emitted_payloads = []
+
+        def _recording_observe(name):
+            def _decorator(fn):
+                def _wrapper(*args, **kwargs):
+                    emit_count[0] += 1
+                    emitted_payloads.append(args[0] if args else {})
+                    return fn(*args, **kwargs)
+                return _wrapper
+            return _decorator
+
+        fake_client = MagicMock()
+        fake_client.flush = MagicMock()
+
+        trace = _ObservedTrace(
+            name="chat_turn",
+            initial_payload={"metadata": {"session": "abc"}},
+            client=fake_client,
+        )
+
+        with patch('app.services.observability.langfuse_observer.observe', _recording_observe):
+            trace.update(metadata={"step": 1})
+            assert emit_count[0] == 0, "update() must not emit"
+
+            trace.update(metadata={"step": 2})
+            assert emit_count[0] == 0, "update() must not emit"
+
+            with trace.span(name="child_step") as span:
+                span.update(metadata={"inner": "val"})
+
+            assert emit_count[0] == 0, "span context must not trigger emit"
+
+            trace.end()
+
+        assert emit_count[0] == 1, f"Expected 1 emission on end(), got {emit_count[0]}"
+        payload = emitted_payloads[0]
+        assert payload["metadata"]["step"] == 2
+        assert payload["metadata"]["session"] == "abc"
+        assert any(s["span_name"] == "child_step" for s in payload.get("child_spans", []))
+
+        trace.end()
+        assert emit_count[0] == 1, "second end() must be ignored"
+
