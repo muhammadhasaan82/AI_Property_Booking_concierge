@@ -962,27 +962,33 @@ def _validate_and_commit_state(
         candidate_state.pop("guests", None)
         errors["guests"] = _occupancy_validation_message(occupancy_max)
 
-
-    check_in = candidate_state.get("check_in") or updates.get("check_in")
-    check_out = candidate_state.get("check_out") or updates.get("check_out")
-    if check_in and check_out:
-        try:
-            check_in_dt = datetime.strptime(str(check_in), cfg.date_format)
-            check_out_dt = datetime.strptime(str(check_out), cfg.date_format)
-            if check_out_dt <= check_in_dt:
-                candidate_state.pop("check_out", None)
-                errors["check_out"] = (
-                    _checkout_validation_message(str(check_in))
-                    or "Check-out must be after check-in."
-                )
-        except Exception:
-            pass
+    if "check_in" in errors:
+        candidate_state.pop("check_in", None)
+        candidate_state.pop("check_out", None)
+        errors.pop("check_out", None)
+    else:
+        check_in = candidate_state.get("check_in") or updates.get("check_in")
+        check_out = candidate_state.get("check_out") or updates.get("check_out")
+        if check_in and check_out:
+            try:
+                check_in_dt = datetime.strptime(str(check_in), cfg.date_format)
+                check_out_dt = datetime.strptime(str(check_out), cfg.date_format)
+                if check_out_dt <= check_in_dt:
+                    candidate_state.pop("check_out", None)
+                    errors["check_out"] = (
+                        _checkout_validation_message(str(check_in))
+                        or "Check-out must be after check-in."
+                    )
+            except Exception:
+                pass
 
     committed = _replace_booking_state(soft_state, candidate_state)
     missing_field = _next_missing_field(committed)
     error_field = None
     if errors:
-        if "check_out" in errors:
+        if "check_in" in errors:
+            error_field = "check_in"
+        elif "check_out" in errors:
             error_field = "check_out"
         else:
             for field in get_ask_order():
