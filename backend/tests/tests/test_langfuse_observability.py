@@ -9,6 +9,7 @@ Covers:
 """
 import os
 import sys
+from pathlib import Path
 import pytest
 from unittest.mock import patch, MagicMock, call
 
@@ -554,6 +555,22 @@ class TestSDK471Compatibility:
 
         trace.end()
         assert emit_count[0] == 1, "second end() must be ignored"
+
+    def test_app_code_has_no_fire_and_forget_trace_update_pattern(self):
+        """App code must not use observer.trace(...).update(...) chains."""
+        app_root = Path(__file__).resolve().parents[2] / "app"
+        assert app_root.exists(), f"Expected app root to exist: {app_root}"
+        offenders = []
+
+        for path in app_root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if "observer.trace(" in line and ").update(" in line:
+                    offenders.append(f"{path.relative_to(app_root.parent)}:{lineno}")
+
+        assert offenders == [], (
+            "Found fire-and-forget trace update call sites:\n" + "\n".join(offenders)
+        )
 
 class TestShouldSample:
     """Tests for the _should_sample() helper added in this PR."""

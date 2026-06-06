@@ -177,12 +177,13 @@ async def request_booking_details(
         set_awaiting_field(soft_state, resolved_fields)
 
     observer = get_observer()
-    observer.trace(name="booking_flow").update(metadata={
-        "previous_booking_stage": soft_state.get("booking_stage") if isinstance(soft_state, dict) else None,
-        "next_booking_stage": "collecting_details",
-        "missing_fields": resolved_fields,
-        "soft_state_summary": summarize_booking_state(soft_state)
-    })
+    with observer.trace(name="booking_flow") as trace:
+        trace.update(metadata={
+            "previous_booking_stage": soft_state.get("booking_stage") if isinstance(soft_state, dict) else None,
+            "next_booking_stage": "collecting_details",
+            "missing_fields": resolved_fields,
+            "soft_state_summary": summarize_booking_state(soft_state)
+        })
 
     return _finalize_payload(
         {"status": Status.GATHERING_INFO, "missing_fields": resolved_fields},
@@ -367,12 +368,13 @@ async def process_v2_booking(
         clear_booking_state(soft_state)
 
     observer = get_observer()
-    observer.trace(name="booking_flow").update(metadata={
-        "previous_booking_stage": soft_state.get("booking_stage") if isinstance(soft_state, dict) else None,
-        "next_booking_stage": "confirmed",
-        "receipt_generated": True,
-        "registration_id_present": bool(payload.get("receipt", {}).get("booking_id")),
-        "soft_state_summary": summarize_booking_state(soft_state)
-    })
+    with observer.trace(name="booking_flow") as trace:
+        trace.update(metadata={
+            "previous_booking_stage": soft_state.get("booking_stage") if isinstance(soft_state, dict) else None,
+            "next_booking_stage": "confirmed",
+            "receipt_generated": True,
+            "registration_id_present": bool(payload.get("receipt", {}).get("booking_id")),
+            "soft_state_summary": summarize_booking_state(soft_state)
+        })
 
     return _finalize_payload(payload, action_intent, context_flag)

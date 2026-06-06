@@ -15,7 +15,8 @@ Call-site interface (unchanged):
         with trace.span("step"):
             …
 
-    observer.trace("booking_flow").update(metadata={…})
+    with observer.trace("booking_flow") as trace:
+        trace.update(metadata={…})
 
     t = observer.trace("chat_turn", user_id=uid)
     t.update(metadata={…})
