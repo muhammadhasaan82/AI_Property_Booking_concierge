@@ -507,6 +507,7 @@ class TestSDK471Compatibility:
                 pass
         trace.end()
 
+
     def test_explicit_lifecycle_trace_does_not_emit_until_end(self):
         """Explicit lifecycle trace must NOT emit on update(); only on end().  All
         metadata from multiple update() calls, including child spans, must be
@@ -570,3 +571,195 @@ class TestSDK471Compatibility:
             "Found fire-and-forget trace update call sites:\n" + "\n".join(offenders)
         )
 
+class TestShouldSample:
+    """Tests for the _should_sample() helper added in this PR."""
+
+    def test_sample_rate_one_always_returns_true(self):
+        """LANGFUSE_SAMPLE_RATE=1.0 must always return True (no RNG needed)."""
+        from app.services.observability.langfuse_observer import _should_sample
+        with patch('app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE', 1.0):
+            for _ in range(20):
+                assert _should_sample() is True
+
+    def test_sample_rate_zero_always_returns_false(self):
+        """LANGFUSE_SAMPLE_RATE=0.0 must always return False."""
+        from app.services.observability.langfuse_observer import _should_sample
+        with patch('app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE', 0.0):
+            # random.random() always returns a value in [0.0, 1.0), so 0.0 < 0.0 is never True
+            for _ in range(20):
+                assert _should_sample() is False
+
+    def test_sample_rate_above_one_is_treated_as_always_true(self):
+        """Any rate >= 1.0 must short-circuit to True."""
+        from app.services.observability.langfuse_observer import _should_sample
+        with patch('app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE', 2.5):
+            assert _should_sample() is True
+
+    def test_sample_rate_zero_point_five_uses_random(self):
+        """For rates in (0, 1) the result depends on random.random()."""
+        from app.services.observability.langfuse_observer import _should_sample
+        with patch('app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE', 0.5):
+            with patch('app.services.observability.langfuse_observer.random') as mock_rng:
+                mock_rng.random.return_value = 0.3
+                assert _should_sample() is True
+                mock_rng.random.return_value = 0.7
+                assert _should_sample() is False
+
+    def test_observer_trace_returns_noop_when_not_sampled(self):
+        """
+        When _should_sample() returns False, observer.trace() must return a
+        NoOpTrace even when the observer is otherwise active.
+        """
+        obs, _client, _observe = _make_active_observer()
+        with patch('app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE', 0.0):
+            trace = obs.trace("sampled_away")
+        assert isinstance(trace, NoOpTrace)
+
+
+class TestObservedTraceMetadataMerge:
+    """
+    Tests for the dict-merge logic inside _ObservedTrace.update() —
+    specifically that repeated update(metadata=…) calls merge dicts
+    rather than replacing them.
+    """
+
+    def test_metadata_dicts_are_merged_not_replaced(self):
+        """Two update(metadata=…) calls must produce a merged metadata dict."""
+        trace = _ObservedTrace(name="t", initial_payload={}, client=None)
+        trace._in_context = True  # prevent emit during update()
+        trace.update(metadata={"a": 1})
+        trace.update(metadata={"b": 2})
+        assert trace._payload["metadata"] == {"a": 1, "b": 2}
+
+    def test_metadata_new_key_overwrites_old_value_when_same_key(self):
+        """If the same metadata key is updated twice, the second value wins."""
+        trace = _ObservedTrace(name="t", initial_payload={}, client=None)
+        trace._in_context = True
+        trace.update(metadata={"stage": "start"})
+        trace.update(metadata={"stage": "end"})
+        assert trace._payload["metadata"]["stage"] == "end"
+
+    def test_non_dict_metadata_replaces_previous_dict(self):
+        """If a new metadata value is a string (not a dict), it replaces the prior dict."""
+        trace = _ObservedTrace(name="t", initial_payload={}, client=None)
+        trace._in_context = True
+        trace.update(metadata={"key": "val"})
+        trace.update(metadata="plain-string")
+        # sanitize_for_observability("plain-string") → "plain-string" (no PII)
+        assert trace._payload["metadata"] == "plain-string"
+
+    def test_non_metadata_keys_stored_directly(self):
+        """Arbitrary kwargs that are not metadata/input/output go in as-is."""
+        trace = _ObservedTrace(name="t", initial_payload={}, client=None)
+        trace._in_context = True
+        trace.update(session_id="abc-123", user_id="u-456")
+        assert trace._payload["session_id"] == "abc-123"
+        assert trace._payload["user_id"] == "u-456"
+
+    def test_initial_payload_metadata_preserved_before_first_update(self):
+        """Metadata from initial_payload must survive until update() is called."""
+        trace = _ObservedTrace(
+            name="t",
+            initial_payload={"metadata": {"source": "init"}},
+            client=None,
+        )
+        trace._in_context = True
+        # No update yet — payload from __init__ must be intact
+        assert trace._payload.get("metadata", {}).get("source") == "init"
+
+    def test_initial_payload_metadata_merged_with_update(self):
+        """update(metadata=…) on top of an initial metadata dict must merge."""
+        trace = _ObservedTrace(
+            name="t",
+            initial_payload={"metadata": {"source": "init"}},
+            client=None,
+        )
+        trace._in_context = True
+        trace.update(metadata={"extra": "value"})
+        assert trace._payload["metadata"]["source"] == "init"
+        assert trace._payload["metadata"]["extra"] == "value"
+
+
+class TestObservedSpan:
+    """
+    Tests for _ObservedSpan — the child-span object returned by
+    _ObservedTrace.span().
+    """
+
+    def _make_trace(self) -> _ObservedTrace:
+        return _ObservedTrace(name="parent", initial_payload={}, client=None)
+
+    def test_span_update_appends_to_parent_child_spans(self):
+        """span.update(metadata=…) must push an entry into parent._child_spans."""
+        trace = self._make_trace()
+        span = _ObservedSpan(parent=trace, name="step_a")
+        span.update(metadata={"key": "value"})
+        assert len(trace._child_spans) == 1
+        assert trace._child_spans[0]["span_name"] == "step_a"
+
+    def test_span_update_sanitizes_metadata(self):
+        """Email in span metadata must be redacted before being stored."""
+        trace = self._make_trace()
+        span = _ObservedSpan(parent=trace, name="pii_step")
+        span.update(metadata={"note": "user is test@example.com"})
+        stored = trace._child_spans[0]["metadata"]
+        assert "[REDACTED_EMAIL]" in stored["note"]
+
+    def test_multiple_spans_accumulate_in_parent(self):
+        """Creating two spans on the same trace must accumulate both entries."""
+        trace = self._make_trace()
+        s1 = _ObservedSpan(parent=trace, name="step_1")
+        s2 = _ObservedSpan(parent=trace, name="step_2")
+        s1.update(metadata={"x": 1})
+        s2.update(metadata={"y": 2})
+        names = [s["span_name"] for s in trace._child_spans]
+        assert "step_1" in names
+        assert "step_2" in names
+
+    def test_span_end_does_not_raise(self):
+        """end() must be a no-op and must not raise."""
+        trace = self._make_trace()
+        span = _ObservedSpan(parent=trace, name="s")
+        span.end()  # must not raise
+
+    def test_span_context_manager_is_safe(self):
+        """_ObservedSpan as a context manager must not raise even on exception."""
+        trace = self._make_trace()
+        span = _ObservedSpan(parent=trace, name="ctx_span")
+        try:
+            with span:
+                span.update(metadata={"in_context": True})
+        except Exception as exc:
+            pytest.fail(f"Context manager raised unexpectedly: {exc}")
+
+    def test_span_context_manager_with_exception_does_not_suppress(self):
+        """Exceptions inside 'with span:' must not be suppressed."""
+        trace = self._make_trace()
+        span = _ObservedSpan(parent=trace, name="err_span")
+        with pytest.raises(ValueError):
+            with span:
+                raise ValueError("test error")
+
+    def test_child_spans_included_in_emit_payload(self):
+        """When a trace emits, child_spans must be included in the final payload."""
+        emit_payloads: list = []
+
+        def _capturing_observe(name):
+            def _decorator(fn):
+                def _wrapper(payload, **kw):
+                    emit_payloads.append(payload)
+                    return fn(payload, **kw)
+                return _wrapper
+            return _decorator
+
+        fake_client = MagicMock()
+        trace = _ObservedTrace(name="tracing_span", initial_payload={}, client=fake_client)
+        span = trace.span("child_step", metadata={"detail": "x"})
+        span.update(metadata={"inner": "y"})
+
+        with patch('app.services.observability.langfuse_observer.observe', _capturing_observe):
+            trace.end()
+
+        assert len(emit_payloads) == 1
+        assert "child_spans" in emit_payloads[0]
+        assert any(s["span_name"] == "child_step" for s in emit_payloads[0]["child_spans"])
