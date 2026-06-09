@@ -539,7 +539,8 @@ async def test_booking_status_without_receipt_asks_for_booking_id(monkeypatch):
     )
 
     route_pre_adk.assert_not_awaited()
-    assert "registration ID" in reply.lower() or "booking ID" in reply.lower()
+    lower_reply = reply.lower()
+    assert "registration id" in lower_reply or "booking id" in lower_reply
     assert "BK-" in reply
 
 
