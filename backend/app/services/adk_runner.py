@@ -1510,7 +1510,10 @@ async def run_adk_turn(
             message=cleaned_message,
         )
     if booking_payload:
-        deterministic_reply = booking_payload.get("deterministic_reply")
+        deterministic_reply = (
+            str(booking_payload.get("deterministic_reply") or "").strip()
+            or _deterministic_reply_from_router_output(booking_payload)
+        )
         if deterministic_reply:
             trace.end()
             yield str(deterministic_reply)

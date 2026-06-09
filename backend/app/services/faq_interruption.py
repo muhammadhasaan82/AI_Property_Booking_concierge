@@ -79,13 +79,16 @@ def is_active(soft_state: Optional[Dict[str, Any]]) -> bool:
 def clear_faq_interruption(soft_state: Optional[Dict[str, Any]]) -> None:
     if isinstance(soft_state, dict):
         soft_state.pop(get_state_key(), None)
+        soft_state.pop("faq_interruption", None)
 
 
 def detect_policy_question(message: str) -> bool:
     if not message or not message.strip():
         return False
-    from app.components.faq_enhanced import detect_faq_intent
+    from app.components.faq_enhanced import detect_faq_intent, lookup_canonical_faq
 
+    if lookup_canonical_faq(message):
+        return True
     return bool(detect_faq_intent(message))
 
 

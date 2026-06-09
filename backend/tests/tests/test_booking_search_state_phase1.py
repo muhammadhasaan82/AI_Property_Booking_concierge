@@ -219,7 +219,7 @@ async def test_sure_after_faq_returns_previous_property_menu():
     assert payload is not None
     assert payload["status"] == "properties_found"
     assert "Apartment In New York 1" in payload["deterministic_reply"]
-    assert "pick an option number for details" in payload["deterministic_reply"]
+    assert "Reply with an option number to see full details" in payload["deterministic_reply"]
     assert "faq_interruption" not in snapshot["state"]["soft_state"]
 
 

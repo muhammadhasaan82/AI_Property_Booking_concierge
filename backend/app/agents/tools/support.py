@@ -160,21 +160,22 @@ async def check_faq(
         )
 
     try:
-        from ...components.faq_enhanced import enhanced_faq_agent
+        from ...components.faq_enhanced import lookup_canonical_faq
 
-        canonical_result = enhanced_faq_agent(question, {"in_booking_flow": False})
-        canonical_answer = str(canonical_result.get("reply") or "").strip()
-        faq_intent, retrieval_source = _faq_metadata_from_result(canonical_result)
-        if canonical_answer and retrieval_source == "canonical_faq":
-            return _faq_payload(
-                answer=canonical_answer,
-                source=Source.RAG,
-                soft_state=soft_state,
-                action_intent=action_intent,
-                context_flag=faq_context_flag,
-                faq_intent=faq_intent,
-                retrieval_source=retrieval_source,
-            )
+        canonical_match = lookup_canonical_faq(question)
+        if isinstance(canonical_match, dict):
+            canonical_answer = str(canonical_match.get("answer") or "").strip()
+            canonical_id = str(canonical_match.get("id") or "").strip() or None
+            if canonical_answer:
+                return _faq_payload(
+                    answer=canonical_answer,
+                    source=Source.RAG,
+                    soft_state=soft_state,
+                    action_intent=action_intent,
+                    context_flag=faq_context_flag,
+                    faq_intent=canonical_id,
+                    retrieval_source="canonical_faq",
+                )
     except Exception as e:
         logger.warning("Canonical FAQ lookup failed: %s", e)
 

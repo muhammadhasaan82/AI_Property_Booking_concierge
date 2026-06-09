@@ -3,6 +3,7 @@ version: "1.0"
 settings:
   keyword_threshold: 0.6
   fuzzy_threshold: 0.82
+  combined_threshold: 0.72
   ttl_seconds: 3600
 
 policies:
@@ -34,10 +35,11 @@ policies:
   - id: pet_policy
     canonical_question: "Do you allow pets?"
     answer: >-
-      Pet policies vary by property. Some properties allow pets with a
-      refundable deposit, while others do not permit animals. Check the
-      specific property listing for details, or ask us to filter for
-      pet-friendly options.
+      Pets are allowed at selected pet-friendly properties when that is shown
+      in the listing amenities or house rules. Some pet-friendly properties may
+      require a refundable pet deposit, while others may have size, breed, or
+      count limits. Please check the specific property listing for the exact
+      pet policy, or ask us to filter for pet-friendly options.
     paraphrases:
       - "Are pets allowed"
       - "Can I bring my dog"
@@ -62,10 +64,14 @@ policies:
   - id: refund_policy
     canonical_question: "What is the refund policy?"
     answer: >-
-      If you cancel 4–6 days before check-in or the booking start date, you
-      receive a 40% refund of the fees actually received. Non-recoverable
-      third-party costs and bank or card processing fees are excluded from the
-      refundable amount.
+      Refunds are based on how many days before check-in or the booking start
+      date you cancel, calculated on the fees actually received. The current
+      refund tiers are: 15 or more days before check-in/start = 90% refund;
+      7–14 days before check-in/start = 50% refund; 4–6 days before
+      check-in/start = 40% refund; under 3 days before check-in/start = 25%
+      refund. For a cancellation 5 days before check-in, the applicable tier is
+      4–6 days, so the refund is 40% of the fees actually received, excluding
+      non-recoverable third-party costs and bank or card processing fees.
     paraphrases:
       - "How do I get a refund"
       - "When will I get my money back"

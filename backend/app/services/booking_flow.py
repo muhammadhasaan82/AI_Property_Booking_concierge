@@ -19,7 +19,12 @@ from app.agents.tools.helpers import _coerce_float, _coerce_int
 from app.agents.tools.search import get_all_available_cities, return_to_previous_results
 from app.agents.tools.support import check_faq
 from app.config.agent_config_loader import cfg
-from app.services.faq_interruption import clear_faq_interruption, sync_alias_keys
+from app.services.faq_interruption import (
+    build_answer_with_resume_prompt,
+    capture_faq_interruption,
+    clear_faq_interruption,
+    sync_alias_keys,
+)
 from app.services.observability.langfuse_observer import get_observer, summarize_booking_state
 from app.config.booking_schema_loader import (
     get_ask_order,
@@ -504,6 +509,33 @@ def _is_booking_faq(message: str) -> bool:
     if "?" in message and not re.search(r"\b(email|phone|guest|guests|check[- ]?in|check[- ]?out|name)\b", normalized):
         return True
     return False
+
+
+def _enrich_booking_faq_payload(
+    payload: Optional[Dict[str, Any]],
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return payload
+
+    status = str(payload.get("status") or "").strip().lower()
+    if status != str(Status.ANSWERED).lower():
+        return payload
+
+    answer = str(payload.get("answer") or "").strip()
+    if not answer:
+        return payload
+
+    deterministic_reply = str(payload.get("deterministic_reply") or "").strip()
+    if deterministic_reply:
+        return payload
+
+    faq_intent = str(payload.get("faq_intent") or "").strip() or None
+    capture_faq_interruption(soft_state, last_faq_intent=faq_intent)
+
+    enriched = dict(payload)
+    enriched["deterministic_reply"] = build_answer_with_resume_prompt(answer, soft_state)
+    return enriched
 
 
 def _seed_property_fields(soft_state: Dict[str, Any], state: Dict[str, Any]) -> None:
@@ -1318,7 +1350,8 @@ async def handle_active_booking_turn(
 
     if _is_booking_faq(message):
         tool_context = SimpleNamespace(state={"soft_state": soft_state})
-        return await check_faq(question=message, tool_context=tool_context)
+        payload = await check_faq(question=message, tool_context=tool_context)
+        return _enrich_booking_faq_payload(payload, soft_state)
 
     clear_faq_interruption(soft_state)
     sync_alias_keys(soft_state)
