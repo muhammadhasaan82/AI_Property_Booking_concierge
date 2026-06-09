@@ -1520,6 +1520,26 @@ async def run_adk_turn(
             trace.end()
             yield str(deterministic_reply)
             return
+    if detect_policy_question(cleaned_message):
+        live_soft_state = state.setdefault("soft_state", {}) if isinstance(state, dict) else {}
+        tool_context = SimpleNamespace(state={"soft_state": live_soft_state})
+        faq_payload = await check_faq(question=cleaned_message, tool_context=tool_context)
+        if isinstance(faq_payload, dict):
+            deterministic_reply = (
+                str(faq_payload.get("deterministic_reply") or "").strip()
+                or str(faq_payload.get("answer") or "").strip()
+            )
+            if deterministic_reply:
+                await save_session_snapshot(
+                    session_id=session_id,
+                    history=history,
+                    state=state,
+                    metadata=metadata,
+                )
+                trace.end()
+                yield deterministic_reply
+                return
+
     with trace.span(name="booking_status_check"):
         status_payload = await _maybe_handle_booking_status_check(
             session_id=session_id,
