@@ -408,3 +408,205 @@ def test_start_booking_for_selected_property_restores_top_level_keys_after_helpe
     assert soft_state["booking_selected_property"]["id"] == selected_property["id"]
     assert soft_state["booking_required_fields"]
     assert soft_state["booking_property_id"] == soft_state["last_selected_property_id"]
+
+_TEST_RECEIPT = {
+    "booking_id": "BK-20260607-C48A4AFA",
+    "property_title": "Apartment 3",
+    "guest_name": "Jane Doe",
+    "guest_email": "jane@example.com",
+    "guest_phone": "03001234567",
+    "check_in": "2026-06-02",
+    "check_out": "2026-06-11",
+    "nights": 9,
+    "guests": 4,
+    "price_per_night": 103.0,
+    "total_amount": 927.0,
+    "status": "confirmed",
+}
+
+
+def _build_status_check_snapshot(soft_state_overrides: dict | None = None) -> dict:
+    """Build a minimal session snapshot for booking-status tests."""
+    soft_state = dict(soft_state_overrides) if soft_state_overrides else {}
+    return {
+        "state": {"soft_state": soft_state},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": "u-status-check",
+            "last_update_time": 1.0,
+        },
+    }
+
+
+async def _run_status_check_turn(
+    monkeypatch,
+    snapshot: dict,
+    message: str,
+) -> tuple[str, AsyncMock]:
+    """
+    Run a single turn through the booking-status handler and return the reply and route_pre_adk mock.
+
+    Patches adk_runner so the turn stops after the booking_status_check step
+    (route_pre_adk and _get_runner both raise if reached).
+    """
+    route_pre_adk = AsyncMock(return_value={"reply": "generic fallback"})
+
+    async def fake_get_session_snapshot(_session_id):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+        snapshot["history"] = history
+        snapshot["meta"].update(metadata or {})
+
+    def fail_get_runner():
+        raise AssertionError("ADK runner must not be invoked for booking-status lookup")
+
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(adk_runner, "maybe_handle_direct_property_search", AsyncMock(return_value=None))
+    monkeypatch.setattr(adk_runner, "route_pre_adk", route_pre_adk)
+    monkeypatch.setattr(adk_runner, "_get_runner", fail_get_runner)
+    monkeypatch.setattr(adk_runner, "sanitize_input", lambda msg: (msg, True))
+    monkeypatch.setattr(adk_runner, "sanitize_output", lambda msg: msg)
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn("u-status-check", "s-status-check", message):
+        chunks.append(chunk)
+
+    return "".join(chunks), route_pre_adk
+
+
+@pytest.mark.asyncio
+async def test_booking_id_lookup_uses_current_session_receipt(monkeypatch):
+    """
+    Seed soft_state.booking_receipt and verify that a "my booking ID is BK-..." message
+    returns deterministic status without invoking route_pre_adk.
+    """
+    snapshot = _build_status_check_snapshot({"booking_receipt": dict(_TEST_RECEIPT)})
+
+    reply, route_pre_adk = await _run_status_check_turn(
+        monkeypatch,
+        snapshot,
+        "My booking ID is BK-20260607-C48A4AFA",
+    )
+
+    route_pre_adk.assert_not_awaited()
+    assert "BK-20260607-C48A4AFA" in reply
+    assert "Jane Doe" in reply
+    assert "jane@example.com" in reply
+    assert "June 2, 2026" in reply
+    assert "June 11, 2026" in reply
+    assert "Apartment 3" in reply
+    assert "confirmed" in reply
+    assert "$927.00" in reply
+
+
+@pytest.mark.asyncio
+async def test_booking_status_without_id_uses_latest_session_receipt(monkeypatch):
+    """
+    When the user asks for booking status without providing an ID and a receipt
+    exists in the session, return the latest receipt's status.
+    """
+    snapshot = _build_status_check_snapshot({"booking_receipt": dict(_TEST_RECEIPT)})
+
+    reply, route_pre_adk = await _run_status_check_turn(
+        monkeypatch,
+        snapshot,
+        "I want to check my booking status",
+    )
+
+    route_pre_adk.assert_not_awaited()
+    assert "BK-20260607-C48A4AFA" in reply
+    assert "Jane Doe" in reply
+    assert "Apartment 3" in reply
+    assert "confirmed" in reply
+
+
+@pytest.mark.asyncio
+async def test_booking_status_without_receipt_asks_for_booking_id(monkeypatch):
+    """
+    When the user asks for booking status but there is no receipt in the session,
+    the system should ask the user for their booking ID.
+    """
+    snapshot = _build_status_check_snapshot({})
+
+    reply, route_pre_adk = await _run_status_check_turn(
+        monkeypatch,
+        snapshot,
+        "I want to check my booking status",
+    )
+
+    route_pre_adk.assert_not_awaited()
+    assert "registration ID" in reply.lower() or "booking ID" in reply.lower()
+    assert "BK-" in reply
+
+
+@pytest.mark.asyncio
+async def test_booking_status_wrong_id_not_found(monkeypatch):
+    """
+    When a booking ID is provided that doesn't match any receipt in the session
+    (and DB is unreachable/mock), return a not-found message without invoking ADK.
+    """
+    snapshot = _build_status_check_snapshot({"booking_receipt": dict(_TEST_RECEIPT)})
+
+    with patch(
+        "app.services.booking.get_booking_status",
+        AsyncMock(return_value={"ok": False, "error": "not found"}),
+    ):
+        reply, route_pre_adk = await _run_status_check_turn(
+            monkeypatch,
+            snapshot,
+            "My booking ID is BK-20260607-UNKNOWN",
+        )
+
+    route_pre_adk.assert_not_awaited()
+    assert "wasn't found" in reply.lower() or "not found" in reply.lower()
+
+
+@pytest.mark.asyncio
+async def test_confirm_then_lookup_booking_id_e2e(monkeypatch):
+    """
+    End-to-end: create a booking through the shortcut flow, capture the generated
+    registration ID, then send "My booking ID is <id>" and verify it's found.
+    """
+    reply, snapshot, saved_states, _search_result, _selected, route_pre_adk = (
+        await _run_booking_confirmation(monkeypatch, "yeah sure", option_number=3)
+    )
+    assert route_pre_adk.await_count == 0
+    assert snapshot["state"]["soft_state"]["booking_stage"] == "collecting_details"
+
+    review_reply, route_pre_adk = await _run_booking_followup_turn(
+        monkeypatch,
+        snapshot,
+        saved_states,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in date would 2nd of june, 2026 and check out shall be around 11 june 2026, we are around 4 guests",
+    )
+    assert route_pre_adk.await_count == 0
+    assert "Please confirm" in review_reply
+
+    receipt_reply, route_pre_adk = await _run_booking_followup_turn(
+        monkeypatch,
+        snapshot,
+        saved_states,
+        "yes",
+    )
+    assert route_pre_adk.await_count == 0
+    assert "Your booking is confirmed." in receipt_reply
+
+    soft_state = snapshot["state"]["soft_state"]
+    registration_id = soft_state["booking_registration_id"]
+    assert registration_id
+    assert registration_id.startswith("BK-")
+
+    status_reply, route_pre_adk = await _run_status_check_turn(
+        monkeypatch,
+        snapshot,
+        f"My booking ID is {registration_id}",
+    )
+
+    assert route_pre_adk.await_count == 0
+    assert registration_id in status_reply
+    assert "confirmed" in status_reply
+    assert "Jane Doe" in status_reply

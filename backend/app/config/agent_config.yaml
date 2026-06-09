@@ -312,6 +312,31 @@ booking:
     - Status: {booking_status}
 
     You can use your registration ID to check your booking status.
+
+  # Template for deterministic booking status lookup when the receipt is found in session
+  booking_status_prompt_template: |
+    Here are your booking details:
+    - Registration ID: {registration_id}
+    - Property: {property_title}
+    - Full name: {guest_name}
+    - Email: {guest_email}
+    - Phone: {guest_phone}
+    - Check-in: {check_in}
+    - Check-out: {check_out}
+    - Guests: {guests}
+    - Nights: {nights}
+    - Price per night: {price_per_night}
+    - Total: {total_amount}
+    - Status: {booking_status}
+
+  # Template shown when a booking ID was provided but not found in session or DB
+  booking_status_not_found_template: |
+    It looks like your booking wasn't found in our system. Please double-check your registration ID and try again, or contact our support team for assistance.
+
+  # Template shown when the user asks for booking status but has no ID and no receipt
+  booking_status_ask_for_id_template: |
+    I'd be happy to check your booking status. Could you share your registration ID? It looks like BK-YYYYMMDD-XXXXXXXX and was shown when you confirmed your booking.
+
   registration_id_prefix: "BK"
 
   booking_source_tag: "v2_adk"     # written to DB — change without Python edits

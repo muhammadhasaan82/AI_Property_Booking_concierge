@@ -174,6 +174,15 @@ class _AgentConfig:
         self.booking_receipt_prompt_template: str = str(
             bk.get("receipt_prompt_template", "")
         )
+        self.booking_status_prompt_template: str = str(
+            bk.get("booking_status_prompt_template", "")
+        )
+        self.booking_status_not_found_template: str = str(
+            bk.get("booking_status_not_found_template", "")
+        )
+        self.booking_status_ask_for_id_template: str = str(
+            bk.get("booking_status_ask_for_id_template", "")
+        )
         self.booking_registration_id_prefix: str = str(
             bk.get("registration_id_prefix", "BK")
         )

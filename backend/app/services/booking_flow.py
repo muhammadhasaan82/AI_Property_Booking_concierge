@@ -220,6 +220,279 @@ def _receipt_reply(receipt: Dict[str, Any]) -> str:
         booking_status=receipt.get("status") or cfg.booking_confirmed_status,
     )
 
+BOOKING_ID_PATTERN = re.compile(r"BK-\d{8}-[A-Z0-9]+", re.I)
+
+_BOOKING_STATUS_INTENT_PATTERNS = [
+    re.compile(p, re.I)
+    for p in [
+        r"\bmy\s+booking\s+id\s+is\b",
+        r"\bbooking\s+id\b",
+        r"\bcheck\s+my\s+booking\s+status\b",
+        r"\bcheck\s+booking\s+status\b",
+        r"\bmy\s+booking\s+status\b",
+        r"\bregistration\s+id\b",
+        r"\bmy\s+registration\s+id\s+is\b",
+        r"\bi\s+want\s+to\s+check\s+my\s+booking\s+status\b",
+        r"\bstatus\s+of\s+my\s+booking\b",
+        r"\bbooking\s+status\b",
+    ]
+]
+
+
+def _detect_booking_status_intent(message: str) -> bool:
+    """
+    Deterministically detect whether the user message expresses a booking-status intent.
+
+    Matches the normalized message against a configured set of regex patterns
+    (e.g. "my booking ID is", "check my booking status", "registration ID").
+    Also returns True when a booking ID token (BK-YYYYMMDD-XXXXXXXX) is present
+    in the message even without an explicit intent phrase.
+
+    Parameters:
+        message (str): The raw user message.
+
+    Returns:
+        bool: True if the message is recognised as a booking-status request.
+    """
+    if not message:
+        return False
+    normalized = _normalize(message)
+    if not normalized:
+        return False
+    for pattern in _BOOKING_STATUS_INTENT_PATTERNS:
+        if pattern.search(normalized):
+            return True
+    if BOOKING_ID_PATTERN.search(message):
+        return True
+    return False
+
+
+def _extract_booking_id(message: str) -> Optional[str]:
+    """
+    Extract the first booking/registration ID token (BK-YYYYMMDD-XXXXXXXX) from a message.
+
+    Parameters:
+        message (str): The raw user message to scan.
+
+    Returns:
+        Optional[str]: The matched booking ID string, or None if no match is found.
+    """
+    if not message:
+        return None
+    match = BOOKING_ID_PATTERN.search(message)
+    return match.group(0).upper() if match else None
+
+
+def _render_booking_status_reply(receipt: Dict[str, Any]) -> str:
+    """
+    Render a deterministic booking status reply from a receipt dictionary.
+
+    Uses the configured `booking_status_prompt_template` from agent_config.yaml.
+    Falls back to the receipt template if the status template is not configured.
+
+    Parameters:
+        receipt (Dict[str, Any]): Booking receipt dict with keys: booking_id,
+            property_title, guest_name, guest_email, guest_phone, check_in,
+            check_out, guests, nights, price_per_night, total_amount, status.
+
+    Returns:
+        str: The rendered status reply string.
+    """
+    template = str(
+        getattr(cfg, "booking_status_prompt_template", "") or ""
+    ).strip()
+    if not template:
+        return _receipt_reply(receipt)
+    return template.format(
+        registration_id=receipt.get("booking_id") or "",
+        property_title=receipt.get("property_title") or "",
+        guest_name=receipt.get("guest_name") or "",
+        guest_email=receipt.get("guest_email") or "",
+        guest_phone=receipt.get("guest_phone") or "",
+        check_in=_format_display_date(str(receipt.get("check_in") or "")),
+        check_out=_format_display_date(str(receipt.get("check_out") or "")),
+        guests=receipt.get("guests") or "",
+        nights=receipt.get("nights") or "",
+        price_per_night=_format_money(receipt.get("price_per_night")),
+        total_amount=_format_money(receipt.get("total_amount")),
+        booking_status=receipt.get("status") or cfg.booking_confirmed_status,
+    )
+
+
+def _lookup_booking_in_session(
+    booking_id: str,
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Search for a booking receipt matching `booking_id` in the current session soft_state.
+
+    Lookup order (returns the first match):
+      A. soft_state.booking_receipt (single receipt dict)
+      B. soft_state.booking_receipts (list/history of receipts)
+      C. soft_state top-level booking_review / pending_booking (compatibility snapshot)
+
+    Parameters:
+        booking_id (str): The booking ID to search for (case-insensitive match).
+        soft_state (Dict[str, Any]): Current session soft_state dictionary.
+
+    Returns:
+        Optional[Dict[str, Any]]: The matching receipt dict, or None if not found.
+    """
+    if not booking_id or not isinstance(soft_state, dict):
+        return None
+
+    target = booking_id.strip().upper()
+
+    receipt = soft_state.get("booking_receipt")
+    if isinstance(receipt, dict):
+        rid = str(receipt.get("booking_id") or "").strip().upper()
+        if rid == target:
+            return dict(receipt)
+
+    receipts_list = soft_state.get("booking_receipts")
+    if isinstance(receipts_list, list):
+        for entry in receipts_list:
+            if not isinstance(entry, dict):
+                continue
+            rid = str(entry.get("booking_id") or "").strip().upper()
+            if rid == target:
+                return dict(entry)
+
+    for key in ("booking_review", "pending_booking"):
+        candidate = soft_state.get(key)
+        if not isinstance(candidate, dict):
+            continue
+        rid = str(candidate.get("booking_id") or candidate.get("registration_id") or "").strip().upper()
+        if rid == target:
+            receipt = dict(candidate)
+            receipt.setdefault("booking_id", rid)
+            receipt.setdefault("status", soft_state.get("booking_status") or cfg.booking_confirmed_status)
+            receipt.setdefault("property_title", candidate.get("property_title") or candidate.get("property"))
+            receipt.setdefault("total_amount", candidate.get("total"))
+            return receipt
+
+    return None
+
+
+def _latest_session_receipt(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Return the most recent booking receipt available in the session soft_state.
+
+    Checks soft_state.booking_receipt first, then the last entry of
+    soft_state.booking_receipts if present as a non-empty list.
+
+    Parameters:
+        soft_state (Dict[str, Any]): Current session soft_state.
+
+    Returns:
+        Optional[Dict[str, Any]]: The latest receipt dict, or None if none found.
+    """
+    if not isinstance(soft_state, dict):
+        return None
+
+    receipt = soft_state.get("booking_receipt")
+    if isinstance(receipt, dict):
+        return dict(receipt)
+
+    receipts_list = soft_state.get("booking_receipts")
+    if isinstance(receipts_list, list) and receipts_list:
+        last = receipts_list[-1]
+        if isinstance(last, dict):
+            return dict(last)
+
+    return None
+
+
+async def handle_booking_status_check(
+    message: str,
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Deterministic booking-status handler — checks session soft_state before falling back to DB/ADK.
+
+    Behaviour:
+      1. Detects booking-status intent in the message.
+      2. Extracts a booking ID (BK-YYYYMMDD-XXXXXXXX) if present.
+      3. If ID is present and found in session → returns deterministic status.
+      4. If ID is present but NOT found in session → attempts DB lookup;
+         if DB also fails → returns not-found message.
+      5. If no ID but session has a booking_receipt → returns latest booking status.
+      6. If no ID and no receipt → asks user for booking ID.
+      7. If booking-status intent is NOT detected → returns None (let pipeline continue).
+
+    Parameters:
+        message (str): The user's raw message.
+        soft_state (Dict[str, Any]): Current session soft_state (mutable dict from Redis snapshot).
+
+    Returns:
+        Optional[Dict[str, Any]]: A payload with `deterministic_reply` when handled,
+        or None when booking-status intent is not detected (pass-through).
+    """
+    if not _detect_booking_status_intent(message):
+        return None
+
+    booking_id = _extract_booking_id(message)
+
+    if booking_id:
+        receipt = _lookup_booking_in_session(booking_id, soft_state)
+        if receipt:
+            return {
+                "status": Status.FOUND,
+                "receipt": receipt,
+                "deterministic_reply": _render_booking_status_reply(receipt),
+            }
+
+        try:
+            from app.services.booking import get_booking_status
+
+            db_result = await get_booking_status(booking_id)
+            if db_result.get("ok"):
+                merged = {
+                    "booking_id": booking_id,
+                    "status": db_result.get("status") or cfg.booking_confirmed_status,
+                    "check_in": db_result.get("check_in") or "",
+                    "check_out": db_result.get("check_out") or "",
+                }
+                return {
+                    "status": Status.FOUND,
+                    "receipt": merged,
+                    "deterministic_reply": _render_booking_status_reply(merged),
+                }
+        except Exception as exc:
+            logger.debug("[booking_status] DB lookup failed for %s: %s", booking_id, exc)
+
+        not_found_template = str(
+            getattr(cfg, "booking_status_not_found_template", "") or ""
+        ).strip()
+        if not not_found_template:
+            not_found_template = "It looks like your booking wasn't found in our system."
+        return {
+            "status": Status.BOOKING_NOT_FOUND,
+            "deterministic_reply": not_found_template,
+        }
+
+    latest = _latest_session_receipt(soft_state)
+    if latest:
+        return {
+            "status": Status.FOUND,
+            "receipt": latest,
+            "deterministic_reply": _render_booking_status_reply(latest),
+        }
+
+    ask_template = str(
+        getattr(cfg, "booking_status_ask_for_id_template", "") or ""
+    ).strip()
+    if not ask_template:
+        ask_template = (
+            "I'd be happy to check your booking status. "
+            "Could you share your registration ID? "
+            "It looks like BK-YYYYMMDD-XXXXXXXX."
+        )
+    return {
+        "status": Status.GATHERING_INFO,
+        "deterministic_reply": ask_template,
+    }
+
 
 def _is_booking_faq(message: str) -> bool:
     normalized = _normalize(message)
