@@ -188,6 +188,7 @@ class _AgentConfig:
         )
         self.booking_source_tag: str = bk["booking_source_tag"]
         self.booking_confirmed_status: str = bk["booking_confirmed_status"]
+        self.faq_interruption = _Namespace(raw.get("faq_interruption", {}))
 
         st = raw["small_talk"]
         self.small_talk_valid_types: FrozenSet[str] = frozenset(st["valid_types"])

@@ -342,6 +342,51 @@ booking:
   booking_source_tag: "v2_adk"     # written to DB — change without Python edits
   booking_confirmed_status: "confirmed"
 
+# ── FAQ interruption / resume ───────────────────────────────────────────────
+faq_interruption:
+  state_key: faq_interruption
+  source: faq
+  reply_joiner: "\n\n"
+  prompts:
+    property_menu: >-
+      Would you like to continue with the property list you were viewing, or ask another policy question?
+    selected_property: >-
+      Would you like to go back to that property, continue booking it, or ask another policy question?
+    booking_flow: >-
+      Would you like to continue your booking, or ask another policy question?
+    fallback: >-
+      Would you like to continue where you left off, or ask another policy question?
+  resume_cues:
+    exact:
+      - "yes"
+      - "sure"
+      - "continue"
+      - "go back"
+      - "back to list"
+      - "resume"
+      - "return"
+      - "yes please"
+      - "continue booking"
+      - "continue please"
+    semantic_cues:
+      any:
+        - ["yes"]
+        - ["sure"]
+        - ["continue"]
+        - ["resume"]
+        - ["return"]
+        - ["go", "back"]
+        - ["back", "list"]
+        - ["yes", "please"]
+        - ["continue", "booking"]
+      none:
+        - ["policy"]
+        - ["refund"]
+        - ["deposit"]
+        - ["cancellation"]
+        - ["check", "in"]
+        - ["check", "out"]
+
 # ── Small talk message types ─────────────────────────────────────────────────
 # Valid values the triage_router may pass to handle_small_talk.
 small_talk:

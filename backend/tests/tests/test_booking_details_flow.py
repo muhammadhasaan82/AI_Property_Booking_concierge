@@ -543,3 +543,37 @@ async def test_valid_checkin_invalid_checkout_preserves_checkin(monkeypatch):
     assert soft_state["booking_stage"] == "collecting_details"
     assert booking_state["check_in"] == "2026-06-02"
     assert "check_out" not in booking_state
+
+
+@pytest.mark.asyncio
+async def test_faq_during_booking_can_resume_booking_stage(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+    soft_state = snapshot["state"]["soft_state"]
+    before_stage = soft_state["booking_stage"]
+    before_awaiting_field = soft_state["awaiting_field"]
+
+    with patch("app.agents.tools.rust_client.execute_tool", new=AsyncMock(return_value={"fallback": True})):
+        faq_reply, faq_route_pre_adk = await _run_turn(
+            monkeypatch,
+            snapshot,
+            "what is the refund policy if i cancel before 5 days of check-in?",
+        )
+
+        assert faq_route_pre_adk.await_count == 0
+        assert "40%" in faq_reply
+        assert "Would you like to continue your booking" in faq_reply
+        assert soft_state["faq_interruption"]["resume_target"] == "booking_flow"
+        assert soft_state["booking_stage"] == before_stage
+        assert soft_state["awaiting_field"] == before_awaiting_field
+
+        resume_reply, resume_route_pre_adk = await _run_turn(
+            monkeypatch,
+            snapshot,
+            "sure",
+        )
+
+    assert resume_route_pre_adk.await_count == 0
+    assert soft_state.get("faq_interruption") is None
+    assert soft_state["booking_stage"] == before_stage
+    assert soft_state["awaiting_field"] == before_awaiting_field
+    assert resume_reply

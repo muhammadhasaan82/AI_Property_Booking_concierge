@@ -626,10 +626,6 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         if context and context.get("in_booking_flow"):
             result["preserve_context"] = True
             result["return_to"] = context.get("return_to", "booking")
-            result["reply"] += (
-                "\n\nFeel free to ask more questions - I'll return you to your"
-                "booking as soon as you're ready."
-            )
         return result
 
     try:
@@ -678,10 +674,6 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         if context and context.get("in_booking_flow"):
             result["preserve_context"] = True
             result["return_to"] = context.get("return_to", "booking")
-            result["reply"] += (
-                "\n\nWould you like to continue your booking now, or ask another FAQ? "
-                "Feel free to ask more policy questions."
-            )
         
         return result
         

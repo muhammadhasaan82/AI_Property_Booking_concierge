@@ -19,6 +19,7 @@ from app.agents.tools.helpers import _coerce_float, _coerce_int
 from app.agents.tools.search import get_all_available_cities, return_to_previous_results
 from app.agents.tools.support import check_faq
 from app.config.agent_config_loader import cfg
+from app.services.faq_interruption import clear_faq_interruption, sync_alias_keys
 from app.services.observability.langfuse_observer import get_observer, summarize_booking_state
 from app.config.booking_schema_loader import (
     get_ask_order,
@@ -1003,7 +1004,10 @@ def start_booking_for_selected_property(soft_state: Dict[str, Any]) -> Optional[
     soft_state["booking_property_id"] = selected_id
     if selected_property:
         soft_state["booking_selected_property"] = dict(selected_property)
+        soft_state["selected_property"] = dict(selected_property)
     soft_state["booking_required_fields"] = list(cfg.booking_details_request_fields)
+    clear_faq_interruption(soft_state)
+    sync_alias_keys(soft_state)
 
     state = _ensure_property_seeded(soft_state)
     property_title = str(state.get("property_title") or _property_title_from_soft_state(soft_state))
@@ -1056,6 +1060,8 @@ def resume_booking_flow(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         stage = str(soft_state.get("booking_stage") or "").strip()
     if stage not in _ACTIVE_BOOKING_STAGES:
         return None
+    clear_faq_interruption(soft_state)
+    sync_alias_keys(soft_state)
     state = _ensure_property_seeded(soft_state)
     if stage == "awaiting_confirmation":
         summary = soft_state.get("booking_review") or soft_state.get("pending_booking")
@@ -1312,14 +1318,10 @@ async def handle_active_booking_turn(
 
     if _is_booking_faq(message):
         tool_context = SimpleNamespace(state={"soft_state": soft_state})
-        faq_payload = await check_faq(question=message, tool_context=tool_context)
-        answer = str(faq_payload.get("answer") or "").strip()
-        resume_prompt = str(getattr(cfg, "booking_faq_resume_prompt", "") or "").strip()
-        if answer and resume_prompt:
-            faq_payload["deterministic_reply"] = f"{answer}\n\n{resume_prompt}"
-        elif answer:
-            faq_payload["deterministic_reply"] = answer
-        return faq_payload
+        return await check_faq(question=message, tool_context=tool_context)
+
+    clear_faq_interruption(soft_state)
+    sync_alias_keys(soft_state)
 
     if stage in {"awaiting_confirmation", "awaiting_modification_choice"}:
         normalized = _normalize(message)

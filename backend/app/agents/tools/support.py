@@ -4,15 +4,80 @@ Tools: handle_small_talk, check_faq, check_booking_status, escalate_to_human
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from ..status_codes import SMALL_TALK_TYPES, Source, Status
 from .helpers import _finalize_payload, _is_blank, _missing_critical_data, _get_soft_state
 from app.config.agent_config_loader import cfg
+from app.services.faq_interruption import (
+    build_answer_with_resume_prompt,
+    capture_faq_interruption,
+)
 from google.adk.tools import ToolContext
 
 
 logger = logging.getLogger(__name__)
+
+
+def _faq_payload(
+    *,
+    answer: str,
+    source: str,
+    soft_state: Optional[Dict[str, Any]],
+    action_intent: Optional[str],
+    context_flag: Optional[str],
+    faq_intent: Optional[str] = None,
+    retrieval_source: Optional[str] = None,
+) -> Dict[str, Any]:
+    if isinstance(soft_state, dict):
+        capture_faq_interruption(soft_state, last_faq_intent=faq_intent)
+    deterministic_reply = build_answer_with_resume_prompt(answer, soft_state)
+    payload: Dict[str, Any] = {
+        "status": Status.ANSWERED,
+        "answer": answer,
+        "source": source,
+    }
+    if deterministic_reply:
+        payload["deterministic_reply"] = deterministic_reply
+    if faq_intent:
+        payload["faq_intent"] = faq_intent
+    if retrieval_source:
+        payload["retrieval_source"] = retrieval_source
+    return _finalize_payload(payload, action_intent, context_flag)
+
+
+def _faq_metadata_from_result(result: Any) -> tuple[Optional[str], Optional[str]]:
+    if not isinstance(result, dict):
+        return (None, None)
+    tool_result = result.get("tool_result")
+    if not isinstance(tool_result, dict):
+        return (None, None)
+    match = tool_result.get("match")
+    faq_intent = None
+    if isinstance(match, dict):
+        faq_intent = match.get("id")
+    retrieval_source = tool_result.get("source") or tool_result.get("confidence")
+    return (
+        str(faq_intent).strip() if faq_intent not in (None, "") else None,
+        str(retrieval_source).strip() if retrieval_source not in (None, "") else None,
+    )
+
+
+def _faq_metadata_from_rust_result(result: Any) -> tuple[Optional[str], Optional[str]]:
+    if not isinstance(result, dict):
+        return (None, None)
+    faq_intent = (
+        result.get("faq_intent")
+        or result.get("policy_id")
+        or result.get("intent")
+        or (result.get("match") or {}).get("id")
+        or (result.get("result") or {}).get("faq_intent")
+    )
+    retrieval_source = result.get("source") or (result.get("result") or {}).get("source")
+    return (
+        str(faq_intent).strip() if faq_intent not in (None, "") else None,
+        str(retrieval_source).strip() if retrieval_source not in (None, "") else None,
+    )
 
 def handle_small_talk(
     message_type: str = "",
@@ -94,6 +159,25 @@ async def check_faq(
             faq_context_flag,
         )
 
+    try:
+        from ...components.faq_enhanced import enhanced_faq_agent
+
+        canonical_result = enhanced_faq_agent(question, {"in_booking_flow": False})
+        canonical_answer = str(canonical_result.get("reply") or "").strip()
+        faq_intent, retrieval_source = _faq_metadata_from_result(canonical_result)
+        if canonical_answer and retrieval_source == "canonical_faq":
+            return _faq_payload(
+                answer=canonical_answer,
+                source=Source.RAG,
+                soft_state=soft_state,
+                action_intent=action_intent,
+                context_flag=faq_context_flag,
+                faq_intent=faq_intent,
+                retrieval_source=retrieval_source,
+            )
+    except Exception as e:
+        logger.warning("Canonical FAQ lookup failed: %s", e)
+
     from ..tools.rust_client import execute_tool
 
     try:
@@ -101,10 +185,15 @@ async def check_faq(
         if result is not None and not result.get("fallback"):
             answer = result.get("answer") or (result.get("result") or {}).get("answer")
             if answer:
-                return _finalize_payload(
-                    {"status": Status.ANSWERED, "answer": answer, "source": Source.POLICY_DB},
-                    action_intent,
-                    faq_context_flag,
+                faq_intent, retrieval_source = _faq_metadata_from_rust_result(result)
+                return _faq_payload(
+                    answer=str(answer).strip(),
+                    source=Source.POLICY_DB,
+                    soft_state=soft_state,
+                    action_intent=action_intent,
+                    context_flag=faq_context_flag,
+                    faq_intent=faq_intent,
+                    retrieval_source=retrieval_source,
                 )
     except Exception as e:
         logger.warning("Rust FAQ lookup failed: %s, using Python fallback", e)
@@ -118,12 +207,17 @@ async def check_faq(
                 "return_to": "booking",
             },
         )
-        reply = faq_result.get("reply", "")
+        reply = str(faq_result.get("reply", "") or "").strip()
         if reply:
-            return _finalize_payload(
-                {"status": Status.ANSWERED, "answer": reply, "source": Source.RAG},
-                action_intent,
-                faq_context_flag,
+            faq_intent, retrieval_source = _faq_metadata_from_result(faq_result)
+            return _faq_payload(
+                answer=reply,
+                source=Source.RAG,
+                soft_state=soft_state,
+                action_intent=action_intent,
+                context_flag=faq_context_flag,
+                faq_intent=faq_intent,
+                retrieval_source=retrieval_source,
             )
     except Exception as e:
         logger.warning("FAQ enhanced agent failed: %s", e)
@@ -132,10 +226,12 @@ async def check_faq(
         from ...services.faq import faq_lookup
         ans = faq_lookup(question)
         if ans:
-            return _finalize_payload(
-                {"status": Status.ANSWERED, "answer": ans, "source": Source.BASIC_FAQ},
-                action_intent,
-                faq_context_flag,
+            return _faq_payload(
+                answer=str(ans).strip(),
+                source=Source.BASIC_FAQ,
+                soft_state=soft_state,
+                action_intent=action_intent,
+                context_flag=faq_context_flag,
             )
     except Exception as e:
         logger.warning("Basic FAQ fallback failed: %s", e)
