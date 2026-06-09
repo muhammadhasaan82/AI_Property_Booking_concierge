@@ -932,6 +932,8 @@ async def _maybe_handle_faq_resume_turn(
             payload["deterministic_reply"] = _render_property_details_from_router_output(payload)
         elif resume_target == "booking_flow":
             payload = _resume_booking_flow(soft_state) or {}
+            if payload:
+                clear_faq_interruption(soft_state)
         else:
             return None
 

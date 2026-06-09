@@ -119,27 +119,34 @@ async def _run_turn(
 
     async def fake_save_session_snapshot(*, session_id, history, state, metadata):
         """
-        Persist the provided session pieces into the shared test snapshot and optionally record a saved copy of the state.
-        
-        This function updates the outer `snapshot` mapping in-place by setting `snapshot["state"]` to the provided `state`, `snapshot["history"]` to `history`, and merging `metadata` into `snapshot["meta"]`. When the module-level flag `deepcopy_session_io` is true, the inputs are deep-copied before being stored. If a `saved_states` list is available and the saved state is a dict, a deep copy of the saved state is appended to that list.
-        
-        Parameters:
-            session_id: The session identifier (not used by this test helper).
-            history: The session history to save into `snapshot["history"]`.
-            state: The session state to save into `snapshot["state"]`.
-            metadata: Optional metadata to merge into `snapshot["meta"]`.
-        
-        Side effects:
-            Mutates the external `snapshot` dictionary and, if present, appends to the external `saved_states` list.
+        Persist session pieces while preserving the original nested soft_state dict identity.
+
+        Some tests keep a reference to snapshot["state"]["soft_state"] before the
+        turn runs. Replacing snapshot["state"] with a new dict leaves that reference
+        stale, so update the existing soft_state mapping in-place.
         """
-        state_to_save = copy.deepcopy(state) if deepcopy_session_io else state
-        history_to_save = copy.deepcopy(history) if deepcopy_session_io else history
-        metadata_to_save = copy.deepcopy(metadata or {}) if deepcopy_session_io else (metadata or {})
-        snapshot["state"] = state_to_save
-        snapshot["history"] = history_to_save
-        snapshot["meta"].update(metadata_to_save)
-        if saved_states is not None and isinstance(state_to_save, dict):
-            saved_states.append(copy.deepcopy(state_to_save))
+        existing_state = snapshot.setdefault("state", {})
+        existing_soft_state = existing_state.get("soft_state")
+        new_soft_state = state.get("soft_state") if isinstance(state, dict) else {}
+
+        if isinstance(existing_soft_state, dict) and isinstance(new_soft_state, dict):
+            replacement_soft_state = copy.deepcopy(new_soft_state)
+            existing_soft_state.clear()
+            existing_soft_state.update(replacement_soft_state)
+            existing_state["soft_state"] = existing_soft_state
+        else:
+            existing_state["soft_state"] = copy.deepcopy(new_soft_state) if deepcopy_session_io else new_soft_state
+
+        if isinstance(state, dict):
+            for key, value in state.items():
+                if key != "soft_state":
+                    existing_state[key] = copy.deepcopy(value) if deepcopy_session_io else value
+
+        snapshot["history"] = copy.deepcopy(history) if deepcopy_session_io else history
+        snapshot.setdefault("meta", {}).update(copy.deepcopy(metadata or {}) if deepcopy_session_io else (metadata or {}))
+
+        if saved_states is not None:
+            saved_states.append(copy.deepcopy(existing_state))
 
     route_pre_adk = AsyncMock(return_value={"reply": "generic fallback"})
     monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
