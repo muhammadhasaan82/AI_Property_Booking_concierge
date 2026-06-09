@@ -57,20 +57,15 @@ def _norm(text: str) -> str:
 
 
 def _canonical_city(value: Optional[str]) -> Optional[str]:
-    """
-    Normalize a city string for display by collapsing internal whitespace and applying title case.
-    
-    Parameters:
-        value (Optional[str]): Input city value; may be None or empty.
-    
-    Returns:
-        Optional[str]: Title-cased city string with collapsed whitespace, or `None` if `value` is falsy.
-    """
-    if not value:
+    """Normalize a city string for display; blank values return None."""
+    if value is None:
         return None
-    normalized = " ".join(str(value).strip().split())
-    return normalized.title()
 
+    normalized = " ".join(str(value).strip().split())
+    if not normalized:
+        return None
+
+    return normalized.title()
 
 def _existing_city(message: str) -> Optional[str]:
     """

@@ -558,7 +558,8 @@ class TestSDK471Compatibility:
 
     def test_app_code_has_no_fire_and_forget_trace_update_pattern(self):
         """App code must not use observer.trace(...).update(...) chains."""
-        app_root = Path(__file__).resolve().parents[2] / "backend" / "app"
+        app_root = Path(__file__).resolve().parents[2] / "app"
+        assert app_root.exists(), f"Expected app root to exist: {app_root}"
         offenders = []
 
         for path in app_root.rglob("*.py"):
