@@ -174,11 +174,21 @@ class _AgentConfig:
         self.booking_receipt_prompt_template: str = str(
             bk.get("receipt_prompt_template", "")
         )
+        self.booking_status_prompt_template: str = str(
+            bk.get("booking_status_prompt_template", "")
+        )
+        self.booking_status_not_found_template: str = str(
+            bk.get("booking_status_not_found_template", "")
+        )
+        self.booking_status_ask_for_id_template: str = str(
+            bk.get("booking_status_ask_for_id_template", "")
+        )
         self.booking_registration_id_prefix: str = str(
             bk.get("registration_id_prefix", "BK")
         )
         self.booking_source_tag: str = bk["booking_source_tag"]
         self.booking_confirmed_status: str = bk["booking_confirmed_status"]
+        self.faq_interruption = _Namespace(raw.get("faq_interruption", {}))
 
         st = raw["small_talk"]
         self.small_talk_valid_types: FrozenSet[str] = frozenset(st["valid_types"])

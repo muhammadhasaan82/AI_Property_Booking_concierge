@@ -19,6 +19,12 @@ from app.agents.tools.helpers import _coerce_float, _coerce_int
 from app.agents.tools.search import get_all_available_cities, return_to_previous_results
 from app.agents.tools.support import check_faq
 from app.config.agent_config_loader import cfg
+from app.services.faq_interruption import (
+    build_answer_with_resume_prompt,
+    capture_faq_interruption,
+    clear_faq_interruption,
+    sync_alias_keys,
+)
 from app.services.observability.langfuse_observer import get_observer, summarize_booking_state
 from app.config.booking_schema_loader import (
     get_ask_order,
@@ -29,6 +35,7 @@ from app.config.booking_schema_loader import (
     get_required_numeric_fields,
     next_field_to_ask,
     validate_field,
+    _reference_today,
 )
 
 logger = logging.getLogger(__name__)
@@ -220,6 +227,279 @@ def _receipt_reply(receipt: Dict[str, Any]) -> str:
         booking_status=receipt.get("status") or cfg.booking_confirmed_status,
     )
 
+BOOKING_ID_PATTERN = re.compile(r"BK-\d{8}-[A-Z0-9]+", re.I)
+
+_BOOKING_STATUS_INTENT_PATTERNS = [
+    re.compile(p, re.I)
+    for p in [
+        r"\bmy\s+booking\s+id\s+is\b",
+        r"\bbooking\s+id\b",
+        r"\bcheck\s+my\s+booking\s+status\b",
+        r"\bcheck\s+booking\s+status\b",
+        r"\bmy\s+booking\s+status\b",
+        r"\bregistration\s+id\b",
+        r"\bmy\s+registration\s+id\s+is\b",
+        r"\bi\s+want\s+to\s+check\s+my\s+booking\s+status\b",
+        r"\bstatus\s+of\s+my\s+booking\b",
+        r"\bbooking\s+status\b",
+    ]
+]
+
+
+def _detect_booking_status_intent(message: str) -> bool:
+    """
+    Deterministically detect whether the user message expresses a booking-status intent.
+
+    Matches the normalized message against a configured set of regex patterns
+    (e.g. "my booking ID is", "check my booking status", "registration ID").
+    Also returns True when a booking ID token (BK-YYYYMMDD-XXXXXXXX) is present
+    in the message even without an explicit intent phrase.
+
+    Parameters:
+        message (str): The raw user message.
+
+    Returns:
+        bool: True if the message is recognised as a booking-status request.
+    """
+    if not message:
+        return False
+    normalized = _normalize(message)
+    if not normalized:
+        return False
+    for pattern in _BOOKING_STATUS_INTENT_PATTERNS:
+        if pattern.search(normalized):
+            return True
+    if BOOKING_ID_PATTERN.search(message):
+        return True
+    return False
+
+
+def _extract_booking_id(message: str) -> Optional[str]:
+    """
+    Extract the first booking/registration ID token (BK-YYYYMMDD-XXXXXXXX) from a message.
+
+    Parameters:
+        message (str): The raw user message to scan.
+
+    Returns:
+        Optional[str]: The matched booking ID string, or None if no match is found.
+    """
+    if not message:
+        return None
+    match = BOOKING_ID_PATTERN.search(message)
+    return match.group(0).upper() if match else None
+
+
+def _render_booking_status_reply(receipt: Dict[str, Any]) -> str:
+    """
+    Render a deterministic booking status reply from a receipt dictionary.
+
+    Uses the configured `booking_status_prompt_template` from agent_config.yaml.
+    Falls back to the receipt template if the status template is not configured.
+
+    Parameters:
+        receipt (Dict[str, Any]): Booking receipt dict with keys: booking_id,
+            property_title, guest_name, guest_email, guest_phone, check_in,
+            check_out, guests, nights, price_per_night, total_amount, status.
+
+    Returns:
+        str: The rendered status reply string.
+    """
+    template = str(
+        getattr(cfg, "booking_status_prompt_template", "") or ""
+    ).strip()
+    if not template:
+        return _receipt_reply(receipt)
+    return template.format(
+        registration_id=receipt.get("booking_id") or "",
+        property_title=receipt.get("property_title") or "",
+        guest_name=receipt.get("guest_name") or "",
+        guest_email=receipt.get("guest_email") or "",
+        guest_phone=receipt.get("guest_phone") or "",
+        check_in=_format_display_date(str(receipt.get("check_in") or "")),
+        check_out=_format_display_date(str(receipt.get("check_out") or "")),
+        guests=receipt.get("guests") or "",
+        nights=receipt.get("nights") or "",
+        price_per_night=_format_money(receipt.get("price_per_night")),
+        total_amount=_format_money(receipt.get("total_amount")),
+        booking_status=receipt.get("status") or cfg.booking_confirmed_status,
+    )
+
+
+def _lookup_booking_in_session(
+    booking_id: str,
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Search for a booking receipt matching `booking_id` in the current session soft_state.
+
+    Lookup order (returns the first match):
+      A. soft_state.booking_receipt (single receipt dict)
+      B. soft_state.booking_receipts (list/history of receipts)
+      C. soft_state top-level booking_review / pending_booking (compatibility snapshot)
+
+    Parameters:
+        booking_id (str): The booking ID to search for (case-insensitive match).
+        soft_state (Dict[str, Any]): Current session soft_state dictionary.
+
+    Returns:
+        Optional[Dict[str, Any]]: The matching receipt dict, or None if not found.
+    """
+    if not booking_id or not isinstance(soft_state, dict):
+        return None
+
+    target = booking_id.strip().upper()
+
+    receipt = soft_state.get("booking_receipt")
+    if isinstance(receipt, dict):
+        rid = str(receipt.get("booking_id") or "").strip().upper()
+        if rid == target:
+            return dict(receipt)
+
+    receipts_list = soft_state.get("booking_receipts")
+    if isinstance(receipts_list, list):
+        for entry in receipts_list:
+            if not isinstance(entry, dict):
+                continue
+            rid = str(entry.get("booking_id") or "").strip().upper()
+            if rid == target:
+                return dict(entry)
+
+    for key in ("booking_review", "pending_booking"):
+        candidate = soft_state.get(key)
+        if not isinstance(candidate, dict):
+            continue
+        rid = str(candidate.get("booking_id") or candidate.get("registration_id") or "").strip().upper()
+        if rid == target:
+            receipt = dict(candidate)
+            receipt.setdefault("booking_id", rid)
+            receipt.setdefault("status", soft_state.get("booking_status") or cfg.booking_confirmed_status)
+            receipt.setdefault("property_title", candidate.get("property_title") or candidate.get("property"))
+            receipt.setdefault("total_amount", candidate.get("total"))
+            return receipt
+
+    return None
+
+
+def _latest_session_receipt(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Return the most recent booking receipt available in the session soft_state.
+
+    Checks soft_state.booking_receipt first, then the last entry of
+    soft_state.booking_receipts if present as a non-empty list.
+
+    Parameters:
+        soft_state (Dict[str, Any]): Current session soft_state.
+
+    Returns:
+        Optional[Dict[str, Any]]: The latest receipt dict, or None if none found.
+    """
+    if not isinstance(soft_state, dict):
+        return None
+
+    receipt = soft_state.get("booking_receipt")
+    if isinstance(receipt, dict):
+        return dict(receipt)
+
+    receipts_list = soft_state.get("booking_receipts")
+    if isinstance(receipts_list, list) and receipts_list:
+        last = receipts_list[-1]
+        if isinstance(last, dict):
+            return dict(last)
+
+    return None
+
+
+async def handle_booking_status_check(
+    message: str,
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Deterministic booking-status handler — checks session soft_state before falling back to DB/ADK.
+
+    Behaviour:
+      1. Detects booking-status intent in the message.
+      2. Extracts a booking ID (BK-YYYYMMDD-XXXXXXXX) if present.
+      3. If ID is present and found in session → returns deterministic status.
+      4. If ID is present but NOT found in session → attempts DB lookup;
+         if DB also fails → returns not-found message.
+      5. If no ID but session has a booking_receipt → returns latest booking status.
+      6. If no ID and no receipt → asks user for booking ID.
+      7. If booking-status intent is NOT detected → returns None (let pipeline continue).
+
+    Parameters:
+        message (str): The user's raw message.
+        soft_state (Dict[str, Any]): Current session soft_state (mutable dict from Redis snapshot).
+
+    Returns:
+        Optional[Dict[str, Any]]: A payload with `deterministic_reply` when handled,
+        or None when booking-status intent is not detected (pass-through).
+    """
+    if not _detect_booking_status_intent(message):
+        return None
+
+    booking_id = _extract_booking_id(message)
+
+    if booking_id:
+        receipt = _lookup_booking_in_session(booking_id, soft_state)
+        if receipt:
+            return {
+                "status": Status.FOUND,
+                "receipt": receipt,
+                "deterministic_reply": _render_booking_status_reply(receipt),
+            }
+
+        try:
+            from app.services.booking import get_booking_status
+
+            db_result = await get_booking_status(booking_id)
+            if db_result.get("ok"):
+                merged = {
+                    "booking_id": booking_id,
+                    "status": db_result.get("status") or cfg.booking_confirmed_status,
+                    "check_in": db_result.get("check_in") or "",
+                    "check_out": db_result.get("check_out") or "",
+                }
+                return {
+                    "status": Status.FOUND,
+                    "receipt": merged,
+                    "deterministic_reply": _render_booking_status_reply(merged),
+                }
+        except Exception as exc:
+            logger.debug("[booking_status] DB lookup failed for %s: %s", booking_id, exc)
+
+        not_found_template = str(
+            getattr(cfg, "booking_status_not_found_template", "") or ""
+        ).strip()
+        if not not_found_template:
+            not_found_template = "It looks like your booking wasn't found in our system."
+        return {
+            "status": Status.BOOKING_NOT_FOUND,
+            "deterministic_reply": not_found_template,
+        }
+
+    latest = _latest_session_receipt(soft_state)
+    if latest:
+        return {
+            "status": Status.FOUND,
+            "receipt": latest,
+            "deterministic_reply": _render_booking_status_reply(latest),
+        }
+
+    ask_template = str(
+        getattr(cfg, "booking_status_ask_for_id_template", "") or ""
+    ).strip()
+    if not ask_template:
+        ask_template = (
+            "I'd be happy to check your booking status. "
+            "Could you share your registration ID? "
+            "It looks like BK-YYYYMMDD-XXXXXXXX."
+        )
+    return {
+        "status": Status.GATHERING_INFO,
+        "deterministic_reply": ask_template,
+    }
+
 
 def _is_booking_faq(message: str) -> bool:
     normalized = _normalize(message)
@@ -232,6 +512,33 @@ def _is_booking_faq(message: str) -> bool:
     return False
 
 
+def _enrich_booking_faq_payload(
+    payload: Optional[Dict[str, Any]],
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return payload
+
+    status = str(payload.get("status") or "").strip().lower()
+    if status != str(Status.ANSWERED).lower():
+        return payload
+
+    answer = str(payload.get("answer") or "").strip()
+    if not answer:
+        return payload
+
+    deterministic_reply = str(payload.get("deterministic_reply") or "").strip()
+    if deterministic_reply:
+        return payload
+
+    faq_intent = str(payload.get("faq_intent") or "").strip() or None
+    capture_faq_interruption(soft_state, last_faq_intent=faq_intent)
+
+    enriched = dict(payload)
+    enriched["deterministic_reply"] = build_answer_with_resume_prompt(answer, soft_state)
+    return enriched
+
+
 def _seed_property_fields(soft_state: Dict[str, Any], state: Dict[str, Any]) -> None:
     property_id = soft_state.get("booking_property_id") or soft_state.get("last_selected_property_id")
     selected = soft_state.get("booking_selected_property")
@@ -242,6 +549,44 @@ def _seed_property_fields(soft_state: Dict[str, Any], state: Dict[str, Any]) -> 
             state["property_title"] = str(selected.get("title"))
         if selected.get("price_per_night") is not None:
             state["price_per_night"] = _coerce_float(selected.get("price_per_night"))
+
+
+def _infer_year_for_month_day(month: int, day: int) -> Optional[int]:
+    """
+    Infer a calendar year for a month/day pair using the schema reference date.
+
+  When the month/day in the reference year is still today or later, that year is
+  used; otherwise the next year is chosen so future bookings stay valid.
+    """
+    reference = _reference_today()
+    try:
+        this_year_date = date(reference.year, month, day)
+    except ValueError:
+        return None
+    if this_year_date >= reference:
+        return reference.year
+    try:
+        date(reference.year + 1, month, day)
+        return reference.year + 1
+    except ValueError:
+        return reference.year
+
+
+def _format_month_day(month: int, day: int, year: int) -> Optional[str]:
+    try:
+        return date(year, month, day).strftime(cfg.date_format)
+    except ValueError:
+        return None
+
+
+def _parse_yearless_month_day(day: int, month_raw: str) -> Optional[str]:
+    month = _MONTHS.get(str(month_raw).lower())
+    if month is None:
+        return None
+    year = _infer_year_for_month_day(month, day)
+    if year is None:
+        return None
+    return _format_month_day(month, day, year)
 
 
 def _parse_natural_date(text: str) -> Optional[str]:
@@ -284,6 +629,24 @@ def _parse_natural_date(text: str) -> Optional[str]:
             return parsed.strftime(cfg.date_format)
         except ValueError:
             return None
+
+    yearless_patterns = (
+        re.compile(
+            r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>[a-z]+)(?!\s*,?\s*\d{4})\b",
+            re.I,
+        ),
+        re.compile(
+            r"\b(?P<month>[a-z]+)\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?(?!\s*,?\s*\d{4})\b",
+            re.I,
+        ),
+    )
+    for pattern in yearless_patterns:
+        match = pattern.search(cleaned)
+        if not match:
+            continue
+        parsed = _parse_yearless_month_day(int(match.group("day")), match.group("month"))
+        if parsed:
+            return parsed
     return None
 
 
@@ -331,6 +694,34 @@ def _find_all_dates(text: str) -> List[Tuple[str, int, int]]:
             except ValueError:
                 pass
 
+    pat3 = re.compile(
+        r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>[a-z]+)(?!\s*,?\s*\d{4})\b",
+        re.I,
+    )
+    for m in pat3.finditer(text):
+        month_raw = m.group("month").lower()
+        month = _MONTHS.get(month_raw)
+        if month is not None:
+            year = _infer_year_for_month_day(month, int(m.group("day")))
+            if year is not None:
+                formatted = _format_month_day(month, int(m.group("day")), year)
+                if formatted:
+                    results.append((formatted, m.start(), m.end()))
+
+    pat4 = re.compile(
+        r"\b(?P<month>[a-z]+)\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?(?!\s*,?\s*\d{4})\b",
+        re.I,
+    )
+    for m in pat4.finditer(text):
+        month_raw = m.group("month").lower()
+        month = _MONTHS.get(month_raw)
+        if month is not None:
+            year = _infer_year_for_month_day(month, int(m.group("day")))
+            if year is not None:
+                formatted = _format_month_day(month, int(m.group("day")), year)
+                if formatted:
+                    results.append((formatted, m.start(), m.end()))
+
     results.sort(key=lambda x: (x[1], -(x[2] - x[1])))
     filtered = []
     last_end = -1
@@ -356,10 +747,28 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
     dates_found = _find_all_dates(text)
     if not dates_found:
         return None, None
-        
+
     check_in_matches = list(re.finditer(_CHECK_IN_DATE_PATTERN, text, re.I))
     check_out_matches = list(re.finditer(_CHECK_OUT_DATE_PATTERN, text, re.I))
-    
+
+    if len(dates_found) >= 2 and check_in_matches and check_out_matches:
+        first_date_start = dates_found[0][1]
+        last_label_end = max(m.end() for m in check_in_matches + check_out_matches)
+        if last_label_end <= first_date_start:
+            return dates_found[0][0], dates_found[1][0]
+
+    if len(dates_found) >= 2 and check_out_matches and not check_in_matches:
+        last_check_out = max(check_out_matches, key=lambda match: match.start())
+        check_out_date = None
+        for d_val, d_start, _d_end in dates_found:
+            if d_start >= last_check_out.end():
+                check_out_date = d_val
+                break
+        if check_out_date:
+            for d_val, _, _ in dates_found:
+                if d_val != check_out_date:
+                    return d_val, check_out_date
+
     check_in_date = None
     check_out_date = None
     
@@ -379,7 +788,7 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
             if m.end() <= d_start:
                 dist = d_start - m.end()
             else:
-                dist = (m.start() - d_end) * 5
+                dist = (m.start() - d_end) * 10
             if dist < min_dist:
                 min_dist = dist
                 best_type = "check_out"
@@ -404,7 +813,7 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
             if m.end() <= d_start:
                 dist = d_start - m.end()
             else:
-                dist = (m.start() - d_end) * 5
+                dist = (m.start() - d_end) * 10
             if dist < min_dist:
                 min_dist = dist
                 best_type = "check_out"
@@ -605,13 +1014,29 @@ def _extract_updates_from_message(
             errors["check_out"] = _friendly_prompt_for_field("check_out")
 
     if has_check_in_phrase and has_check_out_phrase:
+        if assoc_check_in and assoc_check_out:
+            updates["check_in"] = assoc_check_in
+            updates["check_out"] = assoc_check_out
+            errors.pop("check_in", None)
+            errors.pop("check_out", None)
+        elif assoc_check_in and "check_in" not in updates:
+            updates["check_in"] = assoc_check_in
+            errors.pop("check_in", None)
+        elif assoc_check_out and "check_out" not in updates:
+            updates["check_out"] = assoc_check_out
+            errors.pop("check_out", None)
         if "check_in" not in updates or "check_out" not in updates:
             all_dates = _find_all_dates(normalized)
             if len(all_dates) >= 2:
-                updates["check_in"] = all_dates[0][0]
-                updates["check_out"] = all_dates[1][0]
-                errors.pop("check_in", None)
-                errors.pop("check_out", None)
+                if "check_in" not in updates:
+                    updates["check_in"] = all_dates[0][0]
+                    errors.pop("check_in", None)
+                if "check_out" not in updates:
+                    for d_val, _, _ in all_dates:
+                        if d_val != updates.get("check_in"):
+                            updates["check_out"] = d_val
+                            errors.pop("check_out", None)
+                            break
 
     if awaiting_field and awaiting_field not in updates:
         mentioned_fields.append(awaiting_field)
@@ -730,7 +1155,10 @@ def start_booking_for_selected_property(soft_state: Dict[str, Any]) -> Optional[
     soft_state["booking_property_id"] = selected_id
     if selected_property:
         soft_state["booking_selected_property"] = dict(selected_property)
+        soft_state["selected_property"] = dict(selected_property)
     soft_state["booking_required_fields"] = list(cfg.booking_details_request_fields)
+    clear_faq_interruption(soft_state)
+    sync_alias_keys(soft_state)
 
     state = _ensure_property_seeded(soft_state)
     property_title = str(state.get("property_title") or _property_title_from_soft_state(soft_state))
@@ -783,6 +1211,8 @@ def resume_booking_flow(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         stage = str(soft_state.get("booking_stage") or "").strip()
     if stage not in _ACTIVE_BOOKING_STAGES:
         return None
+    clear_faq_interruption(soft_state)
+    sync_alias_keys(soft_state)
     state = _ensure_property_seeded(soft_state)
     if stage == "awaiting_confirmation":
         summary = soft_state.get("booking_review") or soft_state.get("pending_booking")
@@ -1039,14 +1469,11 @@ async def handle_active_booking_turn(
 
     if _is_booking_faq(message):
         tool_context = SimpleNamespace(state={"soft_state": soft_state})
-        faq_payload = await check_faq(question=message, tool_context=tool_context)
-        answer = str(faq_payload.get("answer") or "").strip()
-        resume_prompt = str(getattr(cfg, "booking_faq_resume_prompt", "") or "").strip()
-        if answer and resume_prompt:
-            faq_payload["deterministic_reply"] = f"{answer}\n\n{resume_prompt}"
-        elif answer:
-            faq_payload["deterministic_reply"] = answer
-        return faq_payload
+        payload = await check_faq(question=message, tool_context=tool_context)
+        return _enrich_booking_faq_payload(payload, soft_state)
+
+    clear_faq_interruption(soft_state)
+    sync_alias_keys(soft_state)
 
     if stage in {"awaiting_confirmation", "awaiting_modification_choice"}:
         normalized = _normalize(message)

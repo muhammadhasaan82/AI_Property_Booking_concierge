@@ -11,6 +11,7 @@ from app.config.conversation_shortcuts_loader import (
     _normalize,
     match_shortcut,
 )
+from app.services.faq_interruption import detect_resume_cue
 from app.services.property_type_normalizer import normalize_property_type
 
 _REJECTION_STATE = {
@@ -111,6 +112,12 @@ def test_no_hardcoded_phrase_list_remains_in_adk_runner():
     assert "_extract_pagination_direction" not in src
     assert "_extract_option_selection" not in src
     assert "show me more" not in src
+
+
+def test_faq_resume_cues_are_config_driven():
+    assert detect_resume_cue("yes please") is True
+    assert detect_resume_cue("go back") is True
+    assert detect_resume_cue("refund policy") is False
 
 
 

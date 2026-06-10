@@ -52,9 +52,19 @@ from app.config.response_policies_loader import render_policy_snippet
 from app.config.conversation_shortcuts_loader import match_shortcut
 from app.config.agent_config_loader import cfg as _cfg
 from app.config.service_coverage_loader import evaluate_message_coverage
+from app.services.faq_interruption import (
+    clear_faq_interruption,
+    detect_policy_question,
+    detect_resume_cue,
+    get_faq_interruption,
+    is_active as faq_interruption_active,
+    resolve_resume_target,
+    sync_alias_keys,
+)
 from app.services.booking_flow import (
     confirm_booking_review as _confirm_booking_review,
     handle_active_booking_turn as _handle_active_booking_turn,
+    handle_booking_status_check as _handle_booking_status_check,
     handle_review_modification_request as _handle_review_modification_request,
     list_available_cities_payload as _list_available_cities_payload,
     resume_booking_flow as _resume_booking_flow,
@@ -190,6 +200,7 @@ def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, A
         return {
             "active_flow": "search",
             "visible_results": props,
+            "last_visible_results": props,
             "all_search_results": all_results,
             "option_map": option_map,
             "active_property_options_map": option_map,
@@ -197,15 +208,21 @@ def _soft_state_from_router_output(router_output: Dict[str, Any]) -> Dict[str, A
             "active_property_options_total_found": router_output.get("total_found") or len(all_results),
             "last_search": router_output,
             "last_filters": router_output.get("query_context") or router_output.get("filters") or {},
+            "last_search_filters": router_output.get("query_context") or router_output.get("filters") or {},
+            "selected_property": None,
             "last_presented_view": "property_list",
         }
 
     if status == "property_details":
         prop = router_output.get("property") or {}
         prop_id = router_output.get("property_id") or prop.get("id")
-        updates: Dict[str, Any] = {"last_presented_view": "property_details"}
+        updates: Dict[str, Any] = {
+            "last_presented_view": "property_details",
+            "selected_property": prop if isinstance(prop, dict) else {},
+        }
         if prop_id:
             updates["last_selected_property_id"] = prop_id
+            updates["selected_property_id"] = prop_id
         return updates
 
     return {}
@@ -842,6 +859,107 @@ def _render_property_details_from_router_output(router_output: Dict[str, Any]) -
     return "\n".join(lines)
 
 
+def _deterministic_reply_from_router_output(router_output: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(router_output, dict):
+        return ""
+
+    status = str(router_output.get("status") or "").lower()
+    if status == str(getattr(_cfg.status, "answered", "answered")).lower():
+        return str(router_output.get("deterministic_reply") or router_output.get("answer") or "").strip()
+    if status == str(getattr(_cfg.status, "properties_found", "properties_found")).lower():
+        return _render_property_results_from_router_output(router_output)
+    if status == str(getattr(_cfg.status, "property_details", "property_details")).lower():
+        return _render_property_details_from_router_output(router_output)
+    return ""
+
+
+async def _maybe_handle_faq_resume_turn(
+    *,
+    session_id: str,
+    message: str,
+) -> Optional[Dict[str, Any]]:
+    snapshot = await get_session_snapshot(session_id)
+    if not isinstance(snapshot, dict):
+        return None
+
+    state = snapshot.get("state") or {}
+    if not isinstance(state, dict):
+        return None
+
+    soft_state = state.get("soft_state")
+    if not isinstance(soft_state, dict) or not faq_interruption_active(soft_state):
+        return None
+
+    if detect_policy_question(message):
+        from app.agents.tools.support import check_faq
+
+        tool_context = SimpleNamespace(state={"soft_state": soft_state})
+        payload = await check_faq(question=message, tool_context=tool_context)
+    elif detect_resume_cue(message):
+        interruption = get_faq_interruption(soft_state)
+        resume_target = interruption.get("resume_target") or resolve_resume_target(soft_state)
+        resume_payload = interruption.get("resume_payload") if isinstance(interruption, dict) else {}
+
+        if resume_target == "property_menu":
+            payload = resume_payload if isinstance(resume_payload, dict) else {}
+            if not payload:
+                payload = {"status": str(getattr(_cfg.status, "properties_found", "properties_found"))}
+            if not payload.get("properties"):
+                sync_alias_keys(soft_state)
+                payload = {
+                    "status": str(getattr(_cfg.status, "properties_found", "properties_found")),
+                    "properties": soft_state.get("last_visible_results") or soft_state.get("visible_results") or [],
+                    "all_search_results": soft_state.get("all_search_results") or [],
+                    "shown_count": len(soft_state.get("last_visible_results") or soft_state.get("visible_results") or []),
+                    "total_found": soft_state.get("active_property_options_total_found") or len(soft_state.get("all_search_results") or []),
+                    "query_context": soft_state.get("last_search_filters") or soft_state.get("last_filters") or {},
+                    "pagination": (soft_state.get("last_search") or {}).get("pagination") or {},
+                    "summary_mode": bool((soft_state.get("last_search") or {}).get("summary_mode", False)),
+                }
+            payload["deterministic_reply"] = _render_property_results_from_router_output(payload)
+        elif resume_target == "selected_property":
+            payload = resume_payload if isinstance(resume_payload, dict) else {}
+            if not payload.get("property"):
+                selected_property = (
+                    soft_state.get("selected_property")
+                    or soft_state.get("booking_selected_property")
+                    or {}
+                )
+                payload = {
+                    "status": str(getattr(_cfg.status, "property_details", "property_details")),
+                    "property": selected_property if isinstance(selected_property, dict) else {},
+                }
+            payload["deterministic_reply"] = _render_property_details_from_router_output(payload)
+        elif resume_target == "booking_flow":
+            payload = _resume_booking_flow(soft_state) or {}
+            if payload:
+                clear_faq_interruption(soft_state)
+        else:
+            return None
+
+        clear_faq_interruption(soft_state)
+    else:
+        return None
+
+    if not payload:
+        return None
+
+    sync_alias_keys(soft_state)
+    persisted_state = _state_with_persisted_soft_state(state, soft_state)
+    meta = snapshot.get("meta") or {}
+    await save_session_snapshot(
+        session_id=session_id,
+        history=snapshot.get("history", []),
+        state=persisted_state,
+        metadata={
+            key: meta[key]
+            for key in ("app_name", "user_id", "last_update_time")
+            if key in meta
+        },
+    )
+    return payload
+
+
 async def _render_voice_from_router_output(
     router_output: str,
     user_cognitive_context: str,
@@ -1070,6 +1188,16 @@ async def _maybe_handle_search_state_shortcut(
     if shortcut is None:
         return None
 
+    if shortcut.action == "select_property":
+        stage = str(soft_state.get("booking_stage") or "").strip()
+        if stage in {
+            "collecting_details",
+            "modifying_details",
+            "awaiting_confirmation",
+            "awaiting_modification_choice",
+        }:
+            return None
+
     payload: Optional[Dict[str, Any]] = None
 
     if shortcut.action == "select_property" and shortcut.selection_number is not None:
@@ -1099,12 +1227,12 @@ async def _maybe_handle_search_state_shortcut(
     if not payload:
         return None
 
-    state["soft_state"] = soft_state
+    persisted_state = _state_with_persisted_soft_state(state, soft_state)
     meta = snapshot.get("meta") or {}
     await save_session_snapshot(
         session_id=session_id,
         history=snapshot.get("history", []),
-        state=state,
+        state=persisted_state,
         metadata={
             key: meta[key]
             for key in ("app_name", "user_id", "last_update_time")
@@ -1135,13 +1263,12 @@ async def _maybe_record_unsupported_region(
         else:
             soft_state = dict(soft_state)
         soft_state["last_unsupported_region"] = country
-        state = dict(state)
-        state["soft_state"] = soft_state
+        persisted_state = _state_with_persisted_soft_state(state, soft_state)
         meta = snapshot.get("meta") or {}
         await save_session_snapshot(
             session_id=session_id,
             history=snapshot.get("history", []),
-            state=state,
+            state=persisted_state,
             metadata={
                 key: meta[key]
                 for key in ("app_name", "user_id", "last_update_time")
@@ -1201,6 +1328,59 @@ async def _maybe_handle_active_booking_turn(
     return payload
 
 
+async def _maybe_handle_booking_status_check(
+    *,
+    session_id: str,
+    message: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Handle a deterministic booking-status lookup from the current session soft_state.
+
+    Loads the Redis session snapshot, delegates to
+    :func:`app.services.booking_flow.handle_booking_status_check`, and persists
+    any updated soft_state when a reply is produced.
+
+    Parameters:
+        session_id (str): Redis session identifier.
+        message (str): The raw user message to inspect.
+
+    Returns:
+        Optional[Dict[str, Any]]: A payload with ``deterministic_reply`` when
+        booking-status intent is detected and handled, or ``None`` to let the
+        turn continue through the remaining pipeline stages.
+    """
+    snapshot = await get_session_snapshot(session_id)
+    if not isinstance(snapshot, dict):
+        return None
+
+    state = snapshot.get("state") or {}
+    if not isinstance(state, dict):
+        return None
+
+    if "soft_state" in state and isinstance(state["soft_state"], dict):
+        soft_state = state["soft_state"]
+    else:
+        soft_state = dict(state)
+
+    payload = await _handle_booking_status_check(message, soft_state)
+    if not payload:
+        return None
+
+    persisted_state = _state_with_persisted_soft_state(state, soft_state)
+    meta = snapshot.get("meta") or {}
+    await save_session_snapshot(
+        session_id=session_id,
+        history=snapshot.get("history", []),
+        state=persisted_state,
+        metadata={
+            key: meta[key]
+            for key in ("app_name", "user_id", "last_update_time")
+            if key in meta
+        },
+    )
+    return payload
+
+
 async def run_adk_turn(
     user_id: str,
     session_id: str,
@@ -1236,11 +1416,26 @@ async def run_adk_turn(
         }
     )
     
-    initial_soft_state = {}
+    initial_state: Dict[str, Any] = {}
+    initial_soft_state: Dict[str, Any] = {}
+    initial_history: List[Any] = []
+    initial_metadata: Dict[str, Any] = {}
     try:
         snapshot = await get_session_snapshot(session_id)
         if isinstance(snapshot, dict):
-            initial_soft_state = snapshot.get("state", {}).get("soft_state", {})
+            state = snapshot.get("state") or {}
+            if isinstance(state, dict):
+                initial_state = state
+                soft_state = state.get("soft_state")
+                if isinstance(soft_state, dict):
+                    initial_soft_state = soft_state
+            initial_history = snapshot.get("history", [])
+            meta = snapshot.get("meta") or {}
+            initial_metadata = {
+                key: meta[key]
+                for key in ("app_name", "user_id", "last_update_time")
+                if key in meta
+            }
     except Exception:
         pass
         
@@ -1267,6 +1462,18 @@ async def run_adk_turn(
         yield coverage_decision.message
         return
 
+    with trace.span(name="faq_resume_guard"):
+        faq_resume_payload = await _maybe_handle_faq_resume_turn(
+            session_id=session_id,
+            message=cleaned_message,
+        )
+    if faq_resume_payload:
+        deterministic_reply = str(faq_resume_payload.get("deterministic_reply") or "").strip()
+        if deterministic_reply:
+            trace.end()
+            yield deterministic_reply
+            return
+
     with trace.span(name="direct_property_search"):
         direct_search_payload = await maybe_handle_direct_property_search(
             cleaned_message,
@@ -1275,6 +1482,11 @@ async def run_adk_turn(
             save_snapshot=save_session_snapshot,
         )
     if direct_search_payload:
+        deterministic_reply = str(direct_search_payload.get("deterministic_reply") or "").strip()
+        if deterministic_reply:
+            trace.end()
+            yield deterministic_reply
+            return
         if (
             direct_search_payload.get("status") == "properties_found"
             and direct_search_payload.get("properties")
@@ -1323,13 +1535,54 @@ async def run_adk_turn(
             trace.end()
             yield shortcut_text
             return
+        trace.end()
+        yield "I'm sorry, I couldn't process your request. Could you try again?"
+        return
+
     with trace.span(name="booking_flow"):
         booking_payload = await _maybe_handle_active_booking_turn(
             session_id=session_id,
             message=cleaned_message,
         )
     if booking_payload:
-        deterministic_reply = booking_payload.get("deterministic_reply")
+        deterministic_reply = (
+            str(booking_payload.get("deterministic_reply") or "").strip()
+            or _deterministic_reply_from_router_output(booking_payload)
+        )
+        if not deterministic_reply:
+            deterministic_reply = "I'm sorry, I couldn't process your request. Could you try again?"
+        trace.end()
+        yield str(deterministic_reply)
+        return
+    if detect_policy_question(cleaned_message):
+        from app.agents.tools.support import check_faq
+
+        soft_state = initial_soft_state if isinstance(initial_soft_state, dict) else {}
+        tool_context = SimpleNamespace(state={"soft_state": soft_state})
+        faq_payload = await check_faq(question=cleaned_message, tool_context=tool_context)
+        if isinstance(faq_payload, dict):
+            deterministic_reply = (
+                str(faq_payload.get("deterministic_reply") or "").strip()
+                or str(faq_payload.get("answer") or "").strip()
+            )
+            if deterministic_reply:
+                await save_session_snapshot(
+                    session_id=session_id,
+                    history=initial_history,
+                    state=_state_with_persisted_soft_state(initial_state, soft_state),
+                    metadata=initial_metadata,
+                )
+                trace.end()
+                yield deterministic_reply
+                return
+
+    with trace.span(name="booking_status_check"):
+        status_payload = await _maybe_handle_booking_status_check(
+            session_id=session_id,
+            message=cleaned_message,
+        )
+    if status_payload:
+        deterministic_reply = status_payload.get("deterministic_reply")
         if deterministic_reply:
             trace.end()
             yield str(deterministic_reply)
@@ -1441,6 +1694,12 @@ async def run_adk_turn(
                                     "concierge_voice LLM output will be suppressed (%d properties)",
                                     len(_props),
                                 )
+
+                        if _deterministic_render is None:
+                            _det = _deterministic_reply_from_router_output(router_output_dict)
+                            if _det:
+                                _deterministic_render = _det
+                                trace.update(metadata={"bypassed_voice_llm": True})
 
                         pending_soft_state_updates = _merge_soft_state(
                             pending_soft_state_updates,

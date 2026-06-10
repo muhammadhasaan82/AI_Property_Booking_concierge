@@ -14,6 +14,7 @@ from google.adk.tools import ToolContext
 
 from ..status_codes import Source, Status
 from app.config.agent_config_loader import cfg
+from app.services.faq_interruption import clear_faq_interruption, sync_alias_keys
 from .helpers import (
     _build_active_options,
     _classify_engagement_state,
@@ -634,11 +635,17 @@ def return_to_previous_results(
         soft_state["last_rejected_property_id"] = rejected_id
     soft_state["last_presented_view"] = "property_list"
     soft_state["selected_property_id"] = None
+    soft_state["selected_property"] = None
     soft_state["visible_results"] = list(payload.get("properties") or [])
+    soft_state["last_visible_results"] = list(payload.get("properties") or [])
     soft_state["option_map"] = option_map
     soft_state["active_property_options_map"] = option_map
     soft_state["active_property_options_shown_count"] = payload.get("shown_count")
     soft_state["active_property_options_total_found"] = payload.get("total_found")
+    filters = soft_state.get("last_filters") or {}
+    if isinstance(filters, dict):
+        soft_state["last_search_filters"] = dict(filters)
+    clear_faq_interruption(soft_state)
     _set_cached_last_search(soft_state, dict(payload))
 
     payload["source"] = Source.MEMORY
@@ -898,19 +905,24 @@ async def search_properties(
     if isinstance(soft_state, dict):
         soft_state["active_flow"] = "search"
         soft_state["last_filters"] = filters
+        soft_state["last_search_filters"] = dict(filters)
         soft_state["all_search_results"] = list(results)
         soft_state["current_page"] = payload["pagination"]["current_page"]
         soft_state["page_size"] = payload["pagination"]["page_size"]
         soft_state["visible_results"] = visible_results
+        soft_state["last_visible_results"] = list(visible_results)
         soft_state["option_map"] = option_map
         soft_state["selected_property_id"] = None
+        soft_state["selected_property"] = None
         soft_state["last_presented_view"] = "property_list"
         soft_state["active_property_options_map"] = option_map
         soft_state["active_property_options_shown_count"] = payload["shown_count"]
         soft_state["active_property_options_total_found"] = payload["total_found"]
+        clear_faq_interruption(soft_state)
 
     if isinstance(soft_state, dict):
         soft_state["active_property_options_generated_at"] = time.time()
+        sync_alias_keys(soft_state)
 
     _set_unresolved_turns(soft_state, 0)
     _set_cached_last_search(soft_state, dict(payload))
@@ -1078,15 +1090,23 @@ async def get_property_details(
 
     property_id = str(property_id)
     matched_prop = None
+    fallback_prop = None
     for r in _DATASET:
         r_id = str(r.get("id")) if r.get("id") is not None else str(r.get("title"))
         if r_id == property_id:
             matched_prop = r
             break
-        
-        if selected_item and r.get("title") == selected_item.get("title") and r.get("city") == selected_item.get("city"):
-            matched_prop = r
-            break
+
+        if (
+            fallback_prop is None
+            and selected_item
+            and r.get("title") == selected_item.get("title")
+            and r.get("city") == selected_item.get("city")
+        ):
+            fallback_prop = r
+
+    if not matched_prop and fallback_prop is not None:
+        matched_prop = fallback_prop
 
     if not matched_prop and selected_item:
         matched_prop = selected_item
@@ -1110,8 +1130,12 @@ async def get_property_details(
         if isinstance(soft_state, dict):
             soft_state["last_selected_property_id"] = payload["property"]["id"]
             soft_state["last_selected_property_at"] = time.time()
+            soft_state["selected_property_id"] = payload["property"]["id"]
+            soft_state["selected_property"] = dict(payload["property"])
             soft_state["last_presented_view"] = "property_details"
             _set_unresolved_turns(soft_state, 0)
+            sync_alias_keys(soft_state)
+            clear_faq_interruption(soft_state)
         payload["memory"] = {
             "read_from": "soft_state.last_search" if resolved_from_history else None,
             "written_to": "soft_state.last_selected_property_id",

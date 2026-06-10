@@ -119,27 +119,34 @@ async def _run_turn(
 
     async def fake_save_session_snapshot(*, session_id, history, state, metadata):
         """
-        Persist the provided session pieces into the shared test snapshot and optionally record a saved copy of the state.
-        
-        This function updates the outer `snapshot` mapping in-place by setting `snapshot["state"]` to the provided `state`, `snapshot["history"]` to `history`, and merging `metadata` into `snapshot["meta"]`. When the module-level flag `deepcopy_session_io` is true, the inputs are deep-copied before being stored. If a `saved_states` list is available and the saved state is a dict, a deep copy of the saved state is appended to that list.
-        
-        Parameters:
-            session_id: The session identifier (not used by this test helper).
-            history: The session history to save into `snapshot["history"]`.
-            state: The session state to save into `snapshot["state"]`.
-            metadata: Optional metadata to merge into `snapshot["meta"]`.
-        
-        Side effects:
-            Mutates the external `snapshot` dictionary and, if present, appends to the external `saved_states` list.
+        Persist session pieces while preserving the original nested soft_state dict identity.
+
+        Some tests keep a reference to snapshot["state"]["soft_state"] before the
+        turn runs. Replacing snapshot["state"] with a new dict leaves that reference
+        stale, so update the existing soft_state mapping in-place.
         """
-        state_to_save = copy.deepcopy(state) if deepcopy_session_io else state
-        history_to_save = copy.deepcopy(history) if deepcopy_session_io else history
-        metadata_to_save = copy.deepcopy(metadata or {}) if deepcopy_session_io else (metadata or {})
-        snapshot["state"] = state_to_save
-        snapshot["history"] = history_to_save
-        snapshot["meta"].update(metadata_to_save)
-        if saved_states is not None and isinstance(state_to_save, dict):
-            saved_states.append(copy.deepcopy(state_to_save))
+        existing_state = snapshot.setdefault("state", {})
+        existing_soft_state = existing_state.get("soft_state")
+        new_soft_state = state.get("soft_state") if isinstance(state, dict) else {}
+
+        if isinstance(existing_soft_state, dict) and isinstance(new_soft_state, dict):
+            replacement_soft_state = copy.deepcopy(new_soft_state)
+            existing_soft_state.clear()
+            existing_soft_state.update(replacement_soft_state)
+            existing_state["soft_state"] = existing_soft_state
+        else:
+            existing_state["soft_state"] = copy.deepcopy(new_soft_state) if deepcopy_session_io else new_soft_state
+
+        if isinstance(state, dict):
+            for key, value in state.items():
+                if key != "soft_state":
+                    existing_state[key] = copy.deepcopy(value) if deepcopy_session_io else value
+
+        snapshot["history"] = copy.deepcopy(history) if deepcopy_session_io else history
+        snapshot.setdefault("meta", {}).update(copy.deepcopy(metadata or {}) if deepcopy_session_io else (metadata or {}))
+
+        if saved_states is not None:
+            saved_states.append(copy.deepcopy(existing_state))
 
     route_pre_adk = AsyncMock(return_value={"reply": "generic fallback"})
     monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
@@ -543,3 +550,119 @@ async def test_valid_checkin_invalid_checkout_preserves_checkin(monkeypatch):
     assert soft_state["booking_stage"] == "collecting_details"
     assert booking_state["check_in"] == "2026-06-02"
     assert "check_out" not in booking_state
+
+
+@pytest.mark.asyncio
+async def test_faq_during_booking_can_resume_booking_stage(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+    soft_state = snapshot["state"]["soft_state"]
+    before_stage = soft_state["booking_stage"]
+    before_awaiting_field = soft_state["awaiting_field"]
+
+    with patch("app.agents.tools.rust_client.execute_tool", new=AsyncMock(return_value={"fallback": True})):
+        faq_reply, faq_route_pre_adk = await _run_turn(
+            monkeypatch,
+            snapshot,
+            "what is the refund policy if i cancel before 5 days of check-in?",
+        )
+
+        assert faq_route_pre_adk.await_count == 0
+        assert "40%" in faq_reply
+        assert "Would you like to continue your booking" in faq_reply
+        assert soft_state["faq_interruption"]["resume_target"] == "booking_flow"
+        assert soft_state["booking_stage"] == before_stage
+        assert soft_state["awaiting_field"] == before_awaiting_field
+
+        resume_reply, resume_route_pre_adk = await _run_turn(
+            monkeypatch,
+            snapshot,
+            "sure",
+        )
+
+    assert resume_route_pre_adk.await_count == 0
+    assert soft_state.get("faq_interruption") is None
+    assert soft_state["booking_stage"] == before_stage
+    assert soft_state["awaiting_field"] == before_awaiting_field
+    assert resume_reply
+
+
+@pytest.mark.asyncio
+async def test_all_details_one_message_checkout_before_checkin_text_order_valid(monkeypatch):
+    snapshot, selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        (
+            "no. of guest are 4, check-out date 13 july and check in date is 23 june, "
+            "also phone number is 123456789, email is abc@example.com and my name is ABC"
+        ),
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    review = soft_state["booking_review"]
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert review["guest_name"] == "ABC"
+    assert review["guest_email"] == "abc@example.com"
+    assert review["guest_phone"] == "123456789"
+    assert review["guests"] == 4
+    assert review["check_in"] == "2026-06-23"
+    assert review["check_out"] == "2026-07-13"
+    assert review["property_id"] == selected_property["id"]
+    assert "Please confirm if everything is correct." in reply
+    assert "What check-in date would you prefer?" not in reply
+
+
+@pytest.mark.asyncio
+async def test_all_details_one_message_reversed_dates_preserves_other_fields(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        (
+            "no. of guest are 4, check-out date 23 june and check in date is 13 july, "
+            "also phone number is 123456789, email is abc@example.com and my name is ABC"
+        ),
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    booking_state = soft_state["booking_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert "cannot be earlier than your check-in date" in reply
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert soft_state["awaiting_field"] == "check_out"
+    assert booking_state["guest_name"] == "ABC"
+    assert booking_state["guest_email"] == "abc@example.com"
+    assert booking_state["guest_phone"] == "123456789"
+    assert booking_state["guests"] == 4
+    assert booking_state["check_in"] == "2026-07-13"
+    assert "check_out" not in booking_state
+    assert "What check-in date would you prefer?" not in reply
+
+
+@pytest.mark.asyncio
+async def test_all_details_one_message_does_not_reask_provided_dates(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        (
+            "my name is ABC, email is abc@example.com, phone number is 123456789, "
+            "check-out date 13 july and check in date is 23 june, guests are 4"
+        ),
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert soft_state["booking_state"]["check_in"] == "2026-06-23"
+    assert soft_state["booking_state"]["check_out"] == "2026-07-13"
+    assert "What check-in date would you prefer?" not in reply
+    assert "And the check-out date?" not in reply
+    assert "Please confirm if everything is correct." in reply
