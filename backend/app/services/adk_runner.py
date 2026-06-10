@@ -945,12 +945,12 @@ async def _maybe_handle_faq_resume_turn(
         return None
 
     sync_alias_keys(soft_state)
-    state["soft_state"] = soft_state
+    persisted_state = _state_with_persisted_soft_state(state, soft_state)
     meta = snapshot.get("meta") or {}
     await save_session_snapshot(
         session_id=session_id,
         history=snapshot.get("history", []),
-        state=state,
+        state=persisted_state,
         metadata={
             key: meta[key]
             for key in ("app_name", "user_id", "last_update_time")
@@ -1217,12 +1217,12 @@ async def _maybe_handle_search_state_shortcut(
     if not payload:
         return None
 
-    state["soft_state"] = soft_state
+    persisted_state = _state_with_persisted_soft_state(state, soft_state)
     meta = snapshot.get("meta") or {}
     await save_session_snapshot(
         session_id=session_id,
         history=snapshot.get("history", []),
-        state=state,
+        state=persisted_state,
         metadata={
             key: meta[key]
             for key in ("app_name", "user_id", "last_update_time")
@@ -1253,13 +1253,12 @@ async def _maybe_record_unsupported_region(
         else:
             soft_state = dict(soft_state)
         soft_state["last_unsupported_region"] = country
-        state = dict(state)
-        state["soft_state"] = soft_state
+        persisted_state = _state_with_persisted_soft_state(state, soft_state)
         meta = snapshot.get("meta") or {}
         await save_session_snapshot(
             session_id=session_id,
             history=snapshot.get("history", []),
-            state=state,
+            state=persisted_state,
             metadata={
                 key: meta[key]
                 for key in ("app_name", "user_id", "last_update_time")
@@ -1407,11 +1406,26 @@ async def run_adk_turn(
         }
     )
     
-    initial_soft_state = {}
+    initial_state: Dict[str, Any] = {}
+    initial_soft_state: Dict[str, Any] = {}
+    initial_history: List[Any] = []
+    initial_metadata: Dict[str, Any] = {}
     try:
         snapshot = await get_session_snapshot(session_id)
         if isinstance(snapshot, dict):
-            initial_soft_state = snapshot.get("state", {}).get("soft_state", {})
+            state = snapshot.get("state") or {}
+            if isinstance(state, dict):
+                initial_state = state
+                soft_state = state.get("soft_state")
+                if isinstance(soft_state, dict):
+                    initial_soft_state = soft_state
+            initial_history = snapshot.get("history", [])
+            meta = snapshot.get("meta") or {}
+            initial_metadata = {
+                key: meta[key]
+                for key in ("app_name", "user_id", "last_update_time")
+                if key in meta
+            }
     except Exception:
         pass
         
@@ -1521,8 +1535,10 @@ async def run_adk_turn(
             yield str(deterministic_reply)
             return
     if detect_policy_question(cleaned_message):
-        live_soft_state = state.setdefault("soft_state", {}) if isinstance(state, dict) else {}
-        tool_context = SimpleNamespace(state={"soft_state": live_soft_state})
+        from app.agents.tools.support import check_faq
+
+        soft_state = initial_soft_state if isinstance(initial_soft_state, dict) else {}
+        tool_context = SimpleNamespace(state={"soft_state": soft_state})
         faq_payload = await check_faq(question=cleaned_message, tool_context=tool_context)
         if isinstance(faq_payload, dict):
             deterministic_reply = (
@@ -1532,9 +1548,9 @@ async def run_adk_turn(
             if deterministic_reply:
                 await save_session_snapshot(
                     session_id=session_id,
-                    history=history,
-                    state=state,
-                    metadata=metadata,
+                    history=initial_history,
+                    state=_state_with_persisted_soft_state(initial_state, soft_state),
+                    metadata=initial_metadata,
                 )
                 trace.end()
                 yield deterministic_reply
