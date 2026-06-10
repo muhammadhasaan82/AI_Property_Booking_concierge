@@ -584,3 +584,85 @@ async def test_faq_during_booking_can_resume_booking_stage(monkeypatch):
     assert soft_state["booking_stage"] == before_stage
     assert soft_state["awaiting_field"] == before_awaiting_field
     assert resume_reply
+
+
+@pytest.mark.asyncio
+async def test_all_details_one_message_checkout_before_checkin_text_order_valid(monkeypatch):
+    snapshot, selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        (
+            "no. of guest are 4, check-out date 13 july and check in date is 23 june, "
+            "also phone number is 123456789, email is abc@example.com and my name is ABC"
+        ),
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    review = soft_state["booking_review"]
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert review["guest_name"] == "ABC"
+    assert review["guest_email"] == "abc@example.com"
+    assert review["guest_phone"] == "123456789"
+    assert review["guests"] == 4
+    assert review["check_in"] == "2026-06-23"
+    assert review["check_out"] == "2026-07-13"
+    assert review["property_id"] == selected_property["id"]
+    assert "Please confirm if everything is correct." in reply
+    assert "What check-in date would you prefer?" not in reply
+
+
+@pytest.mark.asyncio
+async def test_all_details_one_message_reversed_dates_preserves_other_fields(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        (
+            "no. of guest are 4, check-out date 23 june and check in date is 13 july, "
+            "also phone number is 123456789, email is abc@example.com and my name is ABC"
+        ),
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    booking_state = soft_state["booking_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert "cannot be earlier than your check-in date" in reply
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert soft_state["awaiting_field"] == "check_out"
+    assert booking_state["guest_name"] == "ABC"
+    assert booking_state["guest_email"] == "abc@example.com"
+    assert booking_state["guest_phone"] == "123456789"
+    assert booking_state["guests"] == 4
+    assert booking_state["check_in"] == "2026-07-13"
+    assert "check_out" not in booking_state
+    assert "What check-in date would you prefer?" not in reply
+
+
+@pytest.mark.asyncio
+async def test_all_details_one_message_does_not_reask_provided_dates(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        (
+            "my name is ABC, email is abc@example.com, phone number is 123456789, "
+            "check-out date 13 july and check in date is 23 june, guests are 4"
+        ),
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert soft_state["booking_state"]["check_in"] == "2026-06-23"
+    assert soft_state["booking_state"]["check_out"] == "2026-07-13"
+    assert "What check-in date would you prefer?" not in reply
+    assert "And the check-out date?" not in reply
+    assert "Please confirm if everything is correct." in reply

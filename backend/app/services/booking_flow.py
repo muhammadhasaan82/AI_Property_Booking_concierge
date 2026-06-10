@@ -35,6 +35,7 @@ from app.config.booking_schema_loader import (
     get_required_numeric_fields,
     next_field_to_ask,
     validate_field,
+    _reference_today,
 )
 
 logger = logging.getLogger(__name__)
@@ -550,6 +551,44 @@ def _seed_property_fields(soft_state: Dict[str, Any], state: Dict[str, Any]) -> 
             state["price_per_night"] = _coerce_float(selected.get("price_per_night"))
 
 
+def _infer_year_for_month_day(month: int, day: int) -> Optional[int]:
+    """
+    Infer a calendar year for a month/day pair using the schema reference date.
+
+  When the month/day in the reference year is still today or later, that year is
+  used; otherwise the next year is chosen so future bookings stay valid.
+    """
+    reference = _reference_today()
+    try:
+        this_year_date = date(reference.year, month, day)
+    except ValueError:
+        return None
+    if this_year_date >= reference:
+        return reference.year
+    try:
+        date(reference.year + 1, month, day)
+        return reference.year + 1
+    except ValueError:
+        return reference.year
+
+
+def _format_month_day(month: int, day: int, year: int) -> Optional[str]:
+    try:
+        return date(year, month, day).strftime(cfg.date_format)
+    except ValueError:
+        return None
+
+
+def _parse_yearless_month_day(day: int, month_raw: str) -> Optional[str]:
+    month = _MONTHS.get(str(month_raw).lower())
+    if month is None:
+        return None
+    year = _infer_year_for_month_day(month, day)
+    if year is None:
+        return None
+    return _format_month_day(month, day, year)
+
+
 def _parse_natural_date(text: str) -> Optional[str]:
     """
     Parse an ISO or common natural-language date from `text` and return it formatted using `cfg.date_format`.
@@ -590,6 +629,24 @@ def _parse_natural_date(text: str) -> Optional[str]:
             return parsed.strftime(cfg.date_format)
         except ValueError:
             return None
+
+    yearless_patterns = (
+        re.compile(
+            r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>[a-z]+)(?!\s*,?\s*\d{4})\b",
+            re.I,
+        ),
+        re.compile(
+            r"\b(?P<month>[a-z]+)\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?(?!\s*,?\s*\d{4})\b",
+            re.I,
+        ),
+    )
+    for pattern in yearless_patterns:
+        match = pattern.search(cleaned)
+        if not match:
+            continue
+        parsed = _parse_yearless_month_day(int(match.group("day")), match.group("month"))
+        if parsed:
+            return parsed
     return None
 
 
@@ -637,6 +694,34 @@ def _find_all_dates(text: str) -> List[Tuple[str, int, int]]:
             except ValueError:
                 pass
 
+    pat3 = re.compile(
+        r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>[a-z]+)(?!\s*,?\s*\d{4})\b",
+        re.I,
+    )
+    for m in pat3.finditer(text):
+        month_raw = m.group("month").lower()
+        month = _MONTHS.get(month_raw)
+        if month is not None:
+            year = _infer_year_for_month_day(month, int(m.group("day")))
+            if year is not None:
+                formatted = _format_month_day(month, int(m.group("day")), year)
+                if formatted:
+                    results.append((formatted, m.start(), m.end()))
+
+    pat4 = re.compile(
+        r"\b(?P<month>[a-z]+)\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?(?!\s*,?\s*\d{4})\b",
+        re.I,
+    )
+    for m in pat4.finditer(text):
+        month_raw = m.group("month").lower()
+        month = _MONTHS.get(month_raw)
+        if month is not None:
+            year = _infer_year_for_month_day(month, int(m.group("day")))
+            if year is not None:
+                formatted = _format_month_day(month, int(m.group("day")), year)
+                if formatted:
+                    results.append((formatted, m.start(), m.end()))
+
     results.sort(key=lambda x: (x[1], -(x[2] - x[1])))
     filtered = []
     last_end = -1
@@ -662,10 +747,28 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
     dates_found = _find_all_dates(text)
     if not dates_found:
         return None, None
-        
+
     check_in_matches = list(re.finditer(_CHECK_IN_DATE_PATTERN, text, re.I))
     check_out_matches = list(re.finditer(_CHECK_OUT_DATE_PATTERN, text, re.I))
-    
+
+    if len(dates_found) >= 2 and check_in_matches and check_out_matches:
+        first_date_start = dates_found[0][1]
+        last_label_end = max(m.end() for m in check_in_matches + check_out_matches)
+        if last_label_end <= first_date_start:
+            return dates_found[0][0], dates_found[1][0]
+
+    if len(dates_found) >= 2 and check_out_matches and not check_in_matches:
+        last_check_out = max(check_out_matches, key=lambda match: match.start())
+        check_out_date = None
+        for d_val, d_start, _d_end in dates_found:
+            if d_start >= last_check_out.end():
+                check_out_date = d_val
+                break
+        if check_out_date:
+            for d_val, _, _ in dates_found:
+                if d_val != check_out_date:
+                    return d_val, check_out_date
+
     check_in_date = None
     check_out_date = None
     
@@ -685,7 +788,7 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
             if m.end() <= d_start:
                 dist = d_start - m.end()
             else:
-                dist = (m.start() - d_end) * 5
+                dist = (m.start() - d_end) * 10
             if dist < min_dist:
                 min_dist = dist
                 best_type = "check_out"
@@ -710,7 +813,7 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
             if m.end() <= d_start:
                 dist = d_start - m.end()
             else:
-                dist = (m.start() - d_end) * 5
+                dist = (m.start() - d_end) * 10
             if dist < min_dist:
                 min_dist = dist
                 best_type = "check_out"
@@ -911,13 +1014,29 @@ def _extract_updates_from_message(
             errors["check_out"] = _friendly_prompt_for_field("check_out")
 
     if has_check_in_phrase and has_check_out_phrase:
+        if assoc_check_in and assoc_check_out:
+            updates["check_in"] = assoc_check_in
+            updates["check_out"] = assoc_check_out
+            errors.pop("check_in", None)
+            errors.pop("check_out", None)
+        elif assoc_check_in and "check_in" not in updates:
+            updates["check_in"] = assoc_check_in
+            errors.pop("check_in", None)
+        elif assoc_check_out and "check_out" not in updates:
+            updates["check_out"] = assoc_check_out
+            errors.pop("check_out", None)
         if "check_in" not in updates or "check_out" not in updates:
             all_dates = _find_all_dates(normalized)
             if len(all_dates) >= 2:
-                updates["check_in"] = all_dates[0][0]
-                updates["check_out"] = all_dates[1][0]
-                errors.pop("check_in", None)
-                errors.pop("check_out", None)
+                if "check_in" not in updates:
+                    updates["check_in"] = all_dates[0][0]
+                    errors.pop("check_in", None)
+                if "check_out" not in updates:
+                    for d_val, _, _ in all_dates:
+                        if d_val != updates.get("check_in"):
+                            updates["check_out"] = d_val
+                            errors.pop("check_out", None)
+                            break
 
     if awaiting_field and awaiting_field not in updates:
         mentioned_fields.append(awaiting_field)

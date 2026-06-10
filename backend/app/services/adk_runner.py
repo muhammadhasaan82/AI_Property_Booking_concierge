@@ -1188,6 +1188,16 @@ async def _maybe_handle_search_state_shortcut(
     if shortcut is None:
         return None
 
+    if shortcut.action == "select_property":
+        stage = str(soft_state.get("booking_stage") or "").strip()
+        if stage in {
+            "collecting_details",
+            "modifying_details",
+            "awaiting_confirmation",
+            "awaiting_modification_choice",
+        }:
+            return None
+
     payload: Optional[Dict[str, Any]] = None
 
     if shortcut.action == "select_property" and shortcut.selection_number is not None:
@@ -1520,6 +1530,10 @@ async def run_adk_turn(
             trace.end()
             yield shortcut_text
             return
+        trace.end()
+        yield "I'm sorry, I couldn't process your request. Could you try again?"
+        return
+
     with trace.span(name="booking_flow"):
         booking_payload = await _maybe_handle_active_booking_turn(
             session_id=session_id,
@@ -1530,10 +1544,11 @@ async def run_adk_turn(
             str(booking_payload.get("deterministic_reply") or "").strip()
             or _deterministic_reply_from_router_output(booking_payload)
         )
-        if deterministic_reply:
-            trace.end()
-            yield str(deterministic_reply)
-            return
+        if not deterministic_reply:
+            deterministic_reply = "I'm sorry, I couldn't process your request. Could you try again?"
+        trace.end()
+        yield str(deterministic_reply)
+        return
     if detect_policy_question(cleaned_message):
         from app.agents.tools.support import check_faq
 
