@@ -105,6 +105,22 @@ class TestFindAllDates:
         assert "2026-06-02" in result
 
     # ------------------------------------------------------------------
+    # Year-less natural language (year inferred from BOOKING_REFERENCE_DATE)
+    # ------------------------------------------------------------------
+
+    def test_day_month_without_year(self, monkeypatch):
+        monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
+        result = _dates("check-out date 13 july and check in date is 23 june")
+        assert "2026-06-23" in result
+        assert "2026-07-13" in result
+
+    def test_month_day_without_year(self, monkeypatch):
+        monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
+        result = _dates("arrive july 13 and leave august 2")
+        assert "2026-07-13" in result
+        assert "2026-08-02" in result
+
+    # ------------------------------------------------------------------
     # Multiple dates
     # ------------------------------------------------------------------
 
@@ -220,6 +236,15 @@ class TestExtractDatesByAssociation:
         check_in, check_out = _extract_dates_by_association(text)
         assert check_in == "2026-06-02"
         assert check_out == "2026-06-11"
+
+    def test_checkout_before_checkin_text_order_valid_yearless_dates(self, monkeypatch):
+        monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
+        text = (
+            "check-out date 13 july and check in date is 23 june"
+        )
+        check_in, check_out = _extract_dates_by_association(text)
+        assert check_in == "2026-06-23"
+        assert check_out == "2026-07-13"
 
     def test_iso_dates_with_both_labels(self):
         text = "check-in 2026-06-02 check-out 2026-06-11"

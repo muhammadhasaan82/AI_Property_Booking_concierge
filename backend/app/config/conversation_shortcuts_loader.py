@@ -263,7 +263,10 @@ def _compile_pattern(template: str) -> re.Pattern:
     Returns:
         re.Pattern: Compiled regular expression that matches the template as a whole and, when `{number}` is used, exposes a named group `number` containing the matched digits.
     """
-    escaped = re.escape(template.strip().lower())
+    t = template.strip().lower()
+    if t == "{number}":
+        return re.compile(r"^(?P<number>\d+)$")
+    escaped = re.escape(t)
     escaped = escaped.replace(re.escape("{number}"), r"(?P<number>\d+)")
     escaped = escaped.replace(r"\ ", r"\s+")
     return re.compile(rf"\b{escaped}\b")
