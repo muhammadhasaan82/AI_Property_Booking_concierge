@@ -1482,6 +1482,11 @@ async def run_adk_turn(
             save_snapshot=save_session_snapshot,
         )
     if direct_search_payload:
+        deterministic_reply = str(direct_search_payload.get("deterministic_reply") or "").strip()
+        if deterministic_reply:
+            trace.end()
+            yield deterministic_reply
+            return
         if (
             direct_search_payload.get("status") == "properties_found"
             and direct_search_payload.get("properties")

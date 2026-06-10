@@ -1090,15 +1090,23 @@ async def get_property_details(
 
     property_id = str(property_id)
     matched_prop = None
+    fallback_prop = None
     for r in _DATASET:
         r_id = str(r.get("id")) if r.get("id") is not None else str(r.get("title"))
         if r_id == property_id:
             matched_prop = r
             break
-        
-        if selected_item and r.get("title") == selected_item.get("title") and r.get("city") == selected_item.get("city"):
-            matched_prop = r
-            break
+
+        if (
+            fallback_prop is None
+            and selected_item
+            and r.get("title") == selected_item.get("title")
+            and r.get("city") == selected_item.get("city")
+        ):
+            fallback_prop = r
+
+    if not matched_prop and fallback_prop is not None:
+        matched_prop = fallback_prop
 
     if not matched_prop and selected_item:
         matched_prop = selected_item
