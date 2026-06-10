@@ -8,6 +8,13 @@ import pytest
 from app.services import adk_runner
 from app.agents.status_codes import Status
 
+_HALLUCINATED_LLM_LOCATIONS = (
+    "Beverly Hills",
+    "Pacific Palisades",
+    "Santa Monica",
+)
+
+
 def _make_la_villas(count: int = 14):
     rows = []
     for idx in range(1, count + 1):
@@ -82,8 +89,8 @@ async def test_v25_smoke_deterministic_turns(monkeypatch):
          patch("app.agents.tools.rust_client.search_properties", return_value={"fallback": True}), \
          patch("app.agents.tools.rust_client.execute_tool", new=AsyncMock(return_value={"fallback": True})):
 
-        # Turn 1: search villas in Los Angeles
-        reply_1, route_1 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "show me villas in Los Angeles")
+        # Turn 1: search villas in Los Angeles using a short lexical variant
+        reply_1, route_1 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "looking for villas los angeles")
         assert "LA Villa 1" in reply_1
         assert "LA Villa 5" in reply_1
         route_1.assert_not_awaited()
@@ -131,3 +138,74 @@ async def test_v25_smoke_deterministic_turns(monkeypatch):
         assert review["check_out"] == "2026-07-24"
         assert review["guest_name"] == "ABC"
         route_5.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_typo_city_property_search_uses_deterministic_dataset_and_persists_canonical_city(monkeypatch):
+    fake = _make_la_villas(14)
+    snapshot = {
+        "state": {},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": "u-typo-city",
+            "last_update_time": 1.0,
+        },
+    }
+
+    with patch("app.components.search._DATASET", fake), \
+         patch("app.agents.tools.rust_client.search_properties", return_value={"fallback": True}), \
+         patch("app.agents.tools.rust_client.execute_tool", new=AsyncMock(return_value={"fallback": True})):
+        reply_1, route_1 = await _run_adk_turn_with_snapshot(
+            monkeypatch,
+            snapshot,
+            "i am looking a villa in los angellas",
+        )
+
+        assert "LA Villa 1" in reply_1
+        assert "LA Villa 5" in reply_1
+        assert "Los Angeles" in reply_1
+        for forbidden in _HALLUCINATED_LLM_LOCATIONS:
+            assert forbidden not in reply_1
+        route_1.assert_not_awaited()
+
+        soft_state = snapshot["state"]["soft_state"]
+        assert soft_state["last_filters"]["city"] == "Los Angeles"
+        assert soft_state["last_search"]["query_context"]["city"] == "Los Angeles"
+
+        reply_2, route_2 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "5")
+        assert "LA Villa 5" in reply_2
+        assert "Want to book this one?" in reply_2
+        route_2.assert_not_awaited()
+        assert soft_state["last_selected_property_id"] == "la_villa_5"
+
+
+@pytest.mark.asyncio
+async def test_unknown_city_search_asks_for_clarification_without_llm_fallback(monkeypatch):
+    fake = _make_la_villas(14)
+    snapshot = {
+        "state": {},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": "u-unknown-city",
+            "last_update_time": 1.0,
+        },
+    }
+
+    with patch("app.components.search._DATASET", fake), \
+         patch("app.agents.tools.rust_client.search_properties", return_value={"fallback": True}), \
+         patch("app.agents.tools.rust_client.execute_tool", new=AsyncMock(return_value={"fallback": True})):
+        reply, route = await _run_adk_turn_with_snapshot(
+            monkeypatch,
+            snapshot,
+            "i am looking for a villa in gothamm",
+        )
+
+    assert "supported city" in reply.lower()
+    assert "gothamm" in reply.lower()
+    assert "LA Villa" not in reply
+    for forbidden in _HALLUCINATED_LLM_LOCATIONS:
+        assert forbidden not in reply
+    route.assert_not_awaited()
+    assert snapshot["state"].get("soft_state", {}).get("last_filters") is None

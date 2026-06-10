@@ -34,6 +34,28 @@ def _make_props(kind: str, city: str, count: int, start: int = 1):
     return rows
 
 
+def _make_duplicate_title_villas(city: str = "Los Angeles") -> list[dict]:
+    prices = [813, 528, 719, 96, 726, 156, 819]
+    rows = []
+    for idx, price in enumerate(prices, start=1):
+        bedrooms = 5 if idx in (5, 7) else max(idx % 4, 1)
+        rows.append(
+            {
+                "id": f"villa-{idx}",
+                "title": "5BR Villa in Los Angeles" if idx in (5, 7) else f"Villa In {city} {idx}",
+                "city": city,
+                "price_per_night": price,
+                "property_type": "Villa",
+                "bedrooms": bedrooms,
+                "bathrooms": max(bedrooms, 1),
+                "rating": 5.0 - (idx * 0.1),
+                "amenities": ["wifi", "pool"],
+                "description": f"villa in {city}",
+            }
+        )
+    return rows
+
+
 def _snapshot_from_ctx(ctx: _Ctx) -> dict:
     return {
         "state": {"soft_state": ctx.state["soft_state"]},
@@ -92,6 +114,27 @@ async def test_search_show_more_option_2_keeps_filters():
         selected = await select_property(option_number=7, tool_context=ctx)
         assert selected["status"] == "property_details"
         assert selected["property"]["id"] == result["properties"][6]["id"]
+
+
+@pytest.mark.asyncio
+async def test_select_property_prefers_exact_property_id_over_duplicate_title_city_match():
+    ctx = _Ctx()
+    fake = _make_duplicate_title_villas()
+
+    with patch("app.components.search._DATASET", fake), \
+         patch("app.agents.tools.rust_client.search_properties", return_value={"fallback": True}):
+        result = await search_properties(city="Los Angeles", property_type="villa", tool_context=ctx)
+        assert result["status"] == "properties_found"
+
+        option_five = result["properties"][4]
+        assert option_five["title"] == "5BR Villa in Los Angeles"
+        assert option_five["price_per_night"] == 726
+
+        selected = await select_property(option_number=5, tool_context=ctx)
+
+    assert selected["status"] == "property_details"
+    assert selected["property"]["id"] == option_five["id"]
+    assert selected["property"]["price_per_night"] == 726
 
 
 @pytest.mark.asyncio
