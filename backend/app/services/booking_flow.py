@@ -88,6 +88,32 @@ def _normalize(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
 
+def has_active_booking_session(soft_state: Dict[str, Any]) -> bool:
+    """
+    Return True when session state indicates an in-progress booking workflow.
+
+    This is intentionally based on workflow state and persisted booking artifacts,
+    not on lexical message heuristics.
+    """
+    if not isinstance(soft_state, dict):
+        return False
+
+    stage = str(soft_state.get("booking_stage") or "").strip()
+    if stage in _ACTIVE_BOOKING_STAGES:
+        return True
+
+    view = str(soft_state.get("last_presented_view") or "").strip()
+    if view in {"booking_details_request", "booking_review"}:
+        if soft_state.get("booking_property_id") or soft_state.get("booking_selected_property"):
+            return True
+
+    if soft_state.get("pending_booking") or soft_state.get("booking_review"):
+        if soft_state.get("booking_property_id") or soft_state.get("booking_selected_property"):
+            return True
+
+    return False
+
+
 def _format_money(value: Any) -> str:
     amount = _coerce_float(value) or 0.0
     return f"${amount:,.2f}"
@@ -1199,6 +1225,7 @@ def start_booking_for_selected_property(soft_state: Dict[str, Any]) -> Optional[
         "missing_fields": list(cfg.booking_details_request_fields),
     })
     trace.end()
+    soft_state["active_flow"] = "booking"
     soft_state["booking_stage"] = "collecting_details"
     soft_state["last_presented_view"] = "booking_details_request"
     set_awaiting_field(soft_state, [next_field])
@@ -1230,6 +1257,7 @@ def resume_booking_flow(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         stage = str(soft_state.get("booking_stage") or "").strip()
     if stage not in _ACTIVE_BOOKING_STAGES:
         return None
+    soft_state["active_flow"] = "booking"
     clear_faq_interruption(soft_state)
     sync_alias_keys(soft_state)
     state = _ensure_property_seeded(soft_state)
@@ -1371,6 +1399,7 @@ async def confirm_booking_review(soft_state: Dict[str, Any]) -> Optional[Dict[st
     })
     trace.end()
     soft_state["booking_stage"] = "confirmed"
+    soft_state["active_flow"] = "booking"
     soft_state["booking_status"] = cfg.booking_confirmed_status
     soft_state["booking_registration_id"] = registration_id
     soft_state["booking_receipt"] = dict(receipt)
@@ -1461,6 +1490,7 @@ def _validate_and_commit_state(
 
 def _review_payload_from_state(soft_state: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
     summary = _review_summary_from_state(soft_state, state)
+    soft_state["active_flow"] = "booking"
     soft_state["booking_stage"] = "awaiting_confirmation"
     soft_state["last_presented_view"] = "booking_review"
     _sync_review_state(soft_state, summary)
@@ -1485,6 +1515,7 @@ async def handle_active_booking_turn(
         stage = str(soft_state.get("booking_stage") or "").strip()
     if stage not in _ACTIVE_BOOKING_STAGES:
         return None
+    soft_state["active_flow"] = "booking"
 
     if _is_booking_faq(message):
         tool_context = SimpleNamespace(state={"soft_state": soft_state})
@@ -1549,6 +1580,7 @@ async def handle_active_booking_turn(
     )
 
     if next_field:
+        soft_state["active_flow"] = "booking"
         soft_state["booking_stage"] = "modifying_details" if stage in {"modifying_details", "awaiting_modification_choice"} else "collecting_details"
         soft_state["last_presented_view"] = "booking_details_request"
         return {

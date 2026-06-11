@@ -66,6 +66,7 @@ from app.services.booking_flow import (
     handle_active_booking_turn as _handle_active_booking_turn,
     handle_booking_status_check as _handle_booking_status_check,
     handle_review_modification_request as _handle_review_modification_request,
+    has_active_booking_session as _has_active_booking_session,
     list_available_cities_payload as _list_available_cities_payload,
     resume_booking_flow as _resume_booking_flow,
     start_booking_for_selected_property as _start_booking_for_selected_property_flow,
@@ -100,9 +101,53 @@ def _filter_persistent_state(state: Any) -> Dict[str, Any]:
     }
 
 def _merge_soft_state(existing: Any, updates: Any) -> Dict[str, Any]:
+    """
+    Merge soft_state updates with constraint-aware logic.
+    
+    - last_filters: Merge individual fields, not entire dict
+    - last_search_filters: Merge individual fields, not entire dict
+    - all_search_results: Replace (new search)
+    - visible_results: Replace (new page)
+    - option_map: Replace (new results)
+    - Other fields: Standard update
+    """
     base = dict(existing) if isinstance(existing, dict) else {}
-    if isinstance(updates, dict):
+    
+    if not isinstance(updates, dict):
+        return base
+    
+    # Special handling for last_filters - merge individual fields
+    if "last_filters" in updates and isinstance(updates["last_filters"], dict):
+        existing_filters = base.get("last_filters", {})
+        if isinstance(existing_filters, dict):
+            # Merge: new non-None values override old
+            merged_filters = dict(existing_filters)
+            for key, value in updates["last_filters"].items():
+                if value is not None:
+                    merged_filters[key] = value
+            base["last_filters"] = merged_filters
+            # Remove last_filters from updates to avoid overwriting
+            updates = dict(updates)
+            updates.pop("last_filters", None)
+    
+    # Special handling for last_search_filters - merge individual fields
+    if "last_search_filters" in updates and isinstance(updates["last_search_filters"], dict):
+        existing_filters = base.get("last_search_filters", {})
+        if isinstance(existing_filters, dict):
+            # Merge: new non-None values override old
+            merged_filters = dict(existing_filters)
+            for key, value in updates["last_search_filters"].items():
+                if value is not None:
+                    merged_filters[key] = value
+            base["last_search_filters"] = merged_filters
+            # Remove last_search_filters from updates to avoid overwriting
+            updates = dict(updates)
+            updates.pop("last_search_filters", None)
+    
+    # Standard update for other fields
+    if updates:
         base.update(updates)
+    
     return base
 
 def _merge_state(target: Dict[str, Any], updates: Dict[str, Any]) -> None:
@@ -1202,14 +1247,14 @@ async def _maybe_handle_search_state_shortcut(
     if shortcut is None:
         return None
 
+    active_booking_session = _has_active_booking_session(soft_state)
+    booking_stage = str(soft_state.get("booking_stage") or "").strip()
+
+    if active_booking_session and shortcut.action in {"paginate_results", "return_to_previous_results"}:
+        return None
+
     if shortcut.action == "select_property":
-        stage = str(soft_state.get("booking_stage") or "").strip()
-        if stage in {
-            "collecting_details",
-            "modifying_details",
-            "awaiting_confirmation",
-            "awaiting_modification_choice",
-        }:
+        if active_booking_session and booking_stage != "awaiting_property_reselection":
             return None
 
     payload: Optional[Dict[str, Any]] = None
@@ -1488,34 +1533,6 @@ async def run_adk_turn(
             yield deterministic_reply
             return
 
-    with trace.span(name="direct_property_search"):
-        direct_search_payload = await maybe_handle_direct_property_search(
-            cleaned_message,
-            session_id,
-            get_snapshot=get_session_snapshot,
-            save_snapshot=save_session_snapshot,
-        )
-    if direct_search_payload:
-        deterministic_reply = str(direct_search_payload.get("deterministic_reply") or "").strip()
-        if deterministic_reply:
-            trace.end()
-            yield deterministic_reply
-            return
-        if (
-            direct_search_payload.get("status") == "properties_found"
-            and direct_search_payload.get("properties")
-        ):
-            deterministic = _render_property_results_from_router_output(direct_search_payload)
-            if deterministic:
-                trace.end()
-                yield deterministic
-                return
-        status = str(direct_search_payload.get("status") or "").lower()
-        if status == "no_results":
-            trace.end()
-            yield _render_no_results_from_search_payload(direct_search_payload)
-            return
-
     with trace.span(name="semantic_shortcut"):
         shortcut_payload = await _maybe_handle_search_state_shortcut(
             session_id = session_id,
@@ -1568,6 +1585,34 @@ async def run_adk_turn(
         trace.end()
         yield str(deterministic_reply)
         return
+
+    with trace.span(name="direct_property_search"):
+        direct_search_payload = await maybe_handle_direct_property_search(
+            cleaned_message,
+            session_id,
+            get_snapshot=get_session_snapshot,
+            save_snapshot=save_session_snapshot,
+        )
+    if direct_search_payload:
+        deterministic_reply = str(direct_search_payload.get("deterministic_reply") or "").strip()
+        if deterministic_reply:
+            trace.end()
+            yield deterministic_reply
+            return
+        if (
+            direct_search_payload.get("status") == "properties_found"
+            and direct_search_payload.get("properties")
+        ):
+            deterministic = _render_property_results_from_router_output(direct_search_payload)
+            if deterministic:
+                trace.end()
+                yield deterministic
+                return
+        status = str(direct_search_payload.get("status") or "").lower()
+        if status == "no_results":
+            trace.end()
+            yield _render_no_results_from_search_payload(direct_search_payload)
+            return
     if detect_policy_question(cleaned_message):
         from app.agents.tools.support import check_faq
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 import csv
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from ..services.config import SEED_PROPERTY_TYPES
 from ..services.property_type_normalizer import normalize_property_type as _normalize_property_type
 from ..services.property_type_normalizer import get_all_canonical_types as _get_all_canonical_types
+
+logger = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DATASET_PATHS = [
     _REPO_ROOT / "backend" / "data" / "dataset.csv",      
@@ -97,6 +100,11 @@ def property_search(
     else:
         property_type = _normalize_property_type(property_type)
     
+    logger.info(
+        "[property_search] search params: location=%s, property_type=%s, beds=%s, budget=%s, amenities=%s",
+        location, property_type, beds, budget, amenities
+    )
+    
     for r in _DATASET:
 
         if not _matches_location(r.get("city",""), location):
@@ -104,6 +112,10 @@ def property_search(
         if property_type:
             row_canonical = _normalize_property_type(r.get("property_type") or "")
             if row_canonical != property_type:
+                logger.debug(
+                    "[property_search] filtered out property: id=%s, type=%s, wanted=%s",
+                    r.get("id"), row_canonical, property_type
+                )
                 continue
 
         if budget is not None and r.get("price_per_night") is not None and r["price_per_night"] > budget:
@@ -129,6 +141,8 @@ def property_search(
         -(x.get("rating") or 0.0),
         x.get("title",""),
     ))
+    
+    logger.info("[property_search] found %d properties matching filters", len(out))
     
     return out
 

@@ -1,10 +1,14 @@
 """Deterministic pre-ADK property search bypasses LLM and persists soft_state."""
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import app.agents.tools.search as search_tool_module
+from app.agents.tools.search import search_properties
+from app.services.constraint_extractor import extract_dynamic_constraints
 from app.services import adk_runner
 from app.services.direct_property_search import (
     extract_property_type_from_message,
@@ -75,6 +79,13 @@ def _block_adk_and_prerouter(monkeypatch):
     monkeypatch.setattr(adk_runner, "sanitize_input", lambda m: (m, True))
     monkeypatch.setattr(adk_runner, "sanitize_output", lambda m: m)
     return route_pre_adk
+
+
+def _enable_paginated_search(monkeypatch, *, page_size: int = 2):
+    monkeypatch.setattr(search_tool_module, "_search_display_pagination_enabled", lambda: True)
+    monkeypatch.setattr(search_tool_module, "_search_display_mode", lambda: "paginated")
+    monkeypatch.setattr(search_tool_module, "_search_display_max_inline_results", lambda: None)
+    monkeypatch.setattr(search_tool_module, "_resolve_page_size", lambda: page_size)
 
 
 @pytest.mark.asyncio
@@ -539,6 +550,117 @@ def _seattle_villa_dataset() -> list[dict]:
     ]
 
 
+def _seattle_refinement_dataset() -> list[dict]:
+    return [
+        _property(
+            property_id="sea-villa-pet-1",
+            title="Cedar Pool Villa",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=3,
+            bathrooms=2,
+            price=190,
+            amenities=["pool", "pet_friendly", "wifi"],
+            rating=4.9,
+            reviews=250,
+        ),
+        _property(
+            property_id="sea-villa-pet-2",
+            title="Harbor Pool Villa",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=3,
+            bathrooms=2,
+            price=210,
+            amenities=["pool", "pet_friendly", "parking"],
+            rating=4.8,
+            reviews=220,
+        ),
+        _property(
+            property_id="sea-villa-pet-3",
+            title="Lakeside Pool Villa",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=3,
+            bathrooms=3,
+            price=230,
+            amenities=["pool", "pet_friendly", "wifi", "parking"],
+            rating=4.7,
+            reviews=210,
+        ),
+        _property(
+            property_id="sea-villa-pet-4",
+            title="Ridge Pool Villa",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=3,
+            bathrooms=2,
+            price=260,
+            amenities=["pool", "pet_friendly"],
+            rating=4.6,
+            reviews=205,
+        ),
+        _property(
+            property_id="sea-villa-pool-only",
+            title="Pool Villa Without Pets",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=3,
+            bathrooms=2,
+            price=170,
+            amenities=["pool", "wifi"],
+            rating=4.5,
+        ),
+        _property(
+            property_id="sea-villa-2br",
+            title="Two Bedroom Pool Villa",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=2,
+            bathrooms=2,
+            price=160,
+            amenities=["pool", "pet_friendly"],
+            rating=4.4,
+        ),
+        _property(
+            property_id="sea-ap-pet-1",
+            title="Green Lake Apartment",
+            city="Seattle",
+            property_type="Apartment",
+            bedrooms=3,
+            bathrooms=2,
+            price=140,
+            amenities=["pool", "pet_friendly", "wifi"],
+            rating=4.7,
+            reviews=180,
+        ),
+        _property(
+            property_id="sea-ap-pet-2",
+            title="Pioneer Apartment",
+            city="Seattle",
+            property_type="Apartment",
+            bedrooms=3,
+            bathrooms=2,
+            price=175,
+            amenities=["pool", "pet_friendly", "parking"],
+            rating=4.6,
+            reviews=170,
+        ),
+        _property(
+            property_id="sea-ap-pool-only",
+            title="Waterfront Apartment",
+            city="Seattle",
+            property_type="Apartment",
+            bedrooms=3,
+            bathrooms=2,
+            price=165,
+            amenities=["pool", "wifi"],
+            rating=4.5,
+            reviews=160,
+        ),
+    ]
+
+
 def test_fuzzy_property_type_normalizes_vila_typo():
     assert fuzzy_resolve_property_type("vila") == "villa"
     assert extract_property_type_from_message("i am looking for an vila in seattle of 2BR") == "villa"
@@ -850,3 +972,221 @@ async def test_no_exact_match_does_not_broaden_property_types(monkeypatch):
     assert "2br apartment in seattle" not in reply
     assert "3br villa in seattle" not in reply
     assert "relax" in reply
+
+
+@pytest.mark.asyncio
+async def test_typo_city_trace_logs_show_fuzzy_root_cause(monkeypatch, caplog):
+    fake = [
+        _property(
+            property_id="la-villa-1",
+            title="Los Angeles Villa One",
+            city="Los Angeles",
+            property_type="Villa",
+            bedrooms=3,
+        ),
+    ]
+    snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+
+    route_pre_adk = _block_adk_and_prerouter(monkeypatch)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+
+    with caplog.at_level("INFO"), patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        chunks = []
+        async for chunk in adk_runner.run_adk_turn(
+            "u-typo-trace",
+            "s-typo-trace",
+            "i am looking a villa in los angellas",
+        ):
+            chunks.append(chunk)
+
+    reply = "".join(chunks)
+    route_pre_adk.assert_not_awaited()
+    assert "Los Angeles Villa One" in reply
+    assert "exact_city=None" in caplog.text
+    assert "city_resolution_status=fuzzy" in caplog.text
+    assert "canonical_city='Los Angeles'" in caplog.text
+    assert "active_search_context=False" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_refinement_flow_preserves_dynamic_constraints_pagination_and_selection(monkeypatch):
+    fake = _seattle_refinement_dataset()
+    snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+        snapshot["history"] = history
+
+    async def run_turn(message: str) -> str:
+        chunks = []
+        async for chunk in adk_runner.run_adk_turn("u-refine", "s-refine", message):
+            chunks.append(chunk)
+        return "".join(chunks)
+
+    route_pre_adk = _block_adk_and_prerouter(monkeypatch)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    _enable_paginated_search(monkeypatch, page_size=2)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        reply = await run_turn("villa in Seattle")
+        assert "Cedar Pool Villa" in reply
+        assert "Green Lake Apartment" not in reply
+        soft_state = snapshot["state"]["soft_state"]
+        assert soft_state["last_filters"]["city"] == "Seattle"
+        assert soft_state["last_filters"]["property_type"] == "villa"
+        assert soft_state["current_page"] == 1
+
+        reply = await run_turn("with pool")
+        soft_state = snapshot["state"]["soft_state"]
+        assert set(soft_state["last_filters"]["amenities"]) == {"pool"}
+        assert all("pool" in {str(a).lower() for a in item.get("amenities") or []} for item in soft_state["all_search_results"])
+
+        reply = await run_turn("cheaper")
+        soft_state = snapshot["state"]["soft_state"]
+        assert soft_state["last_sort_preferences"] == [{"field": "price_per_night", "direction": "asc"}]
+        cheaper_prices = [item["price_per_night"] for item in soft_state["visible_results"]]
+        assert cheaper_prices == sorted(cheaper_prices)
+
+        reply = await run_turn("3 bedrooms")
+        soft_state = snapshot["state"]["soft_state"]
+        assert soft_state["last_dynamic_constraints"]["bedrooms"] == {"value": 3, "operator": "exact"}
+        assert all(item["bedrooms"] == 3 for item in soft_state["all_search_results"])
+        bedroom_prices = [item["price_per_night"] for item in soft_state["all_search_results"]]
+        assert bedroom_prices == sorted(bedroom_prices)
+
+        reply = await run_turn("pet friendly")
+        soft_state = snapshot["state"]["soft_state"]
+        assert set(soft_state["last_filters"]["amenities"]) == {"pool", "pet_friendly"}
+        assert soft_state["last_sort_preferences"] == [{"field": "price_per_night", "direction": "asc"}]
+        assert len(soft_state["all_search_results"]) == 4
+        assert [item["id"] for item in soft_state["visible_results"]] == [
+            "sea-villa-pet-1",
+            "sea-villa-pet-2",
+        ]
+
+        reply = await run_turn("show more")
+        soft_state = snapshot["state"]["soft_state"]
+        assert "Lakeside Pool Villa" in reply
+        assert "Ridge Pool Villa" in reply
+        assert soft_state["current_page"] == 2
+        assert [item["id"] for item in soft_state["visible_results"]] == [
+            "sea-villa-pet-3",
+            "sea-villa-pet-4",
+        ]
+
+        reply = await run_turn("no, apartments only")
+        soft_state = snapshot["state"]["soft_state"]
+        assert "Green Lake Apartment" in reply
+        assert "Pioneer Apartment" in reply
+        assert "Cedar Pool Villa" not in reply
+        assert soft_state["last_filters"]["property_type"] == "apartment"
+        assert soft_state["last_filters"]["city"] == "Seattle"
+        assert soft_state["last_filters"]["bedrooms"] == 3
+        assert set(soft_state["last_filters"]["amenities"]) == {"pool", "pet_friendly"}
+        assert soft_state["last_sort_preferences"] == [{"field": "price_per_night", "direction": "asc"}]
+        assert [item["id"] for item in soft_state["visible_results"]] == [
+            "sea-ap-pet-1",
+            "sea-ap-pet-2",
+        ]
+
+        expected_title = soft_state["visible_results"][1]["title"]
+        expected_id = soft_state["visible_results"][1]["id"]
+        reply = await run_turn("book option 2")
+        soft_state = snapshot["state"]["soft_state"]
+        assert expected_title in reply
+        assert soft_state["last_selected_property_id"] == expected_id
+        assert soft_state["last_presented_view"] == "property_details"
+
+    route_pre_adk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_direct_tool_and_rust_search_paths_return_identical_filtered_results(monkeypatch):
+    fake = _seattle_refinement_dataset()
+    message = "villa in Seattle with pool cheaper 3 bedrooms pet friendly"
+    snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+
+    route_pre_adk = _block_adk_and_prerouter(monkeypatch)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+
+    constraints, plan = extract_dynamic_constraints(message, session_id="parity")
+    common_kwargs = {
+        "city": constraints.get("city"),
+        "property_type": constraints.get("property_type"),
+        "beds": constraints.get("bedrooms"),
+        "beds_operator": constraints.get_operator("bedrooms", "exact"),
+        "bathrooms": constraints.get("bathrooms"),
+        "bathrooms_operator": constraints.get_operator("bathrooms", "exact"),
+        "guests": constraints.get("occupancy_max"),
+        "guests_operator": constraints.get_operator("occupancy_max", "min"),
+        "budget": constraints.get("price_per_night"),
+        "amenities": ",".join(constraints.get("amenities") or []),
+        "sort_preferences": list(plan.sort_preferences),
+        "search_plan": plan,
+    }
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        async for _chunk in adk_runner.run_adk_turn("u-parity", "s-parity", message):
+            pass
+        direct_ids = [item["id"] for item in snapshot["state"]["soft_state"]["all_search_results"]]
+
+        ctx_tool = SimpleNamespace(state={"soft_state": {}})
+        tool_result = await search_properties(
+            **common_kwargs,
+            search_path="tool",
+            tool_context=ctx_tool,
+        )
+        tool_ids = [item["id"] for item in ctx_tool.state["soft_state"]["all_search_results"]]
+        assert tool_ids == [prop["id"] for prop in tool_result["properties"]]
+
+    rust_payload = {"result": {"results": list(reversed(fake))}}
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value=rust_payload,
+    ):
+        ctx_rust = SimpleNamespace(state={"soft_state": {}})
+        rust_result = await search_properties(
+            **common_kwargs,
+            search_path="rust",
+            tool_context=ctx_rust,
+        )
+        rust_ids = [item["id"] for item in ctx_rust.state["soft_state"]["all_search_results"]]
+        assert rust_ids == [prop["id"] for prop in rust_result["properties"]]
+
+    expected_ids = [
+        "sea-villa-pet-1",
+        "sea-villa-pet-2",
+        "sea-villa-pet-3",
+        "sea-villa-pet-4",
+    ]
+    route_pre_adk.assert_not_awaited()
+    assert direct_ids == expected_ids
+    assert tool_ids == expected_ids
+    assert rust_ids == expected_ids

@@ -38,6 +38,7 @@ from app.services.property_type_normalizer import (
     fuzzy_resolve_property_type,
     normalize_property_type,
 )
+from app.services.booking_flow import has_active_booking_session
 from app.services.redis_store import get_session_snapshot, save_session_snapshot
 from app.services.observability.langfuse_observer import get_observer, sanitize_for_observability
 
@@ -375,6 +376,22 @@ def extract_city_from_message(message: str) -> Optional[str]:
     """Return the best-matching configured city name from the message."""
     resolved = resolve_supported_city_from_message(message)
     return resolved.city
+
+
+def _exact_supported_city_from_message(message: str) -> Optional[str]:
+    normalized = _normalize(message)
+    if not normalized:
+        return None
+
+    supported_lookup = _supported_city_lookup()
+    alias_lookup = _city_alias_lookup()
+    for supported_key, canonical in supported_lookup.items():
+        if _contains_term(normalized, supported_key):
+            return canonical
+    for alias_key, canonical in alias_lookup.items():
+        if _contains_term(normalized, alias_key):
+            return canonical
+    return None
 
 
 def _property_type_block_words() -> frozenset[str]:
@@ -813,65 +830,99 @@ async def maybe_handle_direct_property_search(
     state = snapshot.get("state") if isinstance(snapshot.get("state"), dict) else {}
     soft_state = state.get("soft_state") if isinstance(state.get("soft_state"), dict) else {}
     normalized_message = _normalize(message)
-    if not normalized_message or is_status_query(message) or not is_property_search(message):
+    if not normalized_message or is_status_query(message):
+        return None
+
+    if has_active_booking_session(soft_state):
+        logger.info(
+            "[direct_search.trace] skipped due to active booking session: stage=%r view=%r",
+            soft_state.get("booking_stage"),
+            soft_state.get("last_presented_view"),
+        )
         return None
 
     if match_shortcut(message, soft_state) is not None:
         return None
-    if wants_property_search_request(message) and soft_state.get("all_search_results"):
-        return None
 
+    from app.services.constraint_extractor import (
+        dynamic_constraints_from_soft_state,
+        extract_dynamic_constraints,
+    )
+
+    active_search_context = bool(soft_state.get("all_search_results") or soft_state.get("last_filters"))
+    session_constraints = dynamic_constraints_from_soft_state(soft_state) if active_search_context else None
+    session_sort_preferences = list(soft_state.get("last_sort_preferences") or []) if active_search_context else []
+    dynamic_constraints, plan = extract_dynamic_constraints(
+        message,
+        session_constraints=session_constraints,
+        session_id=session_id,
+    )
     property_type = extract_property_type_from_message(message)
     has_search_phrase = _has_search_phrase(message)
-    if not property_type and not has_search_phrase:
+    has_new_signal = bool(plan.trace.extracted_constraints) or bool(plan.sort_preferences)
+
+    if not is_property_search(message) and not (active_search_context and has_new_signal):
         return None
 
-    structured_query = extract_property_search_query(message)
     city_match = resolve_supported_city_from_message(message)
-    if not city_match.city:
+    exact_city = _exact_supported_city_from_message(message)
+    logger.info(
+        "[direct_search.trace] exact_city=%r city_resolution_status=%s canonical_city=%r "
+        "active_search_context=%s extracted=%s merged=%s session_sort_preferences=%s sort_preferences=%s",
+        exact_city,
+        city_match.status,
+        city_match.city,
+        active_search_context,
+        plan.trace.extracted_constraints,
+        plan.trace.merged_constraints,
+        session_sort_preferences,
+        plan.sort_preferences,
+    )
+
+    city = dynamic_constraints.get("city") or city_match.city
+    if not city and not active_search_context and not property_type and not has_search_phrase and not has_new_signal:
+        return None
+
+    if not city:
         return {
             "status": "needs_clarification",
             "missing": ["city"],
             "query_context": {
                 "city": None,
-                "property_type": structured_query.property_type or property_type,
+                "property_type": dynamic_constraints.get("property_type") or property_type,
             },
             "deterministic_reply": _city_clarification_reply(city_match),
         }
 
-    city = city_match.city
-    property_type = _canonical_property_type_key(
-        structured_query.property_type or property_type
-    )
-    constraints = _constraint_values_from_query(
-        structured_query,
-        property_type=property_type,
-    )
-    property_type = constraints.get("property_type") or property_type
+    if not dynamic_constraints.has("city"):
+        dynamic_constraints.set("city", city, "exact")
 
-    bedrooms_exact = constraints["bedroom_exact"]
-    bedrooms_min = constraints["bedroom_min"]
-    bedrooms_max = constraints["bedroom_max"]
-    bathroom_exact = constraints["bathroom_exact"]
-    price_max = constraints["price_max"]
-    occupancy_min = constraints["occupancy_min"]
-    amenities = constraints["amenities"]
+    property_type = _canonical_property_type_key(
+        dynamic_constraints.get("property_type") or property_type
+    )
+    if property_type and not dynamic_constraints.has("property_type"):
+        dynamic_constraints.set("property_type", property_type, "exact")
 
     tool_context = SimpleNamespace(state={"soft_state": dict(soft_state)})
+
+    effective_sort_preferences = list(plan.sort_preferences or session_sort_preferences)
 
     search_kwargs: Dict[str, Any] = {
         "city": city,
         "property_type": property_type,
+        "beds": dynamic_constraints.get("bedrooms"),
+        "beds_operator": dynamic_constraints.get_operator("bedrooms", "exact"),
+        "bathrooms": dynamic_constraints.get("bathrooms"),
+        "bathrooms_operator": dynamic_constraints.get_operator("bathrooms", "exact"),
+        "guests": dynamic_constraints.get("occupancy_max"),
+        "guests_operator": dynamic_constraints.get_operator("occupancy_max", "min"),
+        "budget": dynamic_constraints.get("price_per_night"),
+        "amenities": ",".join(dynamic_constraints.get("amenities") or []),
+        "sort_preferences": effective_sort_preferences,
+        "search_path": "direct",
+        "search_plan": plan,
         "tool_context": tool_context,
     }
-    if bedrooms_exact is not None:
-        search_kwargs["beds"] = bedrooms_exact
-    elif bedrooms_min is not None:
-        search_kwargs["beds"] = bedrooms_min
-    if price_max is not None:
-        search_kwargs["budget"] = price_max
-    if amenities:
-        search_kwargs["amenities"] = ",".join(amenities)
 
     try:
         payload = await search_properties(**search_kwargs)
@@ -882,114 +933,8 @@ async def maybe_handle_direct_property_search(
     new_soft_state = tool_context.state.get("soft_state")
     if not isinstance(new_soft_state, dict):
         new_soft_state = {}
-
-    has_active = _has_active_constraints(constraints)
-    if not has_active:
-        state = dict(state)
-        state["soft_state"] = new_soft_state
-
-        meta = snapshot.get("meta") if isinstance(snapshot.get("meta"), dict) else {}
-        await save_snapshot(
-            session_id=session_id,
-            history=snapshot.get("history", []),
-            state=state,
-            metadata={
-                key: meta[key]
-                for key in ("app_name", "user_id", "last_update_time")
-                if key in meta
-            },
-        )
-        logger.debug(
-            "[direct_search] handled city=%r property_type=%r status=%s total_found=%s",
-            city,
-            property_type,
-            payload.get("status") if isinstance(payload, dict) else None,
-            payload.get("total_found") if isinstance(payload, dict) else None,
-        )
-        return payload if isinstance(payload, dict) else None
-
     if not isinstance(payload, dict):
         return None
-
-    original_props = payload.get("properties") or []
-    original_all_results = (
-        new_soft_state.get("all_search_results")
-        if isinstance(new_soft_state, dict)
-        else None
-    ) or []
-    original_last_search_props: List[Dict[str, Any]] = []
-    if isinstance(new_soft_state, dict):
-        last_search = new_soft_state.get("last_search")
-        if isinstance(last_search, dict):
-            original_last_search_props = list(last_search.get("properties") or [])
-
-    source_records = original_all_results or original_last_search_props or original_props
-    filtered_all = _filter_properties_by_constraints(source_records, constraints)
-    filtered_all = _sort_properties_for_display(filtered_all)
-    page_limit = len(original_props) if original_props else None
-    display_props = filtered_all[:page_limit] if page_limit else filtered_all
-    filtered_props = _renumber_properties(list(display_props))
-    filtered_last_search = list(filtered_all)
-    option_map = _build_option_map(filtered_props)
-
-    payload["properties"] = filtered_props
-    payload["shown_count"] = len(filtered_props)
-    payload["total_found"] = len(filtered_all) or len(filtered_props)
-    payload["option_map"] = option_map
-
-    qctx = _build_query_context(
-        city=city,
-        property_type=property_type,
-        constraints=constraints,
-        price_max=price_max,
-    )
-    payload["query_context"] = {**dict(payload.get("query_context") or {}), **qctx}
-
-    if not filtered_props and _has_active_constraints(constraints):
-        no_results_payload = _build_no_results_payload(
-            city=city,
-            property_type=property_type,
-            constraints=constraints,
-            price_max=price_max,
-        )
-        logger.debug(
-            "[direct_search] no_results city=%r property_type=%r constraints=%s",
-            city,
-            property_type,
-            constraints,
-        )
-        return no_results_payload
-
-    new_soft_state["all_search_results"] = filtered_all
-    new_soft_state["visible_results"] = filtered_props
-    new_soft_state["option_map"] = option_map
-    new_soft_state["active_property_options_map"] = option_map
-    new_soft_state["active_property_options_shown_count"] = len(filtered_props)
-    new_soft_state["active_property_options_total_found"] = (
-        len(filtered_all) or len(filtered_props)
-    )
-    new_soft_state["active_flow"] = "search"
-    new_soft_state["last_filters"] = {
-        "city": city,
-        "property_type": property_type,
-        "bedrooms": bedrooms_exact,
-        "bedrooms_operator": "exact" if bedrooms_exact is not None else None,
-        "bathrooms": bathroom_exact,
-        "guests": occupancy_min,
-        "amenities": list(amenities),
-        "budget": price_max,
-    }
-
-    if isinstance(new_soft_state.get("last_search"), dict):
-        new_soft_state["last_search"] = dict(new_soft_state["last_search"])
-        new_soft_state["last_search"]["properties"] = filtered_last_search or filtered_all
-        new_soft_state["last_search"]["option_map"] = option_map
-        new_soft_state["last_search"]["shown_count"] = len(filtered_props)
-        new_soft_state["last_search"]["total_found"] = (
-            len(filtered_all) or len(filtered_props)
-        )
-        if qctx:
-            new_soft_state["last_search"]["query_context"] = dict(qctx)
 
     state = dict(state)
     state["soft_state"] = new_soft_state
