@@ -421,8 +421,9 @@ async def handle_booking_status_check(
       1. Detects booking-status intent in the message.
       2. Extracts a booking ID (BK-YYYYMMDD-XXXXXXXX) if present.
       3. If ID is present and found in session → returns deterministic status.
-      4. If ID is present but NOT found in session → attempts DB lookup;
-         if DB also fails → returns not-found message.
+      4. If ID is present but NOT found in session → attempts DB lookup
+         (`public.bookings`, then `public.successful_bookings`);
+         if both fail → returns not-found message.
       5. If no ID but session has a booking_receipt → returns latest booking status.
       6. If no ID and no receipt → asks user for booking ID.
       7. If booking-status intent is NOT detected → returns None (let pipeline continue).
@@ -451,6 +452,7 @@ async def handle_booking_status_check(
 
         try:
             from app.services.booking import get_booking_status
+            from app.observability.db_logging import get_successful_booking_status
 
             db_result = await get_booking_status(booking_id)
             if db_result.get("ok"):
@@ -459,6 +461,23 @@ async def handle_booking_status_check(
                     "status": db_result.get("status") or cfg.booking_confirmed_status,
                     "check_in": db_result.get("check_in") or "",
                     "check_out": db_result.get("check_out") or "",
+                }
+                return {
+                    "status": Status.FOUND,
+                    "receipt": merged,
+                    "deterministic_reply": _render_booking_status_reply(merged),
+                }
+
+            db_row = await get_successful_booking_status(booking_id)
+            if db_row:
+                merged = {
+                    "booking_id": booking_id,
+                    "status": db_row.get("status") or cfg.booking_confirmed_status,
+                    "check_in": db_row.get("check_in") or "",
+                    "check_out": db_row.get("check_out") or "",
+                    "guest_name": db_row.get("user_name") or "",
+                    "guest_email": db_row.get("user_email") or "",
+                    "property_title": db_row.get("property_title") or "",
                 }
                 return {
                     "status": Status.FOUND,

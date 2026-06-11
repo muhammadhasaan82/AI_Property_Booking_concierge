@@ -552,14 +552,97 @@ async def test_booking_status_wrong_id_not_found(monkeypatch):
     """
     snapshot = _build_status_check_snapshot({"booking_receipt": dict(_TEST_RECEIPT)})
 
-    with patch(
-        "app.services.booking.get_booking_status",
-        AsyncMock(return_value={"ok": False, "error": "not found"}),
+    with (
+        patch(
+            "app.services.booking.get_booking_status",
+            AsyncMock(return_value={"ok": False, "error": "not found"}),
+        ),
+        patch(
+            "app.observability.db_logging.get_successful_booking_status",
+            AsyncMock(return_value=None),
+        ),
     ):
         reply, route_pre_adk = await _run_status_check_turn(
             monkeypatch,
             snapshot,
             "My booking ID is BK-20260607-UNKNOWN",
+        )
+
+    route_pre_adk.assert_not_awaited()
+    assert "wasn't found" in reply.lower() or "not found" in reply.lower()
+
+
+@pytest.mark.asyncio
+async def test_booking_status_falls_back_to_successful_bookings(monkeypatch):
+    """
+    When session has no receipt, bookings lookup misses, but successful_bookings
+    has the confirmed row, return persisted status instead of not-found.
+    """
+    snapshot = _build_status_check_snapshot({})
+    booking_id = "BK-20260607-C48A4AFA"
+    successful_row = {
+        "booking_id": booking_id,
+        "status": "confirmed",
+        "check_in": "2026-06-02",
+        "check_out": "2026-06-11",
+        "user_name": "Jane Doe",
+        "user_email": "jane@example.com",
+        "property_title": "Apartment 3",
+        "city": "Test City",
+        "payment_url": "https://pay.example.com",
+    }
+
+    with (
+        patch(
+            "app.services.booking.get_booking_status",
+            AsyncMock(return_value={"ok": False, "error": "not found"}),
+        ),
+        patch(
+            "app.observability.db_logging.get_successful_booking_status",
+            AsyncMock(return_value=successful_row),
+        ),
+    ):
+        reply, route_pre_adk = await _run_status_check_turn(
+            monkeypatch,
+            snapshot,
+            f"My booking ID is {booking_id}",
+        )
+
+    route_pre_adk.assert_not_awaited()
+    lower_reply = reply.lower()
+    assert "wasn't found" not in lower_reply
+    assert "not found" not in lower_reply
+    assert booking_id in reply
+    assert "Jane Doe" in reply
+    assert "jane@example.com" in reply
+    assert "Apartment 3" in reply
+    assert "confirmed" in lower_reply
+    assert "June 2, 2026" in reply
+    assert "June 11, 2026" in reply
+
+
+@pytest.mark.asyncio
+async def test_booking_status_both_db_lookups_fail_not_found(monkeypatch):
+    """
+    When session has no receipt and both bookings and successful_bookings lookups
+    fail, return the not-found template.
+    """
+    snapshot = _build_status_check_snapshot({})
+
+    with (
+        patch(
+            "app.services.booking.get_booking_status",
+            AsyncMock(return_value={"ok": False, "error": "not found"}),
+        ),
+        patch(
+            "app.observability.db_logging.get_successful_booking_status",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        reply, route_pre_adk = await _run_status_check_turn(
+            monkeypatch,
+            snapshot,
+            "My booking ID is BK-20260607-NOTFOUND",
         )
 
     route_pre_adk.assert_not_awaited()
