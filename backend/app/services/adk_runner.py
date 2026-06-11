@@ -797,27 +797,41 @@ def _render_property_results_from_router_output(router_output: Dict[str, Any]) -
 def _render_no_results_from_search_payload(payload: Dict[str, Any]) -> str:
     qctx: Dict[str, Any] = payload.get("query_context") or payload.get("filters_applied") or {}
     city = str(qctx.get("city") or payload.get("city") or "").strip().title()
-    property_type = str(qctx.get("property_type") or "").strip().lower()
+    property_type = str(
+        qctx.get("property_type") or payload.get("property_type") or ""
+    ).strip().lower()
     bedrooms = qctx.get("bedrooms")
     bedrooms_operator = str(qctx.get("bedrooms_operator") or "").strip().lower()
+    bathrooms = qctx.get("bathrooms")
+    amenities = [
+        str(item).strip().replace("_", " ")
+        for item in (qctx.get("amenities") or payload.get("amenities") or [])
+        if str(item).strip()
+    ]
+
+    city_part = f" in {city}" if city else ""
+    amenity_part = ""
+    if amenities:
+        amenity_part = f" with {' and '.join(amenities)}"
+
+    if property_type and bedrooms is not None and bedrooms_operator == "exact":
+        subject = f"{int(bedrooms)}-bedroom {property_type}s"
+        if bathrooms is not None:
+            subject = f"{subject} with {int(bathrooms)} bathrooms"
+        return (
+            f"I couldn't find any exact matches for {subject}{city_part}{amenity_part}. "
+            f"I can show other {property_type} options{city_part} or help you relax a filter."
+        )
 
     subject = "matching properties"
     if property_type:
-        subject = f"{property_type} options"
-    if property_type:
         subject = f"{property_type}s"
-    if property_type and bedrooms is not None and bedrooms_operator == "exact":
-        subject = f"{int(bedrooms)}-bedroom {property_type}s"
+    if property_type and amenities:
+        subject = f"{property_type}s{amenity_part}"
 
-    city_part = f" in {city}" if city else ""
-    if property_type and bedrooms is not None and bedrooms_operator == "exact":
-        return (
-            f"I couldn't find any {int(bedrooms)}-bedroom {property_type}s{city_part}. "
-            f"I can show other {property_type} options{city_part} or help you relax the bedroom filter."
-        )
     return (
-        f"I couldn't find any {subject}{city_part} with those filters. "
-        "Try adjusting the city, property type, or budget."
+        f"I couldn't find any exact matches for {subject}{city_part}. "
+        "I can help you relax one of the filters if you'd like."
     )
 
 

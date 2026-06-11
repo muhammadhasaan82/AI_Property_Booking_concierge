@@ -10,6 +10,7 @@ from app.services.direct_property_search import (
     extract_property_type_from_message,
     is_clear_direct_property_search,
 )
+from app.services.property_type_normalizer import fuzzy_resolve_property_type, normalize_property_type
 
 
 def _make_apartment(idx: int) -> dict:
@@ -385,7 +386,9 @@ async def test_no_matches_for_exact_bedroom_filter(monkeypatch):
             chunks.append(chunk)
 
     reply = "".join(chunks)
-    assert "couldn't find any 9-bedroom apartments in New York".lower() in reply.lower()
+    lower_reply = reply.lower()
+    assert "exact match" in lower_reply or "couldn't find" in lower_reply
+    assert "9-bedroom" in lower_reply or "9 bedroom" in lower_reply
     assert "1BR Apartment in New York" not in reply
     assert "2BR Apartment in New York" not in reply
     assert "4BR Apartment in New York" not in reply
@@ -467,3 +470,383 @@ async def test_deterministic_property_render_bypasses_voice_llm_for_large_lists(
     reply = "".join(chunks)
     assert "Apartment 1" in reply
     assert "Apartment 128" in reply
+
+
+def _seattle_villa_dataset() -> list[dict]:
+    return [
+        _property(
+            property_id="sea-villa-2a",
+            title="2BR Villa A in Seattle",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=2,
+            bathrooms=2,
+            amenities=["wifi", "parking", "pool"],
+            rating=4.9,
+            reviews=200,
+        ),
+        _property(
+            property_id="sea-villa-2b",
+            title="2BR Villa B in Seattle",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=2,
+            bathrooms=1,
+            amenities=["wifi", "parking"],
+            rating=4.8,
+            reviews=180,
+        ),
+        _property(
+            property_id="sea-apt-2",
+            title="2BR Apartment in Seattle",
+            city="Seattle",
+            property_type="Apartment",
+            bedrooms=2,
+            rating=4.5,
+        ),
+        _property(
+            property_id="sea-condo-2",
+            title="2BR Condo in Seattle",
+            city="Seattle",
+            property_type="Condo",
+            bedrooms=2,
+            rating=4.4,
+        ),
+        _property(
+            property_id="sea-studio-2",
+            title="2BR Studio in Seattle",
+            city="Seattle",
+            property_type="Studio",
+            bedrooms=2,
+            rating=4.3,
+        ),
+        _property(
+            property_id="sea-house-2",
+            title="2BR House in Seattle",
+            city="Seattle",
+            property_type="House",
+            bedrooms=2,
+            rating=4.2,
+        ),
+        _property(
+            property_id="sea-villa-3",
+            title="3BR Villa in Seattle",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=3,
+            rating=4.7,
+        ),
+    ]
+
+
+def test_fuzzy_property_type_normalizes_vila_typo():
+    assert fuzzy_resolve_property_type("vila") == "villa"
+    assert extract_property_type_from_message("i am looking for an vila in seattle of 2BR") == "villa"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "2 bed vila seattle",
+        "show me 2BR villas Seattle",
+        "looking for 2 bedroom villa in Seattle",
+        "need a villa with 2 beds in seattle",
+        "villa in Seattle for 2 bedrooms",
+    ],
+)
+def test_property_type_variant_queries_normalize_to_villa(message: str):
+    assert extract_property_type_from_message(message) == "villa"
+
+
+@pytest.mark.asyncio
+async def test_vila_seattle_2br_filters_exact_villas_only(monkeypatch):
+    fake = _seattle_villa_dataset()
+    snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+
+    route_pre_adk = _block_adk_and_prerouter(monkeypatch)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        chunks = []
+        async for chunk in adk_runner.run_adk_turn(
+            "u-vila",
+            "s-vila",
+            "i am looking for an vila in seattle of 2BR",
+        ):
+            chunks.append(chunk)
+
+    reply = "".join(chunks)
+    route_pre_adk.assert_not_awaited()
+    assert "2BR Villa A in Seattle" in reply
+    assert "2BR Villa B in Seattle" in reply
+    assert "2BR Apartment in Seattle" not in reply
+    assert "2BR Condo in Seattle" not in reply
+    assert "2BR Studio in Seattle" not in reply
+    assert "2BR House in Seattle" not in reply
+    assert "3BR Villa in Seattle" not in reply
+
+    soft_state = snapshot["state"]["soft_state"]
+    assert soft_state["last_filters"]["city"] == "Seattle"
+    assert soft_state["last_filters"]["property_type"] == "villa"
+    assert soft_state["last_filters"]["bedrooms"] == 2
+    assert soft_state["last_search"]["query_context"]["property_type"] == "villa"
+    assert soft_state["last_search"]["query_context"]["bedrooms"] == 2
+    visible = soft_state["visible_results"]
+    assert visible
+    assert all(item["city"] == "Seattle" for item in visible)
+    assert all(normalize_property_type(item["property_type"]) == "villa" for item in visible)
+    assert all(item["bedrooms"] == 2 for item in visible)
+
+
+@pytest.mark.asyncio
+async def test_vila_seattle_option_selection_uses_constrained_results(monkeypatch):
+    fake = _seattle_villa_dataset()
+    snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+
+    _block_adk_and_prerouter(monkeypatch)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        async for _chunk in adk_runner.run_adk_turn(
+            "u-vila-select",
+            "s-vila-select",
+            "i am looking for an vila in seattle of 2BR",
+        ):
+            pass
+
+        soft_state = snapshot["state"]["soft_state"]
+        expected_title = soft_state["visible_results"][0]["title"]
+        expected_id = soft_state["visible_results"][0]["id"]
+
+        chunks = []
+        async for chunk in adk_runner.run_adk_turn(
+            "u-vila-select",
+            "s-vila-select",
+            "1",
+        ):
+            chunks.append(chunk)
+
+    reply = "".join(chunks)
+    assert expected_title in reply
+    assert snapshot["state"]["soft_state"]["last_selected_property_id"] == expected_id
+    assert normalize_property_type(
+        snapshot["state"]["soft_state"]["last_filters"]["property_type"]
+    ) == "villa"
+
+
+@pytest.mark.asyncio
+async def test_amenity_constrained_villa_search_filters_exact_matches(monkeypatch):
+    fake = _seattle_villa_dataset()
+    snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+
+    _block_adk_and_prerouter(monkeypatch)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        chunks = []
+        async for chunk in adk_runner.run_adk_turn(
+            "u-amenity",
+            "s-amenity",
+            "2BR villa in Seattle with wifi and parking",
+        ):
+            chunks.append(chunk)
+
+    reply = "".join(chunks)
+    assert "2BR Villa A in Seattle" in reply
+    assert "2BR Villa B in Seattle" in reply
+    assert "2BR Apartment in Seattle" not in reply
+
+    soft_state = snapshot["state"]["soft_state"]
+    assert soft_state["last_filters"]["property_type"] == "villa"
+    assert set(soft_state["last_filters"]["amenities"]) == {"wifi", "parking"}
+    for item in soft_state["visible_results"]:
+        amenities = {str(a).lower() for a in item.get("amenities") or []}
+        assert "wifi" in amenities
+        assert "parking" in amenities
+
+
+@pytest.mark.asyncio
+async def test_bathroom_and_guest_constraints_are_applied_and_persisted(monkeypatch):
+    fake = [
+        _property(
+            property_id="sea-villa-2bath",
+            title="2BR 2BA Villa in Seattle",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=2,
+            bathrooms=2,
+            occupancy_max=6,
+            rating=4.9,
+        ),
+        _property(
+            property_id="sea-villa-1bath",
+            title="2BR 1BA Villa in Seattle",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=2,
+            bathrooms=1,
+            occupancy_max=6,
+            rating=4.7,
+        ),
+        _property(
+            property_id="ny-apt-4guest",
+            title="2BR Apartment in New York",
+            city="New York",
+            property_type="Apartment",
+            bedrooms=2,
+            bathrooms=1,
+            occupancy_max=2,
+            rating=4.6,
+        ),
+        _property(
+            property_id="ny-apt-6guest",
+            title="2BR Apartment in New York for groups",
+            city="New York",
+            property_type="Apartment",
+            bedrooms=2,
+            bathrooms=2,
+            occupancy_max=6,
+            rating=4.8,
+        ),
+    ]
+    snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+
+    _block_adk_and_prerouter(monkeypatch)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        chunks = []
+        async for chunk in adk_runner.run_adk_turn(
+            "u-bath",
+            "s-bath",
+            "villa in Seattle with 2 bedrooms and 2 bathrooms",
+        ):
+            chunks.append(chunk)
+
+        reply_bath = "".join(chunks)
+        assert "2BR 2BA Villa in Seattle" in reply_bath
+        assert "2BR 1BA Villa in Seattle" not in reply_bath
+        bath_state = snapshot["state"]["soft_state"]
+        assert bath_state["last_filters"]["bathrooms"] == 2
+
+    guest_snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_guest_snapshot(_sid):
+        return guest_snapshot
+
+    async def fake_save_guest_snapshot(*, session_id, history, state, metadata):
+        guest_snapshot["state"] = state
+
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_guest_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_guest_snapshot)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        chunks = []
+        async for chunk in adk_runner.run_adk_turn(
+            "u-guest",
+            "s-guest",
+            "apartment in New York for 4 guests",
+        ):
+            chunks.append(chunk)
+
+    reply_guest = "".join(chunks)
+    assert "2BR Apartment in New York for groups" in reply_guest
+    assert "**2BR Apartment in New York** —" not in reply_guest
+    guest_state = guest_snapshot["state"]["soft_state"]
+    assert guest_state["last_filters"]["guests"] == 4
+    assert len(guest_state["visible_results"]) == 1
+    assert guest_state["visible_results"][0]["id"] == "ny-apt-6guest"
+
+
+@pytest.mark.asyncio
+async def test_no_exact_match_does_not_broaden_property_types(monkeypatch):
+    fake = [
+        _property(
+            property_id="sea-villa-3",
+            title="3BR Villa in Seattle",
+            city="Seattle",
+            property_type="Villa",
+            bedrooms=3,
+            amenities=["wifi"],
+        ),
+        _property(
+            property_id="sea-apt-2",
+            title="2BR Apartment in Seattle",
+            city="Seattle",
+            property_type="Apartment",
+            bedrooms=2,
+            amenities=["wifi", "parking"],
+        ),
+    ]
+    snapshot = {"state": {}, "history": [], "meta": {}}
+
+    async def fake_get_session_snapshot(_sid):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+
+    _block_adk_and_prerouter(monkeypatch)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value={"fallback": True},
+    ):
+        chunks = []
+        async for chunk in adk_runner.run_adk_turn(
+            "u-no-exact",
+            "s-no-exact",
+            "2BR villa in Seattle with wifi and parking",
+        ):
+            chunks.append(chunk)
+
+    reply = "".join(chunks).lower()
+    assert "exact match" in reply or "couldn't find" in reply
+    assert "2br apartment in seattle" not in reply
+    assert "3br villa in seattle" not in reply
+    assert "relax" in reply

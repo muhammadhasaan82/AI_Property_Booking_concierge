@@ -34,7 +34,10 @@ from app.services.property_query_constraints import (
     PropertySearchQuery,
     extract_property_search_query,
 )
-from app.services.property_type_normalizer import normalize_property_type
+from app.services.property_type_normalizer import (
+    fuzzy_resolve_property_type,
+    normalize_property_type,
+)
 from app.services.redis_store import get_session_snapshot, save_session_snapshot
 from app.services.observability.langfuse_observer import get_observer, sanitize_for_observability
 
@@ -374,6 +377,64 @@ def extract_city_from_message(message: str) -> Optional[str]:
     return resolved.city
 
 
+def _property_type_block_words() -> frozenset[str]:
+    vocab = get_vocabulary().nlp_fallback
+    configured = {
+        str(word).strip().lower()
+        for word in (getattr(vocab, "property_type_block_words", None) or [])
+        if str(word).strip()
+    }
+    defaults = {
+        "looking", "search", "find", "show", "need", "want", "some", "with", "and",
+        "for", "the", "an", "a", "in", "at", "of", "me", "am", "i", "my", "please",
+        "bedroom", "bedrooms", "bed", "beds", "br", "bathroom", "bathrooms", "bath",
+        "guest", "guests", "people", "person", "wifi", "parking", "pool", "gym",
+        "pet", "friendly", "allowed", "under", "below", "above", "over", "city",
+    }
+    return frozenset(configured | defaults)
+
+
+def _fuzzy_property_type_from_message(normalized_message: str) -> Optional[str]:
+    tokens = [
+        token
+        for token in re.findall(r"[a-z]+", normalized_message)
+        if len(token) >= 3 and token not in _property_type_block_words()
+    ]
+    resolved: List[str] = []
+    for token in tokens:
+        canonical = fuzzy_resolve_property_type(token)
+        if canonical:
+            resolved.append(canonical)
+
+    if not resolved:
+        for term, canonical in _property_type_terms():
+            if " " not in term or _contains_term(normalized_message, term):
+                continue
+            if term in normalized_message:
+                resolved.append(normalize_property_type(term) or canonical)
+                continue
+            for token in tokens:
+                if _type_similarity(token, term) >= _fuzzy_match_threshold(token, term):
+                    resolved.append(normalize_property_type(term) or canonical)
+                    break
+
+    if not resolved:
+        return None
+
+    unique = sorted(set(resolved))
+    if len(unique) > 1:
+        return None
+    return unique[0]
+
+
+def _type_similarity(left: str, right: str) -> float:
+    return SequenceMatcher(None, _normalize(left), _normalize(right)).ratio()
+
+
+def _fuzzy_match_threshold(candidate: str, alias: str) -> float:
+    return _city_match_threshold(candidate, alias)
+
+
 def extract_property_type_from_message(message: str) -> Optional[str]:
     """Return canonical property type key when a configured alias appears."""
     normalized = _normalize(message)
@@ -383,7 +444,7 @@ def extract_property_type_from_message(message: str) -> Optional[str]:
     for term, canonical in _property_type_terms():
         if _contains_term(normalized, term):
             return normalize_property_type(term) or canonical
-    return None
+    return _fuzzy_property_type_from_message(normalized)
 
 
 def extract_bedrooms_from_message(message: str) -> Optional[int]:
@@ -395,18 +456,33 @@ def extract_bedrooms_from_message(message: str) -> Optional[int]:
     return None
 
 
+def _canonical_property_type_key(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    raw = str(value).strip().lower()
+    if not raw:
+        return None
+    return normalize_property_type(raw) or fuzzy_resolve_property_type(raw) or raw
+
+
 def _constraint_values_from_query(
     query: Optional[PropertySearchQuery],
+    *,
+    property_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Extract structured constraint values from a PropertySearchQuery."""
     values: Dict[str, Any] = {
+        "property_type": _canonical_property_type_key(property_type),
         "bedroom_exact": None,
         "bedroom_min": None,
         "bedroom_max": None,
+        "bathroom_exact": None,
         "price_max": None,
         "occupancy_min": None,
         "amenities": [],
     }
+    if query is not None and query.property_type:
+        values["property_type"] = _canonical_property_type_key(query.property_type)
     if query is None:
         return values
     for c in query.constraints or []:
@@ -421,6 +497,11 @@ def _constraint_values_from_query(
                 values["bedroom_min"] = num
             elif c.operator == "max":
                 values["bedroom_max"] = num
+        elif c.field == "bathrooms" and c.operator == "exact":
+            try:
+                values["bathroom_exact"] = int(c.value)
+            except (TypeError, ValueError):
+                continue
         elif c.field == "price_per_night" and c.operator == "max":
             try:
                 values["price_max"] = float(c.value)
@@ -439,13 +520,19 @@ def _constraint_values_from_query(
 def _property_matches_constraints(prop: Any, constraints: Dict[str, Any]) -> bool:
     if not isinstance(prop, dict):
         return False
+    property_type = constraints.get("property_type")
     bedroom_exact = constraints.get("bedroom_exact")
     bedroom_min = constraints.get("bedroom_min")
     bedroom_max = constraints.get("bedroom_max")
+    bathroom_exact = constraints.get("bathroom_exact")
     price_max = constraints.get("price_max")
     occupancy_min = constraints.get("occupancy_min")
     amenities = constraints.get("amenities") or []
 
+    if property_type:
+        row_type = _canonical_property_type_key(prop.get("property_type"))
+        if row_type != property_type:
+            return False
     if bedroom_exact is not None:
         try:
             if int(prop.get("bedrooms") or 0) != int(bedroom_exact):
@@ -464,6 +551,12 @@ def _property_matches_constraints(prop: Any, constraints: Dict[str, Any]) -> boo
                 return False
         except (TypeError, ValueError):
             return False
+    if bathroom_exact is not None:
+        try:
+            if int(prop.get("bathrooms") or 0) != int(bathroom_exact):
+                return False
+        except (TypeError, ValueError):
+            return False
     if price_max is not None:
         try:
             if float(prop.get("price_per_night") or 0) > float(price_max):
@@ -472,7 +565,11 @@ def _property_matches_constraints(prop: Any, constraints: Dict[str, Any]) -> boo
             return False
     if occupancy_min is not None:
         try:
-            if int(prop.get("occupancy_max") or 0) < int(occupancy_min):
+            occupancy_value = prop.get("occupancy_max")
+            if occupancy_value is None:
+                bedrooms_value = prop.get("bedrooms")
+                occupancy_value = int(bedrooms_value) * 2 if bedrooms_value is not None else 0
+            if int(occupancy_value) < int(occupancy_min):
                 return False
         except (TypeError, ValueError):
             return False
@@ -492,12 +589,80 @@ def _property_matches_constraints(prop: Any, constraints: Dict[str, Any]) -> boo
 def _has_active_constraints(constraints: Dict[str, Any]) -> bool:
     if not constraints:
         return False
-    for key in ("bedroom_exact", "bedroom_min", "bedroom_max", "price_max", "occupancy_min"):
+    for key in (
+        "property_type",
+        "bedroom_exact",
+        "bedroom_min",
+        "bedroom_max",
+        "bathroom_exact",
+        "price_max",
+        "occupancy_min",
+    ):
         if constraints.get(key) is not None:
             return True
     if constraints.get("amenities"):
         return True
     return False
+
+
+def _build_query_context(
+    *,
+    city: str,
+    property_type: Optional[str],
+    constraints: Dict[str, Any],
+    price_max: Optional[float],
+) -> Dict[str, Any]:
+    qctx: Dict[str, Any] = {"city": city}
+    if property_type:
+        qctx["property_type"] = property_type
+    bedrooms_exact = constraints.get("bedroom_exact")
+    bedrooms_min = constraints.get("bedroom_min")
+    bedrooms_max = constraints.get("bedroom_max")
+    if bedrooms_exact is not None:
+        qctx["bedrooms"] = bedrooms_exact
+        qctx["bedrooms_operator"] = "exact"
+    elif bedrooms_min is not None:
+        qctx["bedrooms"] = bedrooms_min
+        qctx["bedrooms_operator"] = "min"
+    elif bedrooms_max is not None:
+        qctx["bedrooms"] = bedrooms_max
+        qctx["bedrooms_operator"] = "max"
+    if constraints.get("bathroom_exact") is not None:
+        qctx["bathrooms"] = constraints["bathroom_exact"]
+        qctx["bathrooms_operator"] = "exact"
+    if constraints.get("occupancy_min") is not None:
+        qctx["guests"] = constraints["occupancy_min"]
+    if constraints.get("amenities"):
+        qctx["amenities"] = list(constraints["amenities"])
+    if price_max is not None:
+        qctx["budget"] = price_max
+    return qctx
+
+
+def _build_no_results_payload(
+    *,
+    city: str,
+    property_type: Optional[str],
+    constraints: Dict[str, Any],
+    price_max: Optional[float],
+) -> Dict[str, Any]:
+    qctx = _build_query_context(
+        city=city,
+        property_type=property_type,
+        constraints=constraints,
+        price_max=price_max,
+    )
+    return {
+        "status": "no_results",
+        "city": city,
+        "property_type": property_type,
+        "bedrooms": constraints.get("bedroom_exact"),
+        "bedrooms_operator": "exact" if constraints.get("bedroom_exact") is not None else None,
+        "bathrooms": constraints.get("bathroom_exact"),
+        "amenities": list(constraints.get("amenities") or []),
+        "query_context": qctx,
+        "filters_applied": dict(qctx),
+    }
 
 
 def _filter_properties_by_constraints(
@@ -674,13 +839,20 @@ async def maybe_handle_direct_property_search(
             "deterministic_reply": _city_clarification_reply(city_match),
         }
 
-    constraints = _constraint_values_from_query(structured_query)
     city = city_match.city
-    property_type = structured_query.property_type or property_type
+    property_type = _canonical_property_type_key(
+        structured_query.property_type or property_type
+    )
+    constraints = _constraint_values_from_query(
+        structured_query,
+        property_type=property_type,
+    )
+    property_type = constraints.get("property_type") or property_type
 
     bedrooms_exact = constraints["bedroom_exact"]
     bedrooms_min = constraints["bedroom_min"]
     bedrooms_max = constraints["bedroom_max"]
+    bathroom_exact = constraints["bathroom_exact"]
     price_max = constraints["price_max"]
     occupancy_min = constraints["occupancy_min"]
     amenities = constraints["amenities"]
@@ -751,14 +923,13 @@ async def maybe_handle_direct_property_search(
         if isinstance(last_search, dict):
             original_last_search_props = list(last_search.get("properties") or [])
 
-    filtered_props = _filter_properties_by_constraints(original_props, constraints)
-    filtered_all = _filter_properties_by_constraints(original_all_results, constraints)
-    filtered_last_search = _filter_properties_by_constraints(
-        original_last_search_props, constraints
-    )
-
+    source_records = original_all_results or original_last_search_props or original_props
+    filtered_all = _filter_properties_by_constraints(source_records, constraints)
     filtered_all = _sort_properties_for_display(filtered_all)
-    filtered_props = _renumber_properties(filtered_props)
+    page_limit = len(original_props) if original_props else None
+    display_props = filtered_all[:page_limit] if page_limit else filtered_all
+    filtered_props = _renumber_properties(list(display_props))
+    filtered_last_search = list(filtered_all)
     option_map = _build_option_map(filtered_props)
 
     payload["properties"] = filtered_props
@@ -766,44 +937,26 @@ async def maybe_handle_direct_property_search(
     payload["total_found"] = len(filtered_all) or len(filtered_props)
     payload["option_map"] = option_map
 
-    qctx = dict(payload.get("query_context") or {})
-    qctx["city"] = city
-    if property_type:
-        qctx["property_type"] = str(property_type).strip().lower()
-    if bedrooms_exact is not None:
-        qctx["bedrooms"] = bedrooms_exact
-        qctx["bedrooms_operator"] = "exact"
-    elif bedrooms_min is not None:
-        qctx["bedrooms"] = bedrooms_min
-        qctx["bedrooms_operator"] = "min"
-    elif bedrooms_max is not None:
-        qctx["bedrooms"] = bedrooms_max
-        qctx["bedrooms_operator"] = "max"
-    if price_max is not None:
-        qctx["budget"] = price_max
-    payload["query_context"] = qctx
+    qctx = _build_query_context(
+        city=city,
+        property_type=property_type,
+        constraints=constraints,
+        price_max=price_max,
+    )
+    payload["query_context"] = {**dict(payload.get("query_context") or {}), **qctx}
 
-    if bedrooms_exact is not None and not filtered_props:
-        no_results_payload = {
-            "status": "no_results",
-            "city": city,
-            "property_type": str(property_type).strip().lower() if property_type else None,
-            "bedrooms": bedrooms_exact,
-            "bedrooms_operator": "exact",
-            "query_context": dict(qctx),
-            "filters_applied": {
-                "city": city,
-                "property_type": str(property_type).strip().lower() if property_type else None,
-                "bedrooms": bedrooms_exact,
-                "bedrooms_operator": "exact",
-                "budget": price_max,
-            },
-        }
+    if not filtered_props and _has_active_constraints(constraints):
+        no_results_payload = _build_no_results_payload(
+            city=city,
+            property_type=property_type,
+            constraints=constraints,
+            price_max=price_max,
+        )
         logger.debug(
-            "[direct_search] no_results city=%r property_type=%r bedrooms=%s",
+            "[direct_search] no_results city=%r property_type=%r constraints=%s",
             city,
             property_type,
-            bedrooms_exact,
+            constraints,
         )
         return no_results_payload
 
@@ -818,9 +971,12 @@ async def maybe_handle_direct_property_search(
     new_soft_state["active_flow"] = "search"
     new_soft_state["last_filters"] = {
         "city": city,
-        "property_type": str(property_type).strip().lower() if property_type else None,
+        "property_type": property_type,
         "bedrooms": bedrooms_exact,
         "bedrooms_operator": "exact" if bedrooms_exact is not None else None,
+        "bathrooms": bathroom_exact,
+        "guests": occupancy_min,
+        "amenities": list(amenities),
         "budget": price_max,
     }
 
