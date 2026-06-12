@@ -273,6 +273,14 @@ def _compile_pattern(template: str) -> re.Pattern:
 
 
 def _spec_body(body: Any) -> Dict[str, Any]:
+    if body is not None and not isinstance(body, dict):
+        return {
+            "requires_state": [],
+            "requires_any_state": [],
+            "examples": [],
+            "patterns": [],
+        }
+
     """
     Normalize a shortcut YAML "body" into a dict that guarantees canonical list fields.
 
