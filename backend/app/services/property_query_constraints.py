@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
+from app.services.property_schema import get_property_schema
+from app.services.search_planner import get_search_planner
 
 try:
     from app.services.observability.langfuse_observer import get_observer
@@ -123,136 +125,53 @@ def _add(
 
 def extract_property_search_query(message: str) -> PropertySearchQuery:
     """
-    Parse a user's natural-language message into a structured property search query.
-    
-    Extracts schema-aware, deterministic constraints (bedrooms, bathrooms, price per night,
-    occupancy/guests, and common amenities) plus optional city and property type inferred
-    from the message. Constraint source substrings are preserved in each constraint's
-    `source_text`; extraction is based on local regex and best-effort city/property-type
-    extractors.
-    
-    Returns:
-        PropertySearchQuery: Parsed query containing:
-            - `city`: optional canonicalized city display string or None
-            - `property_type`: optional property type display string or None
-            - `constraints`: list of extracted SearchConstraint entries
-            - `confidence`: float (initialized to 1.0)
-            - `unresolved`: list (initialized empty)
+    Compatibility wrapper over the schema-driven search planner.
+
+    Natural-language extraction is delegated to `SearchPlanner`, which discovers
+    searchable fields from dataset/config metadata. This function only converts
+    the planner's dynamic constraints back into the legacy `PropertySearchQuery`
+    shape expected by older callers.
     """
-    text = _norm(message)
+    planner = get_search_planner()
+    schema = get_property_schema()
+    plan = planner.plan_search(message=message)
+
+    city = _canonical_city(plan.constraints.get("city"))
+    property_type = plan.constraints.get("property_type")
+    if property_type:
+        property_type = str(property_type).title()
+
     constraints: List[SearchConstraint] = []
+    for field_name in sorted(plan.constraints.fields()):
+        if field_name in {"city", "property_type"}:
+            continue
+        value = plan.constraints.get(field_name)
+        operator = plan.constraints.get_operator(field_name, "exact")
+        field_schema = schema.get_field(field_name)
+        column = field_schema.name if field_schema else field_name
 
-    city = _canonical_city(_existing_city(message))
-    property_type = _existing_property_type(message)
+        if isinstance(value, list):
+            for item in value:
+                constraints.append(
+                    SearchConstraint(
+                        field=field_name,
+                        column=column,
+                        operator=operator,
+                        value=item,
+                        source_text=str(item),
+                    )
+                )
+            continue
 
-    min_bed_match = re.search(
-        r"\b(?:at\s+least|minimum|min)\s+(\d+)\s*(?:bedrooms?|beds?|br)\b",
-        text,
-    )
-    if min_bed_match:
-        _add(
-            constraints,
-            field_name="bedrooms",
-            column="bedrooms",
-            operator="min",
-            value=int(min_bed_match.group(1)),
-            source_text=min_bed_match.group(0),
-        )
-    else:
-        exact_bed_match = re.search(r"\b(\d+)\s*(?:bedrooms?|beds?|br)\b", text)
-        if exact_bed_match:
-            _add(
-                constraints,
-                field_name="bedrooms",
-                column="bedrooms",
-                operator="exact",
-                value=int(exact_bed_match.group(1)),
-                source_text=exact_bed_match.group(0),
+        constraints.append(
+            SearchConstraint(
+                field=field_name,
+                column=column,
+                operator=operator,
+                value=value,
+                source_text=str(value),
             )
-
-    max_bed_match = re.search(
-        r"\b(?:up\s+to|maximum|max)\s+(\d+)\s*(?:bedrooms?|beds?|br)\b",
-        text,
-    )
-    if max_bed_match and not _has_constraint(constraints, "bedrooms"):
-        _add(
-            constraints,
-            field_name="bedrooms",
-            column="bedrooms",
-            operator="max",
-            value=int(max_bed_match.group(1)),
-            source_text=max_bed_match.group(0),
         )
-
-    bath_match = re.search(r"\b(\d+)\s*(?:bathrooms?|baths?|ba)\b", text)
-    if bath_match:
-        _add(
-            constraints,
-            field_name="bathrooms",
-            column="bathrooms",
-            operator="exact",
-            value=int(bath_match.group(1)),
-            source_text=bath_match.group(0),
-        )
-
-    price_max_match = re.search(
-        r"\b(?:under|below|less\s+than|budget|within)\s+\$?\s*(\d+(?:\.\d+)?)\b",
-        text,
-    )
-    if price_max_match:
-        _add(
-            constraints,
-            field_name="price_per_night",
-            column="price_per_night",
-            operator="max",
-            value=float(price_max_match.group(1)),
-            source_text=price_max_match.group(0),
-        )
-
-    price_min_match = re.search(
-        r"\b(?:above|over|more\s+than)\s+\$?\s*(\d+(?:\.\d+)?)\b",
-        text,
-    )
-    if price_min_match:
-        _add(
-            constraints,
-            field_name="price_per_night",
-            column="price_per_night",
-            operator="min",
-            value=float(price_min_match.group(1)),
-            source_text=price_min_match.group(0),
-        )
-
-    guest_match = re.search(r"\b(?:for\s+)?(\d+)\s*(?:guests?|people|persons?)\b", text)
-    if guest_match:
-        _add(
-            constraints,
-            field_name="occupancy_max",
-            column="occupancy_max",
-            operator="min",
-            value=int(guest_match.group(1)),
-            source_text=guest_match.group(0),
-        )
-
-    amenity_aliases = {
-        "pet friendly": "pet_friendly",
-        "pets allowed": "pet_friendly",
-        "wifi": "wifi",
-        "wi fi": "wifi",
-        "parking": "parking",
-        "pool": "pool",
-        "gym": "gym",
-    }
-    for phrase, amenity in amenity_aliases.items():
-        if phrase in text:
-            _add(
-                constraints,
-                field_name="amenities",
-                column="amenities",
-                operator="contains",
-                value=amenity,
-                source_text=phrase,
-            )
 
     return PropertySearchQuery(
         city=city,

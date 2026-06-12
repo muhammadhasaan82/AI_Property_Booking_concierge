@@ -88,6 +88,15 @@ filters:
       - price
       - budget
       - per night
+    sort_phrases:
+      asc:
+        - cheaper
+        - less expensive
+        - lower price
+        - more affordable
+      desc:
+        - more expensive
+        - higher end
     operators:
       max:
         patterns:

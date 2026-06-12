@@ -181,6 +181,68 @@ async def test_typo_city_property_search_uses_deterministic_dataset_and_persists
 
 
 @pytest.mark.asyncio
+async def test_direct_search_booking_flow_keeps_priority_through_receipt_and_session_restore(monkeypatch):
+    fake = _make_la_villas(8)
+    snapshot = {
+        "state": {},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": "u-booking-priority",
+            "last_update_time": 1.0,
+        },
+    }
+
+    with patch("app.components.search._DATASET", fake), \
+         patch("app.agents.tools.rust_client.search_properties", return_value={"fallback": True}), \
+         patch("app.agents.tools.rust_client.execute_tool", new=AsyncMock(return_value={"fallback": True})):
+        reply_1, route_1 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "looking for villas los angeles")
+        assert "LA Villa 1" in reply_1
+        route_1.assert_not_awaited()
+
+        reply_2, route_2 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "2")
+        assert "LA Villa 2" in reply_2
+        assert "Want to book this one?" in reply_2
+        route_2.assert_not_awaited()
+
+        reply_3, route_3 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "yes please")
+        assert "Please provide" in reply_3
+        route_3.assert_not_awaited()
+        soft_state = snapshot["state"]["soft_state"]
+        assert soft_state["booking_stage"] == "collecting_details"
+        assert soft_state["active_flow"] == "booking"
+        assert soft_state["booking_selected_property"]["id"] == "la_villa_2"
+
+        snapshot = copy.deepcopy(snapshot)
+
+        reply_4, route_4 = await _run_adk_turn_with_snapshot(
+            monkeypatch,
+            snapshot,
+            "my name is Jane Doe, email is jane@example.com, phone is 5551234567, check in is 2026-07-10, check out is 2026-07-13, we are 4 guests",
+        )
+        assert "Please confirm if everything is correct." in reply_4
+        assert "I found" not in reply_4
+        route_4.assert_not_awaited()
+        soft_state = snapshot["state"]["soft_state"]
+        assert soft_state["booking_stage"] == "awaiting_confirmation"
+        assert soft_state["active_flow"] == "booking"
+        assert soft_state["booking_review"]["property_id"] == "la_villa_2"
+        assert soft_state["booking_review"]["guest_name"] == "Jane Doe"
+        assert soft_state["booking_review"]["guests"] == 4
+
+        snapshot = copy.deepcopy(snapshot)
+
+        reply_5, route_5 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "confirm")
+        assert "booking id" in reply_5.lower() or "registration id" in reply_5.lower()
+        assert "LA Villa 2" in reply_5
+        route_5.assert_not_awaited()
+        soft_state = snapshot["state"]["soft_state"]
+        assert soft_state["booking_stage"] == "confirmed"
+        assert soft_state["active_flow"] == "booking"
+        assert soft_state["booking_receipt"]["property_title"] == "LA Villa 2"
+
+
+@pytest.mark.asyncio
 async def test_unknown_city_search_asks_for_clarification_without_llm_fallback(monkeypatch):
     fake = _make_la_villas(14)
     snapshot = {

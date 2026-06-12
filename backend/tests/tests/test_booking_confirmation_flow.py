@@ -181,6 +181,45 @@ async def _run_booking_followup_turn(monkeypatch, snapshot: dict, saved_states: 
     return "".join(chunks), route_pre_adk
 
 
+def _snapshot_from_soft_state(soft_state: dict, *, user_id: str) -> dict:
+    return {
+        "state": {"soft_state": copy.deepcopy(soft_state)},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": user_id,
+            "last_update_time": 1.0,
+        },
+    }
+
+
+async def _run_live_booking_turn(monkeypatch, snapshot: dict, message: str):
+    async def fake_get_session_snapshot(_session_id):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = copy.deepcopy(state)
+        snapshot["history"] = copy.deepcopy(history)
+        snapshot["meta"].update(copy.deepcopy(metadata or {}))
+
+    def fail_get_runner():
+        raise AssertionError("ADK runner must not be invoked for deterministic booking priority tests")
+
+    route_pre_adk = AsyncMock(return_value={"reply": "generic concierge greeting"})
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(adk_runner, "route_pre_adk", route_pre_adk)
+    monkeypatch.setattr(adk_runner, "_get_runner", fail_get_runner)
+    monkeypatch.setattr(adk_runner, "sanitize_input", lambda msg: (msg, True))
+    monkeypatch.setattr(adk_runner, "sanitize_output", lambda msg: msg)
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn("u-booking-live", "s-booking-live", message):
+        chunks.append(chunk)
+
+    return "".join(chunks), route_pre_adk
+
+
 @pytest.mark.asyncio
 async def test_yes_after_property_details_starts_booking_details_collection(monkeypatch):
     reply, snapshot, saved_states, search_result, selected, route_pre_adk = (
@@ -552,14 +591,97 @@ async def test_booking_status_wrong_id_not_found(monkeypatch):
     """
     snapshot = _build_status_check_snapshot({"booking_receipt": dict(_TEST_RECEIPT)})
 
-    with patch(
-        "app.services.booking.get_booking_status",
-        AsyncMock(return_value={"ok": False, "error": "not found"}),
+    with (
+        patch(
+            "app.services.booking.get_booking_status",
+            AsyncMock(return_value={"ok": False, "error": "not found"}),
+        ),
+        patch(
+            "app.observability.db_logging.get_successful_booking_status",
+            AsyncMock(return_value=None),
+        ),
     ):
         reply, route_pre_adk = await _run_status_check_turn(
             monkeypatch,
             snapshot,
             "My booking ID is BK-20260607-UNKNOWN",
+        )
+
+    route_pre_adk.assert_not_awaited()
+    assert "wasn't found" in reply.lower() or "not found" in reply.lower()
+
+
+@pytest.mark.asyncio
+async def test_booking_status_falls_back_to_successful_bookings(monkeypatch):
+    """
+    When session has no receipt, bookings lookup misses, but successful_bookings
+    has the confirmed row, return persisted status instead of not-found.
+    """
+    snapshot = _build_status_check_snapshot({})
+    booking_id = "BK-20260607-C48A4AFA"
+    successful_row = {
+        "booking_id": booking_id,
+        "status": "confirmed",
+        "check_in": "2026-06-02",
+        "check_out": "2026-06-11",
+        "user_name": "Jane Doe",
+        "user_email": "jane@example.com",
+        "property_title": "Apartment 3",
+        "city": "Test City",
+        "payment_url": "https://pay.example.com",
+    }
+
+    with (
+        patch(
+            "app.services.booking.get_booking_status",
+            AsyncMock(return_value={"ok": False, "error": "not found"}),
+        ),
+        patch(
+            "app.observability.db_logging.get_successful_booking_status",
+            AsyncMock(return_value=successful_row),
+        ),
+    ):
+        reply, route_pre_adk = await _run_status_check_turn(
+            monkeypatch,
+            snapshot,
+            f"My booking ID is {booking_id}",
+        )
+
+    route_pre_adk.assert_not_awaited()
+    lower_reply = reply.lower()
+    assert "wasn't found" not in lower_reply
+    assert "not found" not in lower_reply
+    assert booking_id in reply
+    assert "Jane Doe" in reply
+    assert "jane@example.com" in reply
+    assert "Apartment 3" in reply
+    assert "confirmed" in lower_reply
+    assert "June 2, 2026" in reply
+    assert "June 11, 2026" in reply
+
+
+@pytest.mark.asyncio
+async def test_booking_status_both_db_lookups_fail_not_found(monkeypatch):
+    """
+    When session has no receipt and both bookings and successful_bookings lookups
+    fail, return the not-found template.
+    """
+    snapshot = _build_status_check_snapshot({})
+
+    with (
+        patch(
+            "app.services.booking.get_booking_status",
+            AsyncMock(return_value={"ok": False, "error": "not found"}),
+        ),
+        patch(
+            "app.observability.db_logging.get_successful_booking_status",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        reply, route_pre_adk = await _run_status_check_turn(
+            monkeypatch,
+            snapshot,
+            "My booking ID is BK-20260607-NOTFOUND",
         )
 
     route_pre_adk.assert_not_awaited()
@@ -611,3 +733,70 @@ async def test_confirm_then_lookup_booking_id_e2e(monkeypatch):
     assert registration_id in status_reply
     assert "confirmed" in status_reply
     assert "Jane Doe" in status_reply
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rust_result",
+    [
+        {"fallback": True},
+        {"result": {"results": list(reversed(_make_props(8)))}},
+    ],
+)
+async def test_seeded_search_paths_preserve_booking_flow_to_receipt(monkeypatch, rust_result):
+    ctx = _Ctx()
+    fake = _make_props(8)
+
+    with patch("app.components.search._DATASET", fake), patch(
+        "app.agents.tools.rust_client.search_properties",
+        return_value=rust_result,
+    ):
+        search_result = await search_properties(
+            city="New York",
+            property_type="apartment",
+            tool_context=ctx,
+        )
+        selected = await select_property(option_number=1, tool_context=ctx)
+
+    assert search_result["status"] == "properties_found"
+    assert search_result["properties"]
+    assert selected["status"] == "property_details"
+
+    snapshot = _snapshot_from_soft_state(ctx.state["soft_state"], user_id="u-seeded-booking")
+
+    reply_1, route_pre_adk = await _run_live_booking_turn(monkeypatch, snapshot, "yes please")
+    assert "Please provide" in reply_1
+    assert route_pre_adk.await_count == 0
+    soft_state = snapshot["state"]["soft_state"]
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert soft_state["active_flow"] == "booking"
+    assert soft_state["booking_selected_property"]["id"] == selected["property"]["id"]
+
+    snapshot = copy.deepcopy(snapshot)
+
+    reply_2, route_pre_adk = await _run_live_booking_turn(
+        monkeypatch,
+        snapshot,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in date would 2nd of june, 2026 and check out shall be around 11 june 2026, we are around 4 guests",
+    )
+    assert "Please confirm if everything is correct." in reply_2
+    assert "I found" not in reply_2
+    assert route_pre_adk.await_count == 0
+    soft_state = snapshot["state"]["soft_state"]
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert soft_state["active_flow"] == "booking"
+    assert soft_state["booking_review"]["guest_name"] == "Jane Doe"
+    assert soft_state["booking_review"]["property_id"] == selected["property"]["id"]
+
+    snapshot = copy.deepcopy(snapshot)
+
+    with patch("app.observability.db_logging.insert_successful_booking", new=AsyncMock()):
+        reply_3, route_pre_adk = await _run_live_booking_turn(monkeypatch, snapshot, "confirm")
+
+    assert route_pre_adk.await_count == 0
+    assert "confirmed" in reply_3.lower()
+    soft_state = snapshot["state"]["soft_state"]
+    assert soft_state["booking_stage"] == "confirmed"
+    assert soft_state["active_flow"] == "booking"
+    assert soft_state["booking_receipt"]["property_title"] == selected["property"]["title"]
+    assert soft_state["booking_registration_id"].startswith("BK-")
