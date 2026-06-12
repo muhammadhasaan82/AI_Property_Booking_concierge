@@ -834,12 +834,6 @@ async def maybe_handle_direct_property_search(
     if not normalized_message or is_status_query(message):
         return None
 
-    try:
-        if detect_policy_question(message):
-            return None
-    except Exception as exc:
-        logger.debug("[direct_search] policy detection skipped after error: %s", exc)
-
     if has_active_booking_session(soft_state):
         logger.info(
             "[direct_search.trace] skipped due to active booking session: stage=%r view=%r",
@@ -867,8 +861,6 @@ async def maybe_handle_direct_property_search(
     property_type = extract_property_type_from_message(message)
     has_search_phrase = _has_search_phrase(message)
     has_new_signal = bool(plan.trace.extracted_constraints) or bool(plan.sort_preferences)
-    if detect_policy_question(message):
-        return None
     if not (active_search_context and has_new_signal):
         try:
             if detect_policy_question(message):
