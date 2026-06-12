@@ -4,8 +4,10 @@ Tools: search_properties, get_property_details, select_property, get_all_availab
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 import csv
 import logging
+import string
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -46,11 +48,6 @@ PROPERTY_RERANK_TIMEOUT_SECONDS: float = cfg.rerank_timeout
 PROPERTY_RESULT_LIMIT_DEFAULT: int = cfg.search_result_limit
 PROPERTY_RESULT_LIMIT_MAX: int = cfg.search_result_limit_max
 PROPERTY_SUMMARY_THRESHOLD: int = cfg.search_summary_mode_threshold
-
-from collections.abc import Iterable
-import csv
-import string
-from typing import Any
 
 
 def _normalize_search_value(value: Any) -> str:
@@ -146,27 +143,26 @@ def _split_amenities_by_known(
         _dedupe_preserve_order(hard_terms),
         _dedupe_preserve_order(soft_terms),
     )
-) -> tuple[List[str], List[str]]:
-    if not amenities:
-        return [], []
+
+
+def _known_amenities_from_dataset(dataset: Optional[List[Dict[str, Any]]]) -> list[str]:
+    """
+    Derive known amenity values dynamically from the loaded dataset.
+
+    This keeps hard-filter eligibility data-driven:
+    - no fixed amenity list
+    - no natural-language parsing
+    - no regex
+    """
     if not dataset:
-        return list(amenities), []
-    known: set[str] = set()
+        return []
+
+    terms: list[str] = []
     for row in dataset:
-        for item in row.get("amenities") or []:
-            if isinstance(item, str) and item.strip():
-                known.add(item.strip().lower())
-    hard_terms: List[str] = []
-    soft_terms: List[str] = []
-    for term in amenities:
-        cleaned = (term or "").strip()
-        if not cleaned:
-            continue
-        if cleaned.lower() in known:
-            hard_terms.append(cleaned)
-        else:
-            soft_terms.append(cleaned)
-    return hard_terms, soft_terms
+        if isinstance(row, dict):
+            terms.extend(_split_amenity_input(row.get("amenities")))
+
+    return _dedupe_preserve_order(terms)
 
 
 def _build_vibe_query(soft_terms: List[str], free_text: Optional[str]) -> str:
@@ -916,7 +912,6 @@ async def search_properties(
     context_flag: Optional[str] = None,
     sort_preferences: Optional[List[Dict[str, str]]] = None,
     search_path: str = "tool",
-    search_plan: Optional[SearchPlan] = None,
     tool_context: Optional[ToolContext] = None,
 ) -> dict:
     """
@@ -993,7 +988,16 @@ async def search_properties(
     if resolved_city:
         city = resolved_city
 
-    raw_amenities = [a.strip() for a in (amenities or "").split(",") if a.strip()]
+    raw_amenities = _split_amenity_input(amenities)
+    known_amenities = _known_amenities_from_dataset(_DATASET or None)
+    hard_amenities, soft_terms = _split_amenities_by_known(
+        raw_amenities,
+        known_amenities=known_amenities,
+    )
+    amenity_list = hard_amenities or None
+    vibe_query = _build_vibe_query(soft_terms, free_text)
+    should_rerank = bool(vibe_query)
+
     constraints = _build_dynamic_constraints_from_inputs(
         city=city,
         budget=budget_value,
@@ -1004,36 +1008,20 @@ async def search_properties(
         guests=guests_value,
         guests_operator=guests_operator,
         property_type=normalized_property_type,
-        amenities=raw_amenities,
+        amenities=hard_amenities,
     )
-    if search_plan is not None:
-        plan = search_plan
-        if sort_preferences is not None:
-            plan = SearchPlan(
-                constraints=plan.constraints,
-                trace=plan.trace,
-                session_id=plan.session_id,
-                user_message=plan.user_message,
-                sort_preferences=list(sort_preferences),
-            )
-            plan.trace.sort_preferences = list(sort_preferences)
-    else:
-        plan = _search_plan_from_constraints(
-            constraints,
-            search_path=search_path,
-            user_message=free_text or "",
-            sort_preferences=sort_preferences,
-        )
+    plan = _search_plan_from_constraints(
+        constraints,
+        search_path=search_path,
+        user_message=free_text or "",
+        sort_preferences=sort_preferences,
+    )
 
     requested_limit = _coerce_int(max_results)
     search_limit = _resolve_result_limit(requested_limit)
     summary_threshold = max(PROPERTY_SUMMARY_THRESHOLD, 1)
     base_beds_value = beds_value if (beds_operator or "exact") in {"exact", "min"} else None
 
-    hard_amenities, soft_terms = _split_amenities_by_known(raw_amenities, _DATASET or None)
-    amenity_list = hard_amenities or None
-    vibe_query = _build_vibe_query(soft_terms, free_text)
-    should_rerank = bool(vibe_query)
 
     results = None
     if not _uses_all_matching_display():
@@ -1121,8 +1109,10 @@ async def search_properties(
     if guests_value is not None:
         filters["guests"] = guests_value
         filters["guests_operator"] = guests_operator
-    if raw_amenities:
-        filters["amenities"] = list(raw_amenities)
+    if hard_amenities:
+        filters["amenities"] = list(hard_amenities)
+    if soft_terms:
+        filters["soft_amenity_terms"] = list(soft_terms)
     page_size = _search_display_max_inline_results() or _resolve_page_size()
     payload, visible_results, option_map = _build_search_page_payload(
         results=results,

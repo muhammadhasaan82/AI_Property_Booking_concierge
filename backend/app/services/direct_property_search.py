@@ -920,7 +920,6 @@ async def maybe_handle_direct_property_search(
         "amenities": ",".join(dynamic_constraints.get("amenities") or []),
         "sort_preferences": effective_sort_preferences,
         "search_path": "direct",
-        "search_plan": plan,
         "tool_context": tool_context,
     }
 
