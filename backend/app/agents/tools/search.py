@@ -1,5 +1,4 @@
 """
----------------------------
 Tools: search_properties, get_property_details, select_property, get_all_available_cities
 """
 from __future__ import annotations
@@ -36,6 +35,7 @@ from .helpers import (
     HISTORY_ACTION_INTENTS,
     NEW_SEARCH_ACTION_INTENTS,
 )
+from app.services.faq_interruption import detect_policy_question
 from app.services.property_type_normalizer import normalize_property_type as _normalize_property_type
 from app.services.observability.langfuse_observer import get_observer, sanitize_for_observability, summarize_property_results
 logger = logging.getLogger(__name__)

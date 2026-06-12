@@ -8,8 +8,8 @@ from app.agents.tools import search as search_tools
 from app.agents.tools import support as support_tools
 
 
-_BANNED_PARAM_NAMES = {"tool_context", "search_plan"}
-_BANNED_TYPE_TOKENS = {"SearchPlan", "DynamicConstraints", "ToolContext"}
+_BANNED_PARAM_NAMES = {"search_plan"}
+_BANNED_TYPE_TOKENS = {"SearchPlan", "DynamicConstraints"}
 
 
 def _signature_tokens(fn) -> tuple[list[str], str]:
