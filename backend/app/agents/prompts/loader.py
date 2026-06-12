@@ -1,6 +1,4 @@
 """
-app/agents/prompts/loader.py
------------------------------
 Lightweight prompt loader with safe fallback behavior.
 """
 from __future__ import annotations

@@ -1,6 +1,4 @@
 """
-app/agents/resolvers/property_resolver.py
-------------------------------------------
 Resolves fuzzy property references ("the second one", "the $400 place", etc.)
 against the active options list using the DISPATCHER_MODEL.
 
