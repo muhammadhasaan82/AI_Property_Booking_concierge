@@ -13,6 +13,8 @@ Usage:
 """
 from __future__ import annotations
 import logging
+import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, Optional, Set
 
@@ -47,6 +49,96 @@ def _get_pass_through_policy() -> str:
 _ALIAS_MAP: Dict[str, str] = _load_alias_map()
 _PASS_THROUGH_POLICY: str = _get_pass_through_policy()
 _CANONICAL_KEYS: Set[str] = set(_ALIAS_MAP.values())
+
+def _type_similarity(left: str, right: str) -> float:
+    normalized_left = left.strip().lower()
+    normalized_right = right.strip().lower()
+    if not normalized_left or not normalized_right:
+        return 0.0
+    spaced = SequenceMatcher(None, normalized_left, normalized_right).ratio()
+    compact_left = normalized_left.replace(" ", "")
+    compact_right = normalized_right.replace(" ", "")
+    compact = SequenceMatcher(None, compact_left, compact_right).ratio()
+    return max(spaced, compact)
+
+
+def _fuzzy_match_threshold(candidate: str, alias: str) -> float:
+    try:
+        from app.services.dynamic_config import get_thresholds
+
+        thresholds = get_thresholds().nlp
+        if " " in alias or len(alias.split()) > 1:
+            return float(thresholds.fuzzy_match_medium)
+        if len(candidate) <= 4:
+            return float(thresholds.fuzzy_match_medium)
+        return float(thresholds.fuzzy_match_high)
+    except Exception:
+        return 0.88
+
+
+def fuzzy_resolve_property_type(raw: Optional[str]) -> Optional[str]:
+    """Resolve a single token/phrase to a canonical property type via fuzzy matching."""
+    if not raw or not str(raw).strip():
+        return None
+
+    key = re.sub(r"\s+", " ", str(raw).strip().lower())
+    if len(key) < 3:
+        return None
+
+    exact = _ALIAS_MAP.get(key)
+    if exact:
+        return exact
+    if key in _CANONICAL_KEYS:
+        return key
+
+    best_score = 0.0
+    best_canonical: Optional[str] = None
+    second_best_score = 0.0
+    second_best_canonical: Optional[str] = None
+
+    candidates: Set[str] = {key}
+    if key.endswith("s") and len(key) > 3:
+        candidates.add(key[:-1])
+
+    for candidate in candidates:
+        for alias, canonical in _ALIAS_MAP.items():
+            threshold = _fuzzy_match_threshold(candidate, alias)
+            score = max(
+                _type_similarity(candidate, alias),
+                _type_similarity(candidate, canonical),
+            )
+            if score < threshold:
+                continue
+            if score > best_score:
+                second_best_score = best_score
+                second_best_canonical = best_canonical
+                best_score = score
+                best_canonical = canonical
+            elif score > second_best_score and canonical != best_canonical:
+                second_best_score = score
+                second_best_canonical = canonical
+
+    if not best_canonical:
+        return None
+
+    try:
+        from app.services.dynamic_config import get_thresholds
+
+        high = float(get_thresholds().nlp.fuzzy_match_high)
+        medium = float(get_thresholds().nlp.fuzzy_match_medium)
+        margin = max(high - medium, 0.03)
+    except Exception:
+        margin = 0.03
+
+    if (
+        second_best_canonical
+        and second_best_canonical != best_canonical
+        and second_best_score >= best_score - margin
+    ):
+        return None
+
+    return best_canonical
+
 
 def normalize_property_type(raw: Optional[str]) -> Optional[str]:
     """Return the canonical property type key, or None if unknown/empty.

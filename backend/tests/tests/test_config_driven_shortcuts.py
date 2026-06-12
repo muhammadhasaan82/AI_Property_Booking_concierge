@@ -107,6 +107,12 @@ def test_property_aliases_loaded_from_taxonomy_config():
     assert normalize_property_type("villas") == "villa"
 
 
+def test_fuzzy_property_type_typo_normalization():
+    from app.services.property_type_normalizer import fuzzy_resolve_property_type
+
+    assert fuzzy_resolve_property_type("vila") == "villa"
+
+
 def test_no_hardcoded_phrase_list_remains_in_adk_runner():
     src = Path("app/services/adk_runner.py").read_text(encoding="utf-8")
     assert "_extract_pagination_direction" not in src

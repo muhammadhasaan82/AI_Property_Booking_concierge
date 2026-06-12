@@ -14,7 +14,9 @@ from google.adk.tools import ToolContext
 
 from ..status_codes import Source, Status
 from app.config.agent_config_loader import cfg
+from app.services.dynamic_constraints import DynamicConstraints
 from app.services.faq_interruption import clear_faq_interruption, sync_alias_keys
+from app.services.search_planner import SearchPlan, SearchTrace, get_search_planner
 from .helpers import (
     _build_active_options,
     _classify_engagement_state,
@@ -731,16 +733,94 @@ def get_all_available_cities(
     except Exception as e:
         return {"status": Status.ERROR, "error": str(e)}
 
+
+def _build_dynamic_constraints_from_inputs(
+    *,
+    city: Optional[str] = None,
+    budget: Optional[float] = None,
+    beds: Optional[int] = None,
+    beds_operator: str = "exact",
+    bathrooms: Optional[int] = None,
+    bathrooms_operator: str = "exact",
+    guests: Optional[int] = None,
+    guests_operator: str = "min",
+    property_type: Optional[str] = None,
+    amenities: Optional[List[str]] = None,
+) -> DynamicConstraints:
+    planner = get_search_planner()
+    constraints = DynamicConstraints(schema=planner._schema)
+    if city:
+        constraints.set("city", city, "exact")
+    if property_type:
+        constraints.set("property_type", property_type, "exact")
+    if beds is not None:
+        constraints.set("bedrooms", beds, beds_operator or "exact")
+    if bathrooms is not None:
+        constraints.set("bathrooms", bathrooms, bathrooms_operator or "exact")
+    if guests is not None:
+        constraints.set("occupancy_max", guests, guests_operator or "min")
+    if budget is not None:
+        constraints.set("price_per_night", budget, "max")
+    if amenities:
+        constraints.set("amenities", list(amenities), "contains")
+    return constraints
+
+
+def _search_plan_from_constraints(
+    constraints: DynamicConstraints,
+    *,
+    search_path: str,
+    user_message: str = "",
+    sort_preferences: Optional[List[Dict[str, str]]] = None,
+) -> SearchPlan:
+    trace = SearchTrace(
+        session_id="search-tool",
+        user_message=user_message,
+        extracted_constraints=constraints.to_dict(),
+        merged_constraints=constraints.to_dict(),
+        search_path=search_path,
+        sort_preferences=list(sort_preferences or []),
+    )
+    trace.log(f"Executing schema search path={search_path} constraints={constraints.to_full_dict()}")
+    hard_filters = constraints.get_hard_filters()
+    soft_filters = constraints.get_soft_filters()
+    trace.hard_filters = hard_filters
+    trace.soft_filters = soft_filters
+    return SearchPlan(
+        constraints=constraints,
+        trace=trace,
+        session_id="search-tool",
+        user_message=user_message,
+        sort_preferences=list(sort_preferences or []),
+    )
+
+
+def _apply_planner_to_results(
+    results: List[Dict[str, Any]],
+    plan: SearchPlan,
+) -> List[Dict[str, Any]]:
+    planner = get_search_planner()
+    filtered, _trace = planner.execute_search(list(results or []), plan)
+    return filtered
+
 async def search_properties(
     city: Optional[str] = None,
     budget: Optional[float] = None,
     beds: Optional[int] = None,
+    beds_operator: str = "exact",
+    bathrooms: Optional[int] = None,
+    bathrooms_operator: str = "exact",
+    guests: Optional[int] = None,
+    guests_operator: str = "min",
     property_type: Optional[str] = None,
     amenities: Optional[str] = None,
     free_text: Optional[str] = None,
     max_results: Optional[int] = None,
     action_intent: Optional[str] = None,
     context_flag: Optional[str] = None,
+    sort_preferences: Optional[List[Dict[str, str]]] = None,
+    search_path: str = "tool",
+    search_plan: Optional[SearchPlan] = None,
     tool_context: Optional[ToolContext] = None,
 ) -> dict:
     """
@@ -810,16 +890,50 @@ async def search_properties(
 
     budget_value = _coerce_float(budget)
     beds_value = _coerce_int(beds)
+    bathrooms_value = _coerce_int(bathrooms)
+    guests_value = _coerce_int(guests)
     normalized_property_type = _normalize_property_type(property_type)
     resolved_city = _resolve_city_from_catalog(city, _DATASET or None)
     if resolved_city:
         city = resolved_city
 
+    raw_amenities = [a.strip() for a in (amenities or "").split(",") if a.strip()]
+    constraints = _build_dynamic_constraints_from_inputs(
+        city=city,
+        budget=budget_value,
+        beds=beds_value,
+        beds_operator=beds_operator,
+        bathrooms=bathrooms_value,
+        bathrooms_operator=bathrooms_operator,
+        guests=guests_value,
+        guests_operator=guests_operator,
+        property_type=normalized_property_type,
+        amenities=raw_amenities,
+    )
+    if search_plan is not None:
+        plan = search_plan
+        if sort_preferences is not None:
+            plan = SearchPlan(
+                constraints=plan.constraints,
+                trace=plan.trace,
+                session_id=plan.session_id,
+                user_message=plan.user_message,
+                sort_preferences=list(sort_preferences),
+            )
+            plan.trace.sort_preferences = list(sort_preferences)
+    else:
+        plan = _search_plan_from_constraints(
+            constraints,
+            search_path=search_path,
+            user_message=free_text or "",
+            sort_preferences=sort_preferences,
+        )
+
     requested_limit = _coerce_int(max_results)
     search_limit = _resolve_result_limit(requested_limit)
     summary_threshold = max(PROPERTY_SUMMARY_THRESHOLD, 1)
+    base_beds_value = beds_value if (beds_operator or "exact") in {"exact", "min"} else None
 
-    raw_amenities = [a.strip() for a in (amenities or "").split(",") if a.strip()]
     hard_amenities, soft_terms = _split_amenities_by_known(raw_amenities, _DATASET or None)
     amenity_list = hard_amenities or None
     vibe_query = _build_vibe_query(soft_terms, free_text)
@@ -831,7 +945,7 @@ async def search_properties(
             rust_result = await rust_search(
                 location=city,
                 budget=budget_value,
-                beds=beds_value,
+                beds=base_beds_value,
                 amenities=amenity_list or [],
                 property_type=normalized_property_type or "",
                 max_results=search_limit,
@@ -853,18 +967,13 @@ async def search_properties(
             budget=int(budget_value) if budget_value is not None else None,
             amenities=amenity_list,
             location=city,
-            beds=beds_value,
+            beds=base_beds_value,
             property_type=normalized_property_type,
         )
 
-    if results and normalized_property_type:
-        results = [
-            r for r in results
-            if _normalize_property_type(r.get("property_type") or "")
-            == normalized_property_type
-        ]
-
-    results = _sort_results_for_display(list(results or []))
+    results = _apply_planner_to_results(list(results or []), plan)
+    if not plan.sort_preferences:
+        results = _sort_results_for_display(list(results or []))
 
     if not results:
         unresolved_turns = _set_unresolved_turns(soft_state, _get_unresolved_turns(soft_state) + 1)
@@ -874,8 +983,25 @@ async def search_properties(
             "filters_applied": {
                 "budget": budget_value,
                 "beds": beds_value,
+                "beds_operator": beds_operator,
+                "bathrooms": bathrooms_value,
+                "bathrooms_operator": bathrooms_operator,
+                "guests": guests_value,
+                "guests_operator": guests_operator,
                 "property_type": property_type,
                 "amenities": amenities,
+            },
+            "query_context": {
+                "city": city,
+                "property_type": normalized_property_type,
+                "budget": budget_value,
+                "bedrooms": beds_value,
+                "bedrooms_operator": beds_operator if beds_value is not None else None,
+                "bathrooms": bathrooms_value,
+                "bathrooms_operator": bathrooms_operator if bathrooms_value is not None else None,
+                "guests": guests_value,
+                "guests_operator": guests_operator if guests_value is not None else None,
+                "amenities": list(raw_amenities),
             },
             "user_engagement_state": _classify_engagement_state(unresolved_turns),
             "unresolved_turns": unresolved_turns,
@@ -886,12 +1012,21 @@ async def search_properties(
         results = await _rerank_properties_by_vibe(results, vibe_query)
 
 
-    filters = {
-        "city": city,
-        "budget": budget_value,
-        "beds": beds_value,
-        "property_type": normalized_property_type,
-    }
+    filters = constraints.to_dict()
+    filters["city"] = city
+    filters["property_type"] = normalized_property_type
+    filters["budget"] = budget_value
+    if beds_value is not None:
+        filters["bedrooms"] = beds_value
+        filters["bedrooms_operator"] = beds_operator
+    if bathrooms_value is not None:
+        filters["bathrooms"] = bathrooms_value
+        filters["bathrooms_operator"] = bathrooms_operator
+    if guests_value is not None:
+        filters["guests"] = guests_value
+        filters["guests_operator"] = guests_operator
+    if raw_amenities:
+        filters["amenities"] = list(raw_amenities)
     page_size = _search_display_max_inline_results() or _resolve_page_size()
     payload, visible_results, option_map = _build_search_page_payload(
         results=results,
@@ -901,11 +1036,27 @@ async def search_properties(
         search_limit=len(results) if _uses_all_matching_display() else search_limit,
         summary_threshold=summary_threshold,
     )
+    payload["query_context"] = {
+        **dict(payload.get("query_context") or {}),
+        "city": city,
+        "property_type": normalized_property_type,
+        "budget": budget_value,
+        "bedrooms": beds_value,
+        "bedrooms_operator": beds_operator if beds_value is not None else None,
+        "bathrooms": bathrooms_value,
+        "bathrooms_operator": bathrooms_operator if bathrooms_value is not None else None,
+        "guests": guests_value,
+        "guests_operator": guests_operator if guests_value is not None else None,
+        "amenities": list(raw_amenities),
+        "sort_preferences": list(plan.sort_preferences),
+    }
 
     if isinstance(soft_state, dict):
         soft_state["active_flow"] = "search"
         soft_state["last_filters"] = filters
         soft_state["last_search_filters"] = dict(filters)
+        soft_state["last_dynamic_constraints"] = constraints.to_full_dict()
+        soft_state["last_sort_preferences"] = list(plan.sort_preferences)
         soft_state["all_search_results"] = list(results)
         soft_state["current_page"] = payload["pagination"]["current_page"]
         soft_state["page_size"] = payload["pagination"]["page_size"]
@@ -943,7 +1094,12 @@ async def search_properties(
                 "property_type": normalized_property_type,
                 "budget": budget_value,
                 "beds": beds_value,
+                "bathrooms": bathrooms_value,
+                "guests": guests_value,
                 "amenities": amenity_list,
+                "search_path": search_path,
+                "hard_filters": plan.trace.hard_filters,
+                "sort_preferences": plan.sort_preferences,
             },
         ) as trace:
             trace.update(
@@ -953,7 +1109,10 @@ async def search_properties(
                         "city": city,
                         "budget": budget_value,
                         "beds": beds_value,
+                        "bathrooms": bathrooms_value,
+                        "guests": guests_value,
                         "property_type": normalized_property_type,
+                        "amenities": raw_amenities,
                     },
                     "summary": summarize_property_results(results),
                 }
@@ -1090,15 +1249,23 @@ async def get_property_details(
 
     property_id = str(property_id)
     matched_prop = None
+    fallback_prop = None
     for r in _DATASET:
         r_id = str(r.get("id")) if r.get("id") is not None else str(r.get("title"))
         if r_id == property_id:
             matched_prop = r
             break
-        
-        if selected_item and r.get("title") == selected_item.get("title") and r.get("city") == selected_item.get("city"):
-            matched_prop = r
-            break
+
+        if (
+            fallback_prop is None
+            and selected_item
+            and r.get("title") == selected_item.get("title")
+            and r.get("city") == selected_item.get("city")
+        ):
+            fallback_prop = r
+
+    if not matched_prop and fallback_prop is not None:
+        matched_prop = fallback_prop
 
     if not matched_prop and selected_item:
         matched_prop = selected_item

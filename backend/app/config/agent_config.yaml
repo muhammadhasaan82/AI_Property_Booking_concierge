@@ -353,7 +353,7 @@ faq_interruption:
     selected_property: >-
       Would you like to go back to that property, continue booking it, or ask another policy question?
     booking_flow: >-
-      Would you like to continue your booking, or ask another policy question?
+      Would you like to continue your booking? You can also ask another policy question.
     fallback: >-
       Would you like to continue where you left off, or ask another policy question?
   resume_cues:

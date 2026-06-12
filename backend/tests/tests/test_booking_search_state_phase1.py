@@ -1,3 +1,4 @@
+import copy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -28,6 +29,28 @@ def _make_props(kind: str, city: str, count: int, start: int = 1):
                 "rating": 4.0,
                 "amenities": ["wifi"],
                 "description": f"{kind} in {city}",
+            }
+        )
+    return rows
+
+
+def _make_duplicate_title_villas(city: str = "Los Angeles") -> list[dict]:
+    prices = [813, 528, 719, 96, 726, 156, 819]
+    rows = []
+    for idx, price in enumerate(prices, start=1):
+        bedrooms = 5 if idx in (5, 7) else max(idx % 4, 1)
+        rows.append(
+            {
+                "id": f"villa-{idx}",
+                "title": "5BR Villa in Los Angeles" if idx in (5, 7) else f"Villa In {city} {idx}",
+                "city": city,
+                "price_per_night": price,
+                "property_type": "Villa",
+                "bedrooms": bedrooms,
+                "bathrooms": max(bedrooms, 1),
+                "rating": 5.0 - (idx * 0.1),
+                "amenities": ["wifi", "pool"],
+                "description": f"villa in {city}",
             }
         )
     return rows
@@ -91,6 +114,27 @@ async def test_search_show_more_option_2_keeps_filters():
         selected = await select_property(option_number=7, tool_context=ctx)
         assert selected["status"] == "property_details"
         assert selected["property"]["id"] == result["properties"][6]["id"]
+
+
+@pytest.mark.asyncio
+async def test_select_property_prefers_exact_property_id_over_duplicate_title_city_match():
+    ctx = _Ctx()
+    fake = _make_duplicate_title_villas()
+
+    with patch("app.components.search._DATASET", fake), \
+         patch("app.agents.tools.rust_client.search_properties", return_value={"fallback": True}):
+        result = await search_properties(city="Los Angeles", property_type="villa", tool_context=ctx)
+        assert result["status"] == "properties_found"
+
+        option_five = result["properties"][4]
+        assert option_five["title"] == "5BR Villa in Los Angeles"
+        assert option_five["price_per_night"] == 726
+
+        selected = await select_property(option_number=5, tool_context=ctx)
+
+    assert selected["status"] == "property_details"
+    assert selected["property"]["id"] == option_five["id"]
+    assert selected["property"]["price_per_night"] == 726
 
 
 @pytest.mark.asyncio
@@ -341,3 +385,107 @@ async def test_no_vague_let_me_check_response_for_policy_faq():
     reply = str(faq.get("deterministic_reply") or faq.get("answer") or "").lower()
     assert "let me check our faq" not in reply
     assert "let me check the exact details" not in reply
+
+
+async def _run_adk_turn_with_snapshot(monkeypatch, snapshot: dict, message: str) -> tuple[str, AsyncMock]:
+    async def fake_get_session_snapshot(_session_id):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        existing_state = snapshot.setdefault("state", {})
+        existing_soft_state = existing_state.get("soft_state")
+        new_soft_state = state.get("soft_state") if isinstance(state, dict) else {}
+
+        if isinstance(existing_soft_state, dict) and isinstance(new_soft_state, dict):
+            replacement_soft_state = copy.deepcopy(new_soft_state)
+            existing_soft_state.clear()
+            existing_soft_state.update(replacement_soft_state)
+            existing_state["soft_state"] = existing_soft_state
+        else:
+            existing_state["soft_state"] = copy.deepcopy(new_soft_state)
+
+        if isinstance(state, dict):
+            for key, value in state.items():
+                if key != "soft_state":
+                    existing_state[key] = value
+
+        snapshot["history"] = history
+        snapshot.setdefault("meta", {}).update(metadata or {})
+
+    route_pre_adk = AsyncMock(side_effect=AssertionError("route_pre_adk must not be called"))
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(adk_runner, "route_pre_adk", route_pre_adk)
+    monkeypatch.setattr(adk_runner, "_get_runner", lambda: (_ for _ in ()).throw(AssertionError("ADK runner must not be invoked")))
+    monkeypatch.setattr(adk_runner, "sanitize_input", lambda msg: (msg, True))
+    monkeypatch.setattr(adk_runner, "sanitize_output", lambda msg: msg)
+
+    chunks: list[str] = []
+    async for chunk in adk_runner.run_adk_turn("u-faq-live", "s-faq-live", message):
+        chunks.append(chunk)
+    return "".join(chunks), route_pre_adk
+
+
+@pytest.mark.asyncio
+async def test_run_adk_turn_property_search_faq_deposit_and_resume(monkeypatch):
+    fake = _make_props("apartment", "New York", 6)
+    snapshot = {
+        "state": {},
+        "history": [],
+        "meta": {
+            "app_name": adk_runner.APP_NAME,
+            "user_id": "u-faq-live",
+            "last_update_time": 1.0,
+        },
+    }
+
+    with patch("app.components.search._DATASET", fake), \
+         patch("app.agents.tools.rust_client.search_properties", return_value={"fallback": True}), \
+         patch("app.agents.tools.rust_client.execute_tool", new=AsyncMock(return_value={"fallback": True})):
+
+        search_reply, search_route = await _run_adk_turn_with_snapshot(
+            monkeypatch,
+            snapshot,
+            "show me apartments in New York",
+        )
+        assert "Apartment In New York 1" in search_reply
+        search_route.assert_not_awaited()
+
+        refund_reply, refund_route = await _run_adk_turn_with_snapshot(
+            monkeypatch,
+            snapshot,
+            "refund policy if I cancel 5 days before check-in",
+        )
+        soft_state = snapshot["state"]["soft_state"]
+        interruption = soft_state["faq_interruption"]
+
+        refund_route.assert_not_awaited()
+        assert "40%" in refund_reply
+        assert "4–6 days" in refund_reply
+        assert "Would you like to continue with the property list you were viewing" in refund_reply
+        assert interruption["active"] is True
+        assert interruption["resume_target"] == "property_menu"
+
+        deposit_reply, deposit_route = await _run_adk_turn_with_snapshot(
+            monkeypatch,
+            snapshot,
+            "deposit refund policy",
+        )
+
+        deposit_route.assert_not_awaited()
+        assert "unpaid rent" in deposit_reply.lower()
+        assert "late fees" in deposit_reply.lower()
+        assert "10–14 business days" in deposit_reply
+        assert soft_state["faq_interruption"]["active"] is True
+
+        resume_reply, resume_route = await _run_adk_turn_with_snapshot(
+            monkeypatch,
+            snapshot,
+            "sure",
+        )
+
+    resume_route.assert_not_awaited()
+    assert "Apartment In New York 1" in resume_reply
+    assert "Reply with an option number to see full details" in resume_reply
+    assert "What would you like to do next?" not in resume_reply
+    assert soft_state.get("faq_interruption") is None

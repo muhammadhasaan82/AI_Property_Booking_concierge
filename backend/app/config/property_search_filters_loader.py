@@ -25,6 +25,7 @@ class FilterConfig(BaseModel):
     type: str
     match: Optional[str] = None
     aliases: Any = None
+    sort_phrases: Dict[str, List[str]] = Field(default_factory=dict)
     operators: Dict[str, FilterOperatorConfig] = Field(default_factory=dict)
     taxonomy_ref: Optional[str] = None
     taxonomy_aliases: Dict[str, str] = Field(default_factory=dict)

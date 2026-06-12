@@ -140,6 +140,7 @@ shortcuts:
       - "book option {number}"
       - "go with {number}"
       - "back to booking option {number}"
+      - "{number}"
 
   property_detail_rejected:
     action: return_to_previous_results
