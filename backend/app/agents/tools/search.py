@@ -312,52 +312,45 @@ def _get_active_option_window(
     return max(shown_count, 0), max(total_found, 0)
 
 
+_DEFAULT_SEARCH_PAGE_SIZE = 5
+_DEFAULT_SEARCH_PAGE_SIZE_MAX = 25
+
+
 def _resolve_page_size_max() -> int:
     """
-    Determine the maximum allowed page size from configuration.
-    
-    Coerces `cfg.page_size_max` to an integer, uses 25 if the configured value is missing or invalid, and enforces a minimum value of 1.
-    
-    Returns:
-        int: The maximum page size (always >= 1).
+    Resolve the maximum page size from config.
+
+    A configured zero/negative value is clamped to 1. A missing value falls
+    back to the legacy-safe maximum.
     """
-    configured = _coerce_int(getattr(cfg, "page_size_max", None)) or 25
+    configured = _coerce_int(getattr(cfg, "page_size_max", None))
+    if configured is None:
+        configured = _DEFAULT_SEARCH_PAGE_SIZE_MAX
     return max(configured, 1)
 
 
 def _resolve_page_size() -> int:
     """
-    Determine the effective page size for pagination, clamped to allowed bounds.
-    
-    Reads the configured page size and falls back to the configured maximum if
-    the default is missing or invalid, then clamps the result to the range
-    [1, page_size_max].
-    
-    Returns:
-        int: An integer page size between 1 and the configured maximum.
+    Resolve default page size.
+
+    Config still controls this dynamically. When config is missing or invalid,
+    we fall back to the legacy default expected by pagination callers.
     """
     configured = _coerce_int(getattr(cfg, "page_size", None))
     max_size = _resolve_page_size_max()
     if configured is None or configured <= 0:
-        configured = max_size
+        configured = _DEFAULT_SEARCH_PAGE_SIZE
     return max(1, min(configured, max_size))
 
 
 def _resolve_page_size_from(value: Any) -> int:
     """
-    Resolve an input into a valid page size bounded by configured defaults and maximum.
-    
-    Parameters:
-        value (Any): Candidate page size; will be coerced to an integer.
-    
-    Returns:
-        int: A page size integer at least 1 and at most the configured maximum. If `value` is missing, invalid, or <= 0, the configured default page size is returned.
+    Resolve a requested/stored page size, falling back to the configured default.
     """
     configured = _coerce_int(value)
     if configured is None or configured <= 0:
         return _resolve_page_size()
     return max(1, min(configured, _resolve_page_size_max()))
-
 
 def _search_display_cfg() -> Any:
     return getattr(cfg, "search_display", None)
@@ -471,6 +464,7 @@ def _build_search_page_payload(
     page_size: Optional[int] = None,
     search_limit: int = PROPERTY_RESULT_LIMIT_DEFAULT,
     summary_threshold: int = PROPERTY_SUMMARY_THRESHOLD,
+    all_matching_display: bool = False,
 ) -> tuple[Dict[str, Any], list[Dict[str,Any]], Dict[str, Dict[str, Any]]]:
     """
     Builds a paginated search payload, the visible results for the requested page, and an option map for quick lookup.
@@ -497,7 +491,7 @@ def _build_search_page_payload(
     total_found = len(results)
     pagination_enabled = _search_display_pagination_enabled()
     max_inline_results = _search_display_max_inline_results()
-    all_matching_display = _uses_all_matching_display()
+    all_matching_display = bool(all_matching_display)
 
     if all_matching_display:
         safe_page = 1
@@ -578,68 +572,23 @@ def paginate_stored_results(
 ) -> Optional[Dict[str, Any]]:
     """
     Advance or rewind the current paginated search results stored in session soft state.
-    
-    Updates the provided `soft_state` to reflect the new page and returns a payload describing the page.
-    
-    Parameters:
-        soft_state (Optional[Dict[str, Any]]): Session soft state containing `all_search_results` and pagination keys; must be a dict with a non-empty `all_search_results` list.
-        direction (str): "next" to advance a page or "previous" to go back one page.
-    
-    Returns:
-        Optional[Dict[str, Any]]: A payload dictionary with pagination metadata, visible `properties`, and memory instructions, or `None` if `soft_state` is invalid or has no stored results.
-    
-    Side effects:
-        - Mutates `soft_state` setting keys such as `active_flow`, `current_page`, `page_size`, `visible_results`, `option_map`, `active_property_options_*`, and `active_property_options_generated_at`.
-        - Caches the updated last search via `_set_cached_last_search`.
     """
     if not isinstance(soft_state, dict):
         return None
- 
+
     all_results = soft_state.get("all_search_results") or []
     if not isinstance(all_results, list) or not all_results:
         return None
 
-    last_payload = soft_state.get("last_search")
-    pagination_state = (
-        last_payload.get("pagination", {}) if isinstance(last_payload, dict) else {}
-    )
-    if not _search_display_pagination_enabled() or (
-        direction != "previous" and not bool(pagination_state.get("has_more", False))
-    ):
-        return {
-            "status": Status.PROPERTIES_FOUND,
-            "deterministic_reply": cfg.msg_all_results_already_shown,
-            "message": cfg.msg_all_results_already_shown,
-            "properties": [],
-            "total_found": len(all_results),
-            "shown_count": len(soft_state.get("visible_results") or []),
-            "pagination": {
-                "current_page": _coerce_int(soft_state.get("current_page")) or 1,
-                "page_size": len(soft_state.get("visible_results") or []),
-                "page_start": 1 if all_results else 0,
-                "page_end": len(soft_state.get("visible_results") or []),
-                "total_pages": 1,
-                "has_more": False,
-                "has_next": False,
-                "has_prev": False,
-                "pagination_enabled": False,
-            },
-            "source": Source.MEMORY,
-            "memory": {
-                "read_from": "soft_state.all_search_results",
-                "state_available": True,
-            },
-        }
- 
     current_page = max(_coerce_int(soft_state.get("current_page")) or 1, 1)
     page_size = _resolve_page_size_from(soft_state.get("page_size"))
     filters = soft_state.get("last_filters") or {}
- 
+
     if direction == "previous":
         target_page = max(current_page - 1, 1)
     else:
         target_page = current_page + 1
- 
+
     payload, visible_results, option_map = _build_search_page_payload(
         results=all_results,
         filters=filters,
@@ -647,19 +596,23 @@ def paginate_stored_results(
         page_size=page_size,
         search_limit=_resolve_result_limit(None),
         summary_threshold=PROPERTY_SUMMARY_THRESHOLD,
+        all_matching_display=False,
     )
- 
+
     soft_state["active_flow"] = "search"
     soft_state["current_page"] = payload["pagination"]["current_page"]
-    soft_state["page_size"] = page_size
+    soft_state["page_size"] = payload["pagination"]["page_size"]
     soft_state["visible_results"] = visible_results
+    soft_state["last_visible_results"] = list(visible_results)
     soft_state["option_map"] = option_map
     soft_state["active_property_options_map"] = option_map
     soft_state["active_property_options_shown_count"] = payload["shown_count"]
     soft_state["active_property_options_total_found"] = payload["total_found"]
     soft_state["active_property_options_generated_at"] = time.time()
- 
+    sync_alias_keys(soft_state)
+
     _set_cached_last_search(soft_state, dict(payload))
+
     payload["source"] = Source.MEMORY
     payload["memory"] = {
         "read_from": "soft_state.all_search_results",
@@ -1120,6 +1073,7 @@ async def search_properties(
         page_size=page_size,
         search_limit=len(results) if _uses_all_matching_display() else search_limit,
         summary_threshold=summary_threshold,
+        all_matching_display=_uses_all_matching_display(),
     )
     payload["query_context"] = {
         **dict(payload.get("query_context") or {}),
