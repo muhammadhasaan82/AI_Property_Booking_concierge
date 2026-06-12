@@ -222,7 +222,6 @@ class SearchPlanner:
             if filter_cfg.type == "integer":
                 return int(float(raw_value)), operator_name
             return float(raw_value), operator_name
-            
 
         return extract_numeric
 

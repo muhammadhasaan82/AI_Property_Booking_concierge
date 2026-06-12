@@ -39,6 +39,7 @@ from app.services.property_type_normalizer import (
     normalize_property_type,
 )
 from app.services.booking_flow import has_active_booking_session
+from app.services.faq_interruption import detect_policy_question
 from app.services.redis_store import get_session_snapshot, save_session_snapshot
 from app.services.observability.langfuse_observer import get_observer, sanitize_for_observability
 
@@ -832,6 +833,12 @@ async def maybe_handle_direct_property_search(
     normalized_message = _normalize(message)
     if not normalized_message or is_status_query(message):
         return None
+
+    try:
+        if detect_policy_question(message):
+            return None
+    except Exception as exc:
+        logger.debug("[direct_search] policy detection skipped after error: %s", exc)
 
     if has_active_booking_session(soft_state):
         logger.info(
