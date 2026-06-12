@@ -47,9 +47,105 @@ PROPERTY_RESULT_LIMIT_DEFAULT: int = cfg.search_result_limit
 PROPERTY_RESULT_LIMIT_MAX: int = cfg.search_result_limit_max
 PROPERTY_SUMMARY_THRESHOLD: int = cfg.search_summary_mode_threshold
 
+from collections.abc import Iterable
+import csv
+import string
+from typing import Any
+
+
+def _normalize_search_value(value: Any) -> str:
+    """
+    Generic deterministic normalization for schema/entity comparison.
+
+    This does not encode business rules.
+    It only normalizes casing, surrounding punctuation, and whitespace.
+    """
+    text = str(value or "").strip().lower()
+    text = text.strip(string.whitespace + string.punctuation)
+    return " ".join(text.split())
+
+
+def _split_amenity_input(value: Any) -> list[str]:
+    """
+    Normalize structured amenity candidate input.
+
+    This intentionally expects already-extracted candidate terms.
+    Natural-language understanding belongs to the planner/model, not here.
+    """
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        text = value.replace(";", ",")
+        rows = csv.reader([text], skipinitialspace=True)
+        parts = next(rows, [])
+        return [
+            normalized
+            for item in parts
+            if (normalized := _normalize_search_value(item))
+        ]
+
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray)):
+        terms: list[str] = []
+        for item in value:
+            terms.extend(_split_amenity_input(item))
+        return _dedupe_preserve_order(terms)
+
+    normalized = _normalize_search_value(value)
+    return [normalized] if normalized else []
+
+
+def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for value in values:
+        normalized = _normalize_search_value(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+
+    return result
+
+
 def _split_amenities_by_known(
-    amenities: Optional[List[str]],
-    dataset: Optional[List[Dict[str, Any]]],
+    candidate_terms: Any,
+    *,
+    known_amenities: Iterable[str],
+) -> tuple[list[str], list[str]]:
+    """
+    Split model/planner-extracted amenity candidates into hard and soft terms.
+
+    Contract:
+    - known_amenities comes from schema/config/taxonomy
+    - matching known terms become hard filters
+    - unknown terms remain soft ranking terms
+    - no natural-language phrase parsing
+    - no regex
+    - no fixed amenity list
+    """
+    known = {
+        _normalize_search_value(item)
+        for item in known_amenities
+        if _normalize_search_value(item)
+    }
+
+    hard_terms: list[str] = []
+    soft_terms: list[str] = []
+
+    for term in _split_amenity_input(candidate_terms):
+        normalized = _normalize_search_value(term)
+
+        if normalized in known:
+            hard_terms.append(normalized)
+        else:
+            soft_terms.append(normalized)
+
+    return (
+        _dedupe_preserve_order(hard_terms),
+        _dedupe_preserve_order(soft_terms),
+    )
 ) -> tuple[List[str], List[str]]:
     if not amenities:
         return [], []

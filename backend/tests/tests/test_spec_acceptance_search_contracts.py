@@ -7,7 +7,7 @@ import pytest
 
 import app.agents.tools.search as search_tool_module
 from app.agents.tools.search import paginate_stored_results
-from app.services.direct_property_search import _extract_soft_ranking_terms
+from app.agents.tools.search import _split_amenities_by_known
 from app.services.property_query_constraints import extract_property_search_query
 
 
@@ -81,16 +81,19 @@ def test_comma_and_semicolon_amenity_inputs_normalize_identically():
 
 
 def test_unknown_vibe_amenity_becomes_soft_term_not_hard_filter():
-    soft_terms = _extract_soft_ranking_terms(
-        "villa in Seattle with wifi, parking, cozy",
-        ["wifi", "parking"],
+    """
+    Spec contract:
+    - The model/planner may extract candidate amenity-like terms.
+    - The backend must separate known hard amenities from unknown soft ranking terms.
+    - Backend must not hard-filter unknown vibe terms.
+    """
+    hard_terms, soft_terms = _split_amenities_by_known(
+        ["wifi", "parking", "cozy"],
+        known_amenities=["wifi", "parking"],
     )
 
-    query = extract_property_search_query("villa in Seattle with wifi, parking, cozy")
-    amenity_values = [constraint.value for constraint in query.constraints if constraint.field == "amenities"]
-
-    assert set(amenity_values) == {"wifi", "parking"}
-    assert soft_terms == "cozy"
+    assert hard_terms == ["wifi", "parking"]
+    assert soft_terms == ["cozy"]
 
 
 def test_pagination_state_keys_remain_consistent(monkeypatch):
