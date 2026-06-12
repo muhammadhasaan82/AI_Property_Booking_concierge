@@ -868,13 +868,13 @@ async def maybe_handle_direct_property_search(
     has_search_phrase = _has_search_phrase(message)
     has_new_signal = bool(plan.trace.extracted_constraints) or bool(plan.sort_preferences)
     if detect_policy_question(message):
-    return None
+        return None
     if not (active_search_context and has_new_signal):
-    try:
-        if detect_policy_question(message):
-            return None
-    except Exception as exc:
-        logger.debug("[direct_search] policy detection skipped after error: %s", exc)
+        try:
+            if detect_policy_question(message):
+                return None
+        except Exception as exc:
+            logger.debug("[direct_search] policy detection skipped after error: %s", exc)
     city_match = resolve_supported_city_from_message(message)
     exact_city = _exact_supported_city_from_message(message)
     logger.info(
