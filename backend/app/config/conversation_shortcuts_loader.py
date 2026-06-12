@@ -525,6 +525,15 @@ def match_shortcut(
     Returns:
         Optional[ShortcutMatch]: A `ShortcutMatch` containing the matched shortcut's `intent`, `action`, optional `direction`, optional integer `selection_number`, and the spec's `requires_state` / `requires_any_state` lists; `None` if no shortcut matches.
     """
+    global shortcut_router
+
+    # Self-heal after tests/runtime reload the global router from a missing YAML.
+    # reload() is still allowed to create an empty router, but match_shortcut()
+    # should not let that stale empty router permanently disable YAML shortcuts
+    # once the configured shortcuts file exists again.
+    if not getattr(shortcut_router, "specs", None) and _SHORTCUTS_PATH.exists():
+        shortcut_router = _load()
+
     return shortcut_router.match(message, soft_state)
 
 
