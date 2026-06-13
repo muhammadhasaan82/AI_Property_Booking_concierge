@@ -344,6 +344,19 @@ async def run_chaos_suite() -> bool:
 
 import pytest
 
+_CHAOS_ENV_VAR = "RUN_V2_CHAOS_TESTS"
+
+
+def _chaos_tests_enabled() -> bool:
+    return os.getenv(_CHAOS_ENV_VAR, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+pytestmark = pytest.mark.skipif(
+    not _chaos_tests_enabled(),
+    reason=f"V2 chaos tests are live ADK/LLM integration tests; set {_CHAOS_ENV_VAR}=1 to run.",
+)
+
+
 def pytest_configure(config):
     """
     Hook invoked by pytest at configuration time to install tool-intercepting stubs.
@@ -354,7 +367,8 @@ def pytest_configure(config):
         config: pytest.Config
             The pytest configuration object provided by pytest (not used by this hook).
     """
-    _install_stubs()
+    if _chaos_tests_enabled():
+        _install_stubs()
 
 
 @pytest.mark.parametrize("case,idx", [(c, i) for i, c in enumerate(CHAOS_CASES)], ids=[c.name for c in CHAOS_CASES])
