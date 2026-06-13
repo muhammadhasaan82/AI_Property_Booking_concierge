@@ -36,6 +36,11 @@ class _BookingBlock(BaseModel):
     field_display_names: Dict[str, str] = Field(default_factory=dict)
     field_prompts: Dict[str, str] = Field(default_factory=dict)
     field_aliases: Dict[str, List[str]] = Field(default_factory=dict)
+    amendable_fields: List[str] = Field(default_factory=list)
+    amendment_display_names: Dict[str, str] = Field(default_factory=dict)
+    amendment_intent_verbs: List[str] = Field(default_factory=list)
+    amendment_context_markers: List[str] = Field(default_factory=list)
+    amendment_field_groups: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     validators: Dict[str, _ValidatorSpec] = Field(default_factory=dict)
     date_format: str = "%Y-%m-%d"
     source_tag: str = "v2_adk"
@@ -77,6 +82,43 @@ def get_field_aliases() -> Dict[str, List[str]]:
         str(field): [str(alias).strip() for alias in aliases if str(alias).strip()]
         for field, aliases in (booking_schema.booking.field_aliases or {}).items()
     }
+
+
+def get_amendable_fields() -> List[str]:
+    fields = booking_schema.booking.amendable_fields or []
+    if fields:
+        return [str(field) for field in fields if str(field).strip()]
+    return list(get_ask_order())
+
+
+def get_amendment_display_name(field: str) -> str:
+    return str(
+        booking_schema.booking.amendment_display_names.get(field)
+        or get_field_display_name(field).lower()
+    )
+
+
+def get_amendment_intent_verbs() -> List[str]:
+    verbs = booking_schema.booking.amendment_intent_verbs or []
+    return [str(verb).strip().lower() for verb in verbs if str(verb).strip()]
+
+
+def get_amendment_context_markers() -> List[str]:
+    markers = booking_schema.booking.amendment_context_markers or []
+    return [str(marker).strip().lower() for marker in markers if str(marker).strip()]
+
+
+def get_amendment_field_groups() -> Dict[str, Dict[str, Any]]:
+    groups: Dict[str, Dict[str, Any]] = {}
+    for key, raw in (booking_schema.booking.amendment_field_groups or {}).items():
+        if not isinstance(raw, dict):
+            continue
+        groups[str(key)] = {
+            "display_name": str(raw.get("display_name") or key),
+            "fields": [str(field) for field in raw.get("fields", []) if str(field).strip()],
+            "aliases": [str(alias) for alias in raw.get("aliases", []) if str(alias).strip()],
+        }
+    return groups
 
 def next_field_to_ask(missing_fields: List[str]) -> Optional[str]:
     """

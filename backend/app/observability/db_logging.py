@@ -5,6 +5,22 @@ from typing import Optional, Dict, Any
 from ..services import db_client
 
 
+SUCCESSFUL_BOOKING_UPDATE_COLUMNS = {
+    "user_name",
+    "user_email",
+    "user_phone",
+    "check_in",
+    "check_out",
+    "guests",
+    "nights",
+    "price_per_night",
+    "total_amount",
+    "property_title",
+    "city",
+    "status",
+}
+
+
 async def log_chat(user_message: str, bot_response: str) -> bool:
     try:
         await db_client.execute(
@@ -78,6 +94,37 @@ async def get_successful_booking_status(booking_id: str) -> Optional[Dict[str, A
         )
     except Exception:
         return None
+
+
+async def update_successful_booking(booking_id: str, updates: Dict[str, Any]) -> bool:
+    if not booking_id or not updates:
+        return False
+
+    payload = {
+        key: value
+        for key, value in dict(updates).items()
+        if key in SUCCESSFUL_BOOKING_UPDATE_COLUMNS
+    }
+    if not payload:
+        return False
+
+    assignments = [f"{key} = %s" for key in payload]
+    assignments.append("updated_at = now()")
+    values = list(payload.values())
+    values.append(str(booking_id))
+
+    try:
+        rowcount = await db_client.execute(
+            f"""
+            update public.successful_bookings
+            set {", ".join(assignments)}
+            where booking_id = %s;
+            """,
+            values,
+        )
+        return rowcount > 0
+    except Exception:
+        return False
 
 
 async def log_feedback(user_message: str, bot_response: str, rating: str, comment: Optional[str] = None) -> bool:
