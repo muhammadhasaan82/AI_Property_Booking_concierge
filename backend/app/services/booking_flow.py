@@ -634,6 +634,29 @@ def _parse_yearless_month_day(day: int, month_raw: str) -> Optional[str]:
     return _format_month_day(month, day, year)
 
 
+def _parse_single_structured_date(token: str) -> Optional[date]:
+    # Try year first: YYYY-MM-DD or YYYY/MM/DD
+    m1 = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", token.strip())
+    if m1:
+        try:
+            return date(int(m1.group(1)), int(m1.group(2)), int(m1.group(3)))
+        except ValueError:
+            return None
+    # Try year last strictly as DD-MM-YYYY or DD/MM/YYYY.
+    # Do not silently guess MM-DD-YYYY; accepted user-facing year-last
+    # formats are day-first and normalized to cfg.date_format.
+    m2 = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$", token.strip())
+    if m2:
+        d = int(m2.group(1))
+        m = int(m2.group(2))
+        y = int(m2.group(3))
+        try:
+            return date(y, m, d)
+        except ValueError:
+            return None
+    return None
+
+
 def _parse_natural_date(text: str) -> Optional[str]:
     """
     Parse an ISO or common natural-language date from `text` and return it formatted using `cfg.date_format`.
@@ -649,12 +672,14 @@ def _parse_natural_date(text: str) -> Optional[str]:
     if not text:
         return None
     cleaned = re.sub(r"[\n\r]", " ", text).strip(" ,.;:")
-    iso = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", cleaned)
-    if iso:
-        try:
-            parsed = date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
+    
+    # Try structured formats first
+    structured_match = re.search(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", cleaned)
+    if structured_match:
+        parsed = _parse_single_structured_date(structured_match.group(0))
+        if parsed:
             return parsed.strftime(cfg.date_format)
-        except ValueError:
+        else:
             return None
 
     patterns = [
@@ -709,13 +734,11 @@ def _find_all_dates(text: str) -> List[Tuple[str, int, int]]:
         return []
     results = []
     
-    iso_pat = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
-    for m in iso_pat.finditer(text):
-        try:
-            parsed = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    structured_pat = re.compile(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b")
+    for m in structured_pat.finditer(text):
+        parsed = _parse_single_structured_date(m.group(0))
+        if parsed:
             results.append((parsed.strftime(cfg.date_format), m.start(), m.end()))
-        except ValueError:
-            pass
 
     pat1 = re.compile(r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>[a-z]+)\s*,?\s*(?P<year>\d{4})\b", re.I)
     for m in pat1.finditer(text):
@@ -979,6 +1002,66 @@ def _extract_name_for_field(text: str) -> Optional[str]:
     return None
 
 
+def _field_type_from_schema(field: str) -> str:
+    from app.config.booking_schema_loader import booking_schema
+    spec = booking_schema.booking.validators.get(field)
+    if not spec:
+        return "text"
+    if spec.type == "date":
+        return "date"
+    if spec.type in ("integer", "float"):
+        return "number"
+    if spec.type == "regex":
+        if "email" in field.lower() or (spec.pattern and "@" in spec.pattern):
+            return "email"
+        if "phone" in field.lower() or "mobile" in field.lower():
+            return "phone"
+    return "text"
+
+
+def _is_valid_candidate_for_field(field: str, val: str) -> bool:
+    if not val:
+        return False
+    val_str = val.strip().strip("'\"")
+    if not val_str:
+        return False
+        
+    f_type = _field_type_from_schema(field)
+    if f_type == "email":
+        return "@" in val_str and "." in val_str
+    elif f_type == "phone":
+        digits = re.sub(r"\D", "", val_str)
+        if len(digits) < 5:
+            return False
+        return not bool(re.search(r"[a-zA-Z]", val_str))
+    elif f_type == "date":
+        parsed = _parse_single_structured_date(val_str)
+        if parsed:
+            return True
+        parsed_nat = _parse_natural_date(val_str)
+        return parsed_nat is not None
+    elif f_type == "number":
+        try:
+            float(val_str)
+            return True
+        except ValueError:
+            return False
+    elif f_type == "text":
+        if "@" in val_str:
+            return False
+        digits = re.sub(r"\D", "", val_str)
+        if len(digits) >= 7 and not re.search(r"[a-zA-Z]", val_str):
+            return False
+        if _parse_single_structured_date(val_str) or _parse_natural_date(val_str):
+            return False
+        if val_str.isdigit():
+            return False
+        if val_str.lower() in ("yes", "no", "y", "n", "correct", "sure", "ok", "okay"):
+            return False
+        return len(val_str) >= 2
+    return True
+
+
 def _extract_updates_from_message(
     message: str,
     awaiting_field: Optional[str],
@@ -1082,6 +1165,127 @@ def _extract_updates_from_message(
                             updates["check_out"] = d_val
                             errors.pop("check_out", None)
                             break
+
+    # Delimited fallback parsing using schema ask_order
+    parts = [p.strip() for p in re.split(r'[,;|]', normalized) if p.strip()]
+    
+    # Check if the message is a compact raw delimited list of values (not a sentence)
+    is_compact_raw = False
+    if len(parts) >= 2:
+        is_compact_raw = True
+        for part in parts:
+            if part.count(" ") > 3:
+                is_compact_raw = False
+                break
+                
+    if is_compact_raw:
+        ask_order = get_ask_order()
+        
+        # If the input is delimited raw, clear check_in/check_out from updates
+        # so they are determined strictly by the delimited parser positions
+        updates.pop("check_in", None)
+        updates.pop("check_out", None)
+        if "check_in" in mentioned_fields:
+            mentioned_fields.remove("check_in")
+        if "check_out" in mentioned_fields:
+            mentioned_fields.remove("check_out")
+            
+        # Step 1: Detect explicit labels in parts first
+        labeled_updates = {}
+        unlabeled_parts = []
+        for part in parts:
+            matched_field = None
+            matched_val = None
+            for field in ask_order:
+                aliases = _field_alias_map().get(field, [])
+                sorted_aliases = sorted(aliases, key=len, reverse=True)
+                for alias in sorted_aliases:
+                    pattern = re.compile(rf"^{re.escape(alias)}\b(?:\s*[:=-]|\s+is\b|\s+would\s+be\b)?\s*(.*)$", re.I)
+                    m = pattern.match(part)
+                    if m:
+                        matched_field = field
+                        matched_val = m.group(1).strip()
+                        break
+                if matched_field:
+                    break
+            if matched_field:
+                labeled_updates[matched_field] = matched_val
+            else:
+                unlabeled_parts.append(part)
+                
+        # Step 2: Classify the remaining unlabeled parts semantically
+        email_parts = []
+        phone_parts = []
+        date_parts = []
+        int_parts = []
+        text_parts = []
+        
+        for part in unlabeled_parts:
+            # Date candidate: matches structured regex pattern or natural month names
+            is_date_candidate = bool(re.search(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", part))
+            is_date_candidate = is_date_candidate or bool(re.search(r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b", part, re.I))
+            
+            if is_date_candidate:
+                date_parts.append(part)
+            elif "@" in part and "." in part:
+                email_parts.append(part)
+            elif re.sub(r"\D", "", part) and len(re.sub(r"\D", "", part)) >= 5 and not re.search(r"[a-zA-Z]", part):
+                phone_parts.append(part)
+            elif part.isdigit():
+                int_parts.append(part)
+            else:
+                text_parts.append(part)
+                
+        # Step 3: Map classified parts to unfilled fields of ask_order
+        unfilled_fields = [field for field in ask_order if field not in updates and field not in labeled_updates]
+        
+        email_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "email"]
+        phone_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "phone"]
+        date_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "date"]
+        int_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "number"]
+        text_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "text"]
+        
+        for i, field in enumerate(email_fields):
+            if i < len(email_parts):
+                labeled_updates[field] = email_parts[i]
+        for i, field in enumerate(phone_fields):
+            if i < len(phone_parts):
+                labeled_updates[field] = phone_parts[i]
+        for i, field in enumerate(date_fields):
+            if i < len(date_parts):
+                labeled_updates[field] = date_parts[i]
+        for i, field in enumerate(int_fields):
+            if i < len(int_parts):
+                labeled_updates[field] = int_parts[i]
+        for i, field in enumerate(text_fields):
+            if i < len(text_parts):
+                labeled_updates[field] = text_parts[i]
+                
+        # Clean, validate, and normalize the delimited updates
+        cleaned_delimited_updates = {}
+        for field, val in labeled_updates.items():
+            if _is_valid_candidate_for_field(field, val):
+                if _field_type_from_schema(field) == "date":
+                    parsed = _parse_single_structured_date(val)
+                    if parsed:
+                        cleaned_delimited_updates[field] = parsed.strftime(cfg.date_format)
+                    else:
+                        parsed_nat = _parse_natural_date(val)
+                        if parsed_nat:
+                            cleaned_delimited_updates[field] = parsed_nat
+                elif _field_type_from_schema(field) == "number":
+                    guest_count = _coerce_int(val)
+                    if guest_count is not None:
+                        cleaned_delimited_updates[field] = guest_count
+                else:
+                    cleaned_delimited_updates[field] = val
+                    
+        # Merge cleaned delimited updates
+        for k, v in cleaned_delimited_updates.items():
+            if k not in updates:
+                updates[k] = v
+                if k not in mentioned_fields:
+                    mentioned_fields.append(k)
 
     if awaiting_field and awaiting_field not in updates:
         mentioned_fields.append(awaiting_field)
@@ -1301,15 +1505,7 @@ def resume_booking_flow(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def _modification_field_from_message(message: str) -> Optional[str]:
     normalized = _normalize(message)
     alias_map = _field_alias_map()
-    field_order = [
-        "property_id",
-        "guest_name",
-        "guest_email",
-        "guest_phone",
-        "check_in",
-        "check_out",
-        "guests",
-    ]
+    field_order = ["property_id"] + get_ask_order()
     for field in field_order:
         aliases = alias_map.get(field, [])
         for alias in aliases:
