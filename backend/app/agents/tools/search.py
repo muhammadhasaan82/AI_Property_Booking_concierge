@@ -599,6 +599,13 @@ def paginate_stored_results(
         all_matching_display=False,
     )
 
+    if (
+        direction != "previous"
+        and payload.get("pagination", {}).get("current_page") == current_page
+        and not payload.get("pagination", {}).get("has_next")
+    ):
+        payload["deterministic_reply"] = "All matching properties are already shown."
+
     soft_state["active_flow"] = "search"
     soft_state["current_page"] = payload["pagination"]["current_page"]
     soft_state["page_size"] = payload["pagination"]["page_size"]
