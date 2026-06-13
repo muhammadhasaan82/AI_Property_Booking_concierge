@@ -67,6 +67,7 @@ from app.services.booking_flow import (
     handle_booking_amendment_turn as _handle_booking_amendment_turn,
     has_post_confirmation_amendment_context as _has_post_confirmation_amendment_context,
     handle_booking_status_check as _handle_booking_status_check,
+    handle_booking_cancellation_turn as _handle_booking_cancellation_turn,
     handle_review_modification_request as _handle_review_modification_request,
     has_active_booking_session as _has_active_booking_session,
     list_available_cities_payload as _list_available_cities_payload,
@@ -1482,6 +1483,46 @@ async def _maybe_handle_booking_status_check(
     return payload
 
 
+async def _maybe_handle_booking_cancellation_turn(
+    *,
+    session_id: str,
+    message: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Handle deterministic booking cancellation/deletion turn from the current session soft_state.
+    """
+    snapshot = await get_session_snapshot(session_id)
+    if not isinstance(snapshot, dict):
+        return None
+
+    state = snapshot.get("state") or {}
+    if not isinstance(state, dict):
+        return None
+
+    if "soft_state" in state and isinstance(state["soft_state"], dict):
+        soft_state = state["soft_state"]
+    else:
+        soft_state = dict(state)
+
+    payload = await _handle_booking_cancellation_turn(message, soft_state)
+    if not payload:
+        return None
+
+    persisted_state = _state_with_persisted_soft_state(state, soft_state)
+    meta = snapshot.get("meta") or {}
+    await save_session_snapshot(
+        session_id=session_id,
+        history=snapshot.get("history", []),
+        state=persisted_state,
+        metadata={
+            key: meta[key]
+            for key in ("app_name", "user_id", "last_update_time")
+            if key in meta
+        },
+    )
+    return payload
+
+
 async def run_adk_turn(
     user_id: str,
     session_id: str,
@@ -1550,6 +1591,19 @@ async def run_adk_turn(
     if not is_safe:
         yield "I'm sorry, I can't process that request. Could you rephrase?"
         trace.end()
+        return
+
+    with trace.span(name="booking_cancellation_priority"):
+        cancellation_payload = await _maybe_handle_booking_cancellation_turn(
+            session_id=session_id,
+            message=cleaned_message,
+        )
+    if cancellation_payload:
+        deterministic_reply = cancellation_payload.get("deterministic_reply")
+        if not deterministic_reply:
+            deterministic_reply = "I'm sorry, I couldn't process your request. Could you try again?"
+        trace.end()
+        yield str(deterministic_reply)
         return
 
     with trace.span(name="booking_amendment_priority"):

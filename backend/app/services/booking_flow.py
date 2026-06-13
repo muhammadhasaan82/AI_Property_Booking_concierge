@@ -2407,3 +2407,178 @@ def list_available_cities_payload() -> Dict[str, Any]:
         else "I couldn't load the available cities right now."
     )
     return payload
+
+
+def _detect_booking_cancellation_intent(message: str) -> bool:
+    if not message:
+        return False
+    normalized = _normalize(message)
+    if not normalized:
+        return False
+    # Check for keywords cancel, delete, remove with booking or registration
+    cancel_patterns = [
+        r"\b(delete|cancel|remove)\s+(?:this\s+|my\s+|the\s+)?booking\b",
+        r"\b(delete|cancel|remove)\s+(?:this\s+|my\s+|the\s+)?registration\b",
+    ]
+    for p in cancel_patterns:
+        if re.search(p, normalized, re.I):
+            return True
+
+    # Also if they say delete/cancel/remove and a booking ID is present
+    if re.search(r"\b(delete|cancel|remove)\b", normalized, re.I) and BOOKING_ID_PATTERN.search(message):
+        return True
+
+    return False
+
+
+def _is_yes(message: str) -> bool:
+    if not message:
+        return False
+    normalized = _normalize(message)
+    yes_words = {"yes", "yeah", "sure", "confirm", "proceed", "correct", "ok", "okay"}
+    tokens = set(normalized.split())
+    if any(w in tokens for w in yes_words):
+        return True
+    # If they are in confirmation stage, saying "delete", "cancel", etc. implies yes
+    if re.search(r"\b(delete|cancel|remove)\b", normalized, re.I):
+        return True
+    return False
+
+
+def _is_no(message: str) -> bool:
+    if not message:
+        return False
+    normalized = _normalize(message)
+    no_words = {"no", "nope", "nah", "reject"}
+    tokens = set(normalized.split())
+    if any(w in tokens for w in no_words):
+        return True
+    # Also check if it says "dont", "don't", "keep"
+    if re.search(r"\b(don't|dont|keep|change\s+my\s+mind)\b", normalized, re.I):
+        return True
+    return False
+
+
+async def handle_booking_cancellation_turn(
+    message: str,
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Deterministic booking cancellation/deletion handler.
+    """
+    is_cancel_intent = _detect_booking_cancellation_intent(message)
+    stage = soft_state.get("booking_cancellation_stage")
+
+    if not is_cancel_intent and not stage:
+        return None
+
+    from app.services.booking import get_booking_status, update_booking_status
+    from app.observability.db_logging import get_successful_booking_status, update_successful_booking
+
+    # If we are awaiting confirmation, check for confirmation/rejection
+    if stage == "awaiting_confirmation":
+        if _is_no(message):
+            # Keep booking unchanged. Clear deletion state.
+            soft_state.pop("booking_cancellation_pending", None)
+            soft_state.pop("booking_cancellation_stage", None)
+            soft_state.pop("booking_cancellation_id", None)
+            soft_state.pop("booking_cancellation_receipt", None)
+            return {
+                "status": "cancellation_rejected",
+                "deterministic_reply": "Okay, I have kept your booking unchanged."
+            }
+        elif _is_yes(message):
+            booking_id = soft_state.get("booking_cancellation_id")
+            if booking_id:
+                # Update DB using existing safe update functions
+                await update_successful_booking(booking_id, {"status": "cancelled"})
+                await update_booking_status(booking_id, "", "cancelled")
+                
+                # Update receipt status in session if present
+                if soft_state.get("booking_receipt", {}).get("booking_id") == booking_id:
+                    soft_state["booking_receipt"]["status"] = "cancelled"
+                if soft_state.get("booking_registration_id") == booking_id:
+                    soft_state["booking_status"] = "cancelled"
+                
+                # Clear deletion state
+                soft_state.pop("booking_cancellation_pending", None)
+                soft_state.pop("booking_cancellation_stage", None)
+                soft_state.pop("booking_cancellation_id", None)
+                soft_state.pop("booking_cancellation_receipt", None)
+                
+                return {
+                    "status": "cancelled",
+                    "deterministic_reply": f"Your booking {booking_id} has been successfully cancelled."
+                }
+            else:
+                # Fallback clean up
+                soft_state.pop("booking_cancellation_pending", None)
+                soft_state.pop("booking_cancellation_stage", None)
+                soft_state.pop("booking_cancellation_id", None)
+                soft_state.pop("booking_cancellation_receipt", None)
+                return {
+                    "status": "error",
+                    "deterministic_reply": "Something went wrong. Please try again."
+                }
+        else:
+            # Re-ask for confirmation
+            receipt = soft_state.get("booking_cancellation_receipt")
+            receipt_rendered = _receipt_reply(receipt) if receipt else ""
+            return {
+                "status": "awaiting_cancellation_confirmation",
+                "deterministic_reply": "I didn't quite get that. Please confirm if you want to cancel the booking. Say 'yes' to cancel or 'no' to keep it."
+            }
+
+    # Otherwise we are gathering booking ID or just starting
+    booking_id = _extract_booking_id(message)
+    if not booking_id:
+        # Check if we have it in soft_state/receipt
+        booking_id = soft_state.get("booking_cancellation_id") or soft_state.get("booking_registration_id") or soft_state.get("booking_receipt", {}).get("booking_id")
+
+    if not booking_id:
+        # Preserve state and ask only for booking ID
+        soft_state["booking_cancellation_pending"] = True
+        soft_state["booking_cancellation_stage"] = "awaiting_id"
+        return {
+            "status": "gathering_cancellation_id",
+            "deterministic_reply": "I'd be happy to help you cancel your booking. Could you please provide your booking registration ID? It looks like BK-YYYYMMDD-XXXXXXXX."
+        }
+
+    # We have a booking ID, load the details
+    db_row = await get_successful_booking_status(booking_id)
+    if db_row:
+        receipt = successful_booking_row_to_receipt(db_row)
+        receipt.setdefault("booking_id", booking_id)
+    else:
+        db_result = await get_booking_status(booking_id)
+        if db_result.get("ok"):
+            receipt = {
+                "booking_id": booking_id,
+                "status": db_result.get("status") or cfg.booking_confirmed_status,
+                "check_in": db_result.get("check_in") or "",
+                "check_out": db_result.get("check_out") or "",
+            }
+        else:
+            receipt = None
+
+    if not receipt:
+        # Booking not found. Ask for ID again, preserving the gathering_id stage.
+        soft_state["booking_cancellation_pending"] = True
+        soft_state["booking_cancellation_stage"] = "awaiting_id"
+        return {
+            "status": "booking_not_found",
+            "deterministic_reply": f"It looks like booking {booking_id} wasn't found in our system. Please double-check your registration ID and provide it again."
+        }
+
+    # Show receipt and ask for confirmation
+    receipt_rendered = _receipt_reply(receipt)
+    soft_state["booking_cancellation_pending"] = True
+    soft_state["booking_cancellation_stage"] = "awaiting_confirmation"
+    soft_state["booking_cancellation_id"] = booking_id
+    soft_state["booking_cancellation_receipt"] = receipt
+    
+    return {
+        "status": "awaiting_cancellation_confirmation",
+        "receipt": receipt,
+        "deterministic_reply": f"Here are your booking details:\n{receipt_rendered}\n\nAre you sure you want to cancel this booking? Please say 'yes' to confirm or 'no' to keep it."
+    }
