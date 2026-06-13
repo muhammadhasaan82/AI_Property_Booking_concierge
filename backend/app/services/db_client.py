@@ -6,6 +6,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
+from app.config.env_loader import load_backend_env
+
+load_backend_env()
+
 try:
     import psycopg
     from psycopg.rows import dict_row
@@ -69,10 +73,20 @@ def build_conninfo(conninfo: Optional[str] = None) -> str:
 
 async def _close_existing_pool() -> None:
     global _POOL, _POOL_CONNINFO
-    if _POOL is not None:
-        await _POOL.close()
+
+    pool = _POOL
     _POOL = None
     _POOL_CONNINFO = None
+
+    if pool is None:
+        return
+
+    try:
+        await pool.close()
+    except asyncio.CancelledError as exc:
+        logger.warning("DB pool close was cancelled; dropped stale pool reference: %s", exc)
+    except Exception as exc:
+        logger.warning("DB pool close failed; dropped stale pool reference: %s", exc)
 
 
 async def get_pool(conninfo: Optional[str] = None) -> AsyncConnectionPool:

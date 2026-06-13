@@ -193,7 +193,10 @@ class SearchPlanner:
         compiled: List[Tuple[str, re.Pattern[str]]] = []
         for operator_name, operator_cfg in filter_cfg.operators.items():
             for template in operator_cfg.patterns:
-                pattern = re.escape(template).replace(r"\{number\}", r"(\d+(?:\.\d+)?)")
+                pattern = re.escape(template).replace(
+    r"\{number\}",
+    r"(?:[^\w\s]\s*)?(\d+(?:\.\d+)?)",
+)
                 pattern = pattern.replace(r"\ ", r"\s+")
                 compiled.append((operator_name, re.compile(rf"\b{pattern}\b", re.IGNORECASE)))
 
@@ -219,7 +222,6 @@ class SearchPlanner:
             if filter_cfg.type == "integer":
                 return int(float(raw_value)), operator_name
             return float(raw_value), operator_name
-            return None
 
         return extract_numeric
 

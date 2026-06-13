@@ -1146,7 +1146,6 @@ async def test_direct_tool_and_rust_search_paths_return_identical_filtered_resul
         "budget": constraints.get("price_per_night"),
         "amenities": ",".join(constraints.get("amenities") or []),
         "sort_preferences": list(plan.sort_preferences),
-        "search_plan": plan,
     }
 
     with patch("app.components.search._DATASET", fake), patch(

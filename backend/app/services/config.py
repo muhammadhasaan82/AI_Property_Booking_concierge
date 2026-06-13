@@ -8,9 +8,31 @@ business rules must live in spec/config YAML files, not here.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Set
 
 from app.config.env_loader import load_backend_env
+
+
+# ---------------------------------------------------------------------------
+# Legacy dotenv path compatibility
+# ---------------------------------------------------------------------------
+# Older tests/callers introspect these paths directly. Keep them module-level.
+# Loading order remains broadest-to-narrowest:
+#   repo .env -> backend .env -> app/services .env
+
+_backend_root = Path(__file__).resolve().parents[1]
+_repo_root = Path(__file__).resolve().parents[2]
+
+_env_root = _repo_root / ".env"
+_env_backend = _backend_root / ".env"
+_env_services = Path(__file__).resolve().parent / ".env"
+
+_dotenv_paths = [
+    str(_env_root),
+    str(_env_backend),
+    str(_env_services),
+]
 
 load_backend_env()
 
@@ -64,6 +86,12 @@ SEED_PROPERTY_TYPES: Set[str] = (
 
 
 __all__ = [
+    "_backend_root",
+    "_repo_root",
+    "_env_root",
+    "_env_backend",
+    "_env_services",
+    "_dotenv_paths",
     "DATASET_PATH",
     "MOCK_MODE",
     "PAYMENT_BASE_URL",

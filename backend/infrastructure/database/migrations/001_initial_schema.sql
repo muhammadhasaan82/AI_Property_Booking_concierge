@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS public.successful_bookings (
     city          TEXT,
     guests        INTEGER,
     nights        INTEGER,
+    price_per_night NUMERIC(12,2),
     total_amount  NUMERIC(12,2),
     payment_url   TEXT,
     source        TEXT,

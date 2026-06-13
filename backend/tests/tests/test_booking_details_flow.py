@@ -666,3 +666,123 @@ async def test_all_details_one_message_does_not_reask_provided_dates(monkeypatch
     assert "What check-in date would you prefer?" not in reply
     assert "And the check-out date?" not in reply
     assert "Please confirm if everything is correct." in reply
+
+
+@pytest.mark.asyncio
+async def test_compact_unlabeled_details(monkeypatch):
+    snapshot, selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "xyz, xyz21@gmail.com, 033123456789, 18-06-2026, 29-06-2026, 5",
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    review = soft_state["booking_review"]
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert review["property_id"] == selected_property["id"]
+    assert review["guest_name"] == "xyz"
+    assert review["guest_email"] == "xyz21@gmail.com"
+    assert review["guest_phone"] == "033123456789"
+    assert review["check_in"] == "2026-06-18"
+    assert review["check_out"] == "2026-06-29"
+    assert review["guests"] == 5
+    assert "Please confirm if everything is correct." in reply
+
+
+@pytest.mark.asyncio
+async def test_compact_labeled_details(monkeypatch):
+    snapshot, selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "guests: 5; email: xyz21@gmail.com; check in: 18-06-2026; name: xyz; check-out: 29-06-2026; contact number: 033123456789",
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    review = soft_state["booking_review"]
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "awaiting_confirmation"
+    assert review["property_id"] == selected_property["id"]
+    assert review["guest_name"] == "xyz"
+    assert review["guest_email"] == "xyz21@gmail.com"
+    assert review["guest_phone"] == "033123456789"
+    assert review["check_in"] == "2026-06-18"
+    assert review["check_out"] == "2026-06-29"
+    assert review["guests"] == 5
+
+
+@pytest.mark.asyncio
+async def test_compact_invalid_dates(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "xyz, xyz21@gmail.com, 033123456789, 45-06-2026, 29-06-2026, 5",
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    booking_state = soft_state.get("booking_state", {})
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert booking_state.get("guest_name") == "xyz"
+    assert booking_state.get("guest_email") == "xyz21@gmail.com"
+    assert booking_state.get("guest_phone") == "033123456789"
+    assert booking_state.get("guests") == 5
+    assert "check_in" not in booking_state
+
+
+@pytest.mark.asyncio
+async def test_compact_checkout_before_checkin(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "xyz, xyz21@gmail.com, 033123456789, 29-06-2026, 18-06-2026, 5",
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    booking_state = soft_state.get("booking_state", {})
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert soft_state["awaiting_field"] == "check_out"
+    assert booking_state.get("guest_name") == "xyz"
+    assert booking_state.get("guest_email") == "xyz21@gmail.com"
+    assert booking_state.get("guest_phone") == "033123456789"
+    assert booking_state.get("check_in") == "2026-06-29"
+    assert booking_state.get("guests") == 5
+    assert "check_out" not in booking_state
+    assert any(x in reply for x in ("cannot be earlier than your check-in date", "must be after check_in"))
+
+
+@pytest.mark.asyncio
+async def test_compact_partial_details(monkeypatch):
+    snapshot, _selected_property = await _seed_booking_snapshot()
+
+    reply, route_pre_adk = await _run_turn(
+        monkeypatch,
+        snapshot,
+        "xyz, xyz21@gmail.com, 033123456789",
+    )
+
+    soft_state = snapshot["state"]["soft_state"]
+    booking_state = soft_state.get("booking_state", {})
+
+    assert route_pre_adk.await_count == 0
+    assert soft_state["booking_stage"] == "collecting_details"
+    assert soft_state["awaiting_field"] == "check_in"
+    assert booking_state.get("guest_name") == "xyz"
+    assert booking_state.get("guest_email") == "xyz21@gmail.com"
+    assert booking_state.get("guest_phone") == "033123456789"
+    assert "check_in" not in booking_state
+    assert "check_out" not in booking_state
+    assert "guests" not in booking_state

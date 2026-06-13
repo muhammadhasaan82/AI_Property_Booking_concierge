@@ -736,6 +736,67 @@ async def test_confirm_then_lookup_booking_id_e2e(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_lookup_booking_id_cross_session(monkeypatch):
+    """
+    Regression test:
+    - confirm booking in one session (persists to DB)
+    - create a fresh empty soft_state/new session
+    - ask status using the booking ID (using raw ID and spelling typos like 'boking id')
+    - assert status is found from persistent storage and matches receipt details.
+    """
+    reply, snapshot, saved_states, _search_result, _selected, route_pre_adk = (
+        await _run_booking_confirmation(monkeypatch, "yeah sure", option_number=3)
+    )
+    assert route_pre_adk.await_count == 0
+
+    review_reply, route_pre_adk = await _run_booking_followup_turn(
+        monkeypatch,
+        snapshot,
+        saved_states,
+        "my full name is Jane Doe, email is jane@example.com, number 03001234567, check-in date would 2nd of june, 2026 and check out shall be around 11 june 2026, we are around 4 guests",
+    )
+    assert route_pre_adk.await_count == 0
+
+    receipt_reply, route_pre_adk = await _run_booking_followup_turn(
+        monkeypatch,
+        snapshot,
+        saved_states,
+        "yes",
+    )
+    assert route_pre_adk.await_count == 0
+    assert "Your booking is confirmed." in receipt_reply
+
+    soft_state = snapshot["state"]["soft_state"]
+    registration_id = soft_state["booking_registration_id"]
+    assert registration_id
+    assert registration_id.startswith("BK-")
+
+    # Create a completely fresh, empty session/soft_state
+    fresh_snapshot = _build_status_check_snapshot({})
+
+    # Ask status using the booking ID in the new session, using raw ID and spelling typos
+    queries = [
+        f"My boking ID is {registration_id}",
+        f"booking id {registration_id}",
+        f"{registration_id}",
+    ]
+
+    for query in queries:
+        status_reply, route_pre_adk = await _run_status_check_turn(
+            monkeypatch,
+            fresh_snapshot,
+            query,
+        )
+        assert route_pre_adk.await_count == 0
+        assert registration_id in status_reply
+        assert "confirmed" in status_reply.lower()
+        assert "Jane Doe" in status_reply
+        assert "jane@example.com" in status_reply
+        assert "June 2, 2026" in status_reply
+        assert "June 11, 2026" in status_reply
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "rust_result",
     [

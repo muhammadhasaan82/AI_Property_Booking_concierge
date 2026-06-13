@@ -27,6 +27,11 @@ from app.services.faq_interruption import (
 )
 from app.services.observability.langfuse_observer import get_observer, summarize_booking_state
 from app.config.booking_schema_loader import (
+    get_amendable_fields,
+    get_amendment_context_markers,
+    get_amendment_display_name,
+    get_amendment_field_groups,
+    get_amendment_intent_verbs,
     get_ask_order,
     get_field_aliases,
     get_field_display_name,
@@ -46,6 +51,10 @@ _ACTIVE_BOOKING_STAGES = {
     "awaiting_modification_choice",
     "modifying_details",
     "awaiting_property_reselection",
+    "confirmed",
+    "awaiting_amendment_choice",
+    "awaiting_amendment_values",
+    "awaiting_amendment_confirmation",
 }
 _FAQ_KEYWORDS = (
     "pet",
@@ -84,6 +93,35 @@ _MONTHS = {
 }
 
 
+_POST_CONFIRMATION_AMENDMENT_STAGES = {
+    "confirmed",
+    "awaiting_amendment_choice",
+    "awaiting_amendment_values",
+    "awaiting_amendment_confirmation",
+}
+
+
+def has_post_confirmation_amendment_context(
+    message: str,
+    soft_state: Dict[str, Any],
+) -> bool:
+    if _extract_booking_id(message):
+        return True
+
+    if not isinstance(soft_state, dict):
+        return False
+
+    stage = str(soft_state.get("booking_stage") or "").strip()
+    if stage in _POST_CONFIRMATION_AMENDMENT_STAGES:
+        return True
+
+    if isinstance(soft_state.get("booking_receipt"), dict):
+        return True
+
+    if soft_state.get("booking_registration_id"):
+        return True
+
+    return False
 def _normalize(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
@@ -254,6 +292,24 @@ def _receipt_reply(receipt: Dict[str, Any]) -> str:
     )
 
 BOOKING_ID_PATTERN = re.compile(r"BK-\d{8}-[A-Z0-9]+", re.I)
+RECEIPT_TO_SUCCESSFUL_BOOKING_COLUMNS = {
+    "guest_name": "user_name",
+    "guest_email": "user_email",
+    "guest_phone": "user_phone",
+    "check_in": "check_in",
+    "check_out": "check_out",
+    "guests": "guests",
+    "nights": "nights",
+    "price_per_night": "price_per_night",
+    "total_amount": "total_amount",
+    "property_title": "property_title",
+    "city": "city",
+    "status": "status",
+}
+SUCCESSFUL_BOOKING_TO_RECEIPT_KEYS = {
+    db_key: receipt_key
+    for receipt_key, db_key in RECEIPT_TO_SUCCESSFUL_BOOKING_COLUMNS.items()
+}
 
 _BOOKING_STATUS_INTENT_PATTERNS = [
     re.compile(p, re.I)
@@ -268,6 +324,14 @@ _BOOKING_STATUS_INTENT_PATTERNS = [
         r"\bi\s+want\s+to\s+check\s+my\s+booking\s+status\b",
         r"\bstatus\s+of\s+my\s+booking\b",
         r"\bbooking\s+status\b",
+        r"\bmy\s+boking\s+id\s+is\b",
+        r"\bboking\s+id\b",
+        r"\bcheck\s+my\s+boking\s+status\b",
+        r"\bcheck\s+boking\s+status\b",
+        r"\bmy\s+boking\s+status\b",
+        r"\bi\s+want\s+to\s+check\s+my\s+boking\s+status\b",
+        r"\bstatus\s+of\s+my\s+boking\b",
+        r"\bboking\s+status\b",
     ]
 ]
 
@@ -314,6 +378,51 @@ def _extract_booking_id(message: str) -> Optional[str]:
         return None
     match = BOOKING_ID_PATTERN.search(message)
     return match.group(0).upper() if match else None
+
+
+def receipt_updates_to_successful_booking_columns(updates: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        db_key: updates[receipt_key]
+        for receipt_key, db_key in RECEIPT_TO_SUCCESSFUL_BOOKING_COLUMNS.items()
+        if receipt_key in updates
+    }
+
+
+def successful_booking_row_to_receipt(row: Dict[str, Any]) -> Dict[str, Any]:
+    receipt: Dict[str, Any] = {}
+    for db_key, receipt_key in SUCCESSFUL_BOOKING_TO_RECEIPT_KEYS.items():
+        if db_key in row:
+            receipt[receipt_key] = row.get(db_key)
+    if row.get("booking_id") is not None:
+        receipt["booking_id"] = str(row.get("booking_id"))
+    if row.get("payment_url") is not None:
+        receipt["payment_url"] = row.get("payment_url")
+    if not receipt.get("status"):
+        receipt["status"] = cfg.booking_confirmed_status
+    for key in ("check_in", "check_out"):
+        value = receipt.get(key)
+        if hasattr(value, "isoformat"):
+            receipt[key] = value.isoformat()
+    for key in ("price_per_night", "total_amount"):
+        value = receipt.get(key)
+        if value is not None and not isinstance(value, (int, float, str)):
+            try:
+                receipt[key] = float(value)
+            except Exception:
+                pass
+    return receipt
+
+
+def _store_current_receipt(soft_state: Dict[str, Any], receipt: Dict[str, Any]) -> None:
+    if not isinstance(soft_state, dict) or not isinstance(receipt, dict):
+        return
+    soft_state["booking_receipt"] = dict(receipt)
+    if receipt.get("booking_id"):
+        soft_state["booking_registration_id"] = str(receipt["booking_id"])
+    soft_state["booking_status"] = receipt.get("status") or cfg.booking_confirmed_status
+    soft_state["booking_stage"] = "confirmed"
+    soft_state["active_flow"] = "booking"
+    soft_state["last_presented_view"] = "booking_receipt"
 
 
 def _render_booking_status_reply(receipt: Dict[str, Any]) -> str:
@@ -470,6 +579,7 @@ async def handle_booking_status_check(
     if booking_id:
         receipt = _lookup_booking_in_session(booking_id, soft_state)
         if receipt:
+            _store_current_receipt(soft_state, receipt)
             return {
                 "status": Status.FOUND,
                 "receipt": receipt,
@@ -496,15 +606,9 @@ async def handle_booking_status_check(
 
             db_row = await get_successful_booking_status(booking_id)
             if db_row:
-                merged = {
-                    "booking_id": booking_id,
-                    "status": db_row.get("status") or cfg.booking_confirmed_status,
-                    "check_in": db_row.get("check_in") or "",
-                    "check_out": db_row.get("check_out") or "",
-                    "guest_name": db_row.get("user_name") or "",
-                    "guest_email": db_row.get("user_email") or "",
-                    "property_title": db_row.get("property_title") or "",
-                }
+                merged = successful_booking_row_to_receipt(db_row)
+                merged.setdefault("booking_id", booking_id)
+                _store_current_receipt(soft_state, merged)
                 return {
                     "status": Status.FOUND,
                     "receipt": merged,
@@ -525,6 +629,7 @@ async def handle_booking_status_check(
 
     latest = _latest_session_receipt(soft_state)
     if latest:
+        _store_current_receipt(soft_state, latest)
         return {
             "status": Status.FOUND,
             "receipt": latest,
@@ -634,6 +739,29 @@ def _parse_yearless_month_day(day: int, month_raw: str) -> Optional[str]:
     return _format_month_day(month, day, year)
 
 
+def _parse_single_structured_date(token: str) -> Optional[date]:
+    # Try year first: YYYY-MM-DD or YYYY/MM/DD
+    m1 = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", token.strip())
+    if m1:
+        try:
+            return date(int(m1.group(1)), int(m1.group(2)), int(m1.group(3)))
+        except ValueError:
+            return None
+    # Try year last strictly as DD-MM-YYYY or DD/MM/YYYY.
+    # Do not silently guess MM-DD-YYYY; accepted user-facing year-last
+    # formats are day-first and normalized to cfg.date_format.
+    m2 = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$", token.strip())
+    if m2:
+        d = int(m2.group(1))
+        m = int(m2.group(2))
+        y = int(m2.group(3))
+        try:
+            return date(y, m, d)
+        except ValueError:
+            return None
+    return None
+
+
 def _parse_natural_date(text: str) -> Optional[str]:
     """
     Parse an ISO or common natural-language date from `text` and return it formatted using `cfg.date_format`.
@@ -649,12 +777,14 @@ def _parse_natural_date(text: str) -> Optional[str]:
     if not text:
         return None
     cleaned = re.sub(r"[\n\r]", " ", text).strip(" ,.;:")
-    iso = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", cleaned)
-    if iso:
-        try:
-            parsed = date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
+    
+    # Try structured formats first
+    structured_match = re.search(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", cleaned)
+    if structured_match:
+        parsed = _parse_single_structured_date(structured_match.group(0))
+        if parsed:
             return parsed.strftime(cfg.date_format)
-        except ValueError:
+        else:
             return None
 
     patterns = [
@@ -709,13 +839,11 @@ def _find_all_dates(text: str) -> List[Tuple[str, int, int]]:
         return []
     results = []
     
-    iso_pat = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
-    for m in iso_pat.finditer(text):
-        try:
-            parsed = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    structured_pat = re.compile(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b")
+    for m in structured_pat.finditer(text):
+        parsed = _parse_single_structured_date(m.group(0))
+        if parsed:
             results.append((parsed.strftime(cfg.date_format), m.start(), m.end()))
-        except ValueError:
-            pass
 
     pat1 = re.compile(r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>[a-z]+)\s*,?\s*(?P<year>\d{4})\b", re.I)
     for m in pat1.finditer(text):
@@ -942,7 +1070,7 @@ def _extract_phone(text: str) -> Optional[str]:
 def _extract_guests(text: str) -> Optional[int]:
     patterns = (
         r"\b(?:we are|for|around|approximately|about)?\s*(\d+)\s+(?:guest|guests|people|persons)\b",
-        r"\bguests?\s*(?:is|are|:)?\s*(\d+)\b",
+        r"\bguests?\s*(?:is|are|to|:)?\s*(\d+)\b",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.I)
@@ -977,6 +1105,66 @@ def _extract_name_for_field(text: str) -> Optional[str]:
         if len(value) >= 2:
             return value
     return None
+
+
+def _field_type_from_schema(field: str) -> str:
+    from app.config.booking_schema_loader import booking_schema
+    spec = booking_schema.booking.validators.get(field)
+    if not spec:
+        return "text"
+    if spec.type == "date":
+        return "date"
+    if spec.type in ("integer", "float"):
+        return "number"
+    if spec.type == "regex":
+        if "email" in field.lower() or (spec.pattern and "@" in spec.pattern):
+            return "email"
+        if "phone" in field.lower() or "mobile" in field.lower():
+            return "phone"
+    return "text"
+
+
+def _is_valid_candidate_for_field(field: str, val: str) -> bool:
+    if not val:
+        return False
+    val_str = val.strip().strip("'\"")
+    if not val_str:
+        return False
+        
+    f_type = _field_type_from_schema(field)
+    if f_type == "email":
+        return "@" in val_str and "." in val_str
+    elif f_type == "phone":
+        digits = re.sub(r"\D", "", val_str)
+        if len(digits) < 5:
+            return False
+        return not bool(re.search(r"[a-zA-Z]", val_str))
+    elif f_type == "date":
+        parsed = _parse_single_structured_date(val_str)
+        if parsed:
+            return True
+        parsed_nat = _parse_natural_date(val_str)
+        return parsed_nat is not None
+    elif f_type == "number":
+        try:
+            float(val_str)
+            return True
+        except ValueError:
+            return False
+    elif f_type == "text":
+        if "@" in val_str:
+            return False
+        digits = re.sub(r"\D", "", val_str)
+        if len(digits) >= 7 and not re.search(r"[a-zA-Z]", val_str):
+            return False
+        if _parse_single_structured_date(val_str) or _parse_natural_date(val_str):
+            return False
+        if val_str.isdigit():
+            return False
+        if val_str.lower() in ("yes", "no", "y", "n", "correct", "sure", "ok", "okay"):
+            return False
+        return len(val_str) >= 2
+    return True
 
 
 def _extract_updates_from_message(
@@ -1082,6 +1270,127 @@ def _extract_updates_from_message(
                             updates["check_out"] = d_val
                             errors.pop("check_out", None)
                             break
+
+    # Delimited fallback parsing using schema ask_order
+    parts = [p.strip() for p in re.split(r'[,;|]', normalized) if p.strip()]
+    
+    # Check if the message is a compact raw delimited list of values (not a sentence)
+    is_compact_raw = False
+    if len(parts) >= 2:
+        is_compact_raw = True
+        for part in parts:
+            if part.count(" ") > 3:
+                is_compact_raw = False
+                break
+                
+    if is_compact_raw:
+        ask_order = get_ask_order()
+        
+        # If the input is delimited raw, clear check_in/check_out from updates
+        # so they are determined strictly by the delimited parser positions
+        updates.pop("check_in", None)
+        updates.pop("check_out", None)
+        if "check_in" in mentioned_fields:
+            mentioned_fields.remove("check_in")
+        if "check_out" in mentioned_fields:
+            mentioned_fields.remove("check_out")
+            
+        # Step 1: Detect explicit labels in parts first
+        labeled_updates = {}
+        unlabeled_parts = []
+        for part in parts:
+            matched_field = None
+            matched_val = None
+            for field in ask_order:
+                aliases = _field_alias_map().get(field, [])
+                sorted_aliases = sorted(aliases, key=len, reverse=True)
+                for alias in sorted_aliases:
+                    pattern = re.compile(rf"^{re.escape(alias)}\b(?:\s*[:=-]|\s+is\b|\s+would\s+be\b)?\s*(.*)$", re.I)
+                    m = pattern.match(part)
+                    if m:
+                        matched_field = field
+                        matched_val = m.group(1).strip()
+                        break
+                if matched_field:
+                    break
+            if matched_field:
+                labeled_updates[matched_field] = matched_val
+            else:
+                unlabeled_parts.append(part)
+                
+        # Step 2: Classify the remaining unlabeled parts semantically
+        email_parts = []
+        phone_parts = []
+        date_parts = []
+        int_parts = []
+        text_parts = []
+        
+        for part in unlabeled_parts:
+            # Date candidate: matches structured regex pattern or natural month names
+            is_date_candidate = bool(re.search(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", part))
+            is_date_candidate = is_date_candidate or bool(re.search(r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b", part, re.I))
+            
+            if is_date_candidate:
+                date_parts.append(part)
+            elif "@" in part and "." in part:
+                email_parts.append(part)
+            elif re.sub(r"\D", "", part) and len(re.sub(r"\D", "", part)) >= 5 and not re.search(r"[a-zA-Z]", part):
+                phone_parts.append(part)
+            elif part.isdigit():
+                int_parts.append(part)
+            else:
+                text_parts.append(part)
+                
+        # Step 3: Map classified parts to unfilled fields of ask_order
+        unfilled_fields = [field for field in ask_order if field not in updates and field not in labeled_updates]
+        
+        email_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "email"]
+        phone_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "phone"]
+        date_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "date"]
+        int_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "number"]
+        text_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "text"]
+        
+        for i, field in enumerate(email_fields):
+            if i < len(email_parts):
+                labeled_updates[field] = email_parts[i]
+        for i, field in enumerate(phone_fields):
+            if i < len(phone_parts):
+                labeled_updates[field] = phone_parts[i]
+        for i, field in enumerate(date_fields):
+            if i < len(date_parts):
+                labeled_updates[field] = date_parts[i]
+        for i, field in enumerate(int_fields):
+            if i < len(int_parts):
+                labeled_updates[field] = int_parts[i]
+        for i, field in enumerate(text_fields):
+            if i < len(text_parts):
+                labeled_updates[field] = text_parts[i]
+                
+        # Clean, validate, and normalize the delimited updates
+        cleaned_delimited_updates = {}
+        for field, val in labeled_updates.items():
+            if _is_valid_candidate_for_field(field, val):
+                if _field_type_from_schema(field) == "date":
+                    parsed = _parse_single_structured_date(val)
+                    if parsed:
+                        cleaned_delimited_updates[field] = parsed.strftime(cfg.date_format)
+                    else:
+                        parsed_nat = _parse_natural_date(val)
+                        if parsed_nat:
+                            cleaned_delimited_updates[field] = parsed_nat
+                elif _field_type_from_schema(field) == "number":
+                    guest_count = _coerce_int(val)
+                    if guest_count is not None:
+                        cleaned_delimited_updates[field] = guest_count
+                else:
+                    cleaned_delimited_updates[field] = val
+                    
+        # Merge cleaned delimited updates
+        for k, v in cleaned_delimited_updates.items():
+            if k not in updates:
+                updates[k] = v
+                if k not in mentioned_fields:
+                    mentioned_fields.append(k)
 
     if awaiting_field and awaiting_field not in updates:
         mentioned_fields.append(awaiting_field)
@@ -1301,15 +1610,7 @@ def resume_booking_flow(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def _modification_field_from_message(message: str) -> Optional[str]:
     normalized = _normalize(message)
     alias_map = _field_alias_map()
-    field_order = [
-        "property_id",
-        "guest_name",
-        "guest_email",
-        "guest_phone",
-        "check_in",
-        "check_out",
-        "guests",
-    ]
+    field_order = ["property_id"] + get_ask_order()
     for field in field_order:
         aliases = alias_map.get(field, [])
         for alias in aliases:
@@ -1380,6 +1681,7 @@ async def confirm_booking_review(soft_state: Dict[str, Any]) -> Optional[Dict[st
                 "check_out": summary.get("check_out"),
                 "guests": summary.get("guests"),
                 "nights": summary.get("nights"),
+                "price_per_night": summary.get("price_per_night"),
                 "total_amount": summary.get("total"),
                 "status": cfg.booking_confirmed_status,
                 "source": cfg.booking_source_tag,
@@ -1501,6 +1803,500 @@ def _review_payload_from_state(soft_state: Dict[str, Any], state: Dict[str, Any]
     }
 
 
+async def _current_amendment_receipt(
+    message: str,
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    booking_id = _extract_booking_id(message)
+    if booking_id:
+        receipt = _lookup_booking_in_session(booking_id, soft_state)
+        if receipt:
+            _store_current_receipt(soft_state, receipt)
+            return receipt
+        try:
+            from app.observability.db_logging import get_successful_booking_status
+
+            db_row = await get_successful_booking_status(booking_id)
+            if db_row:
+                receipt = successful_booking_row_to_receipt(db_row)
+                receipt.setdefault("booking_id", booking_id)
+                _store_current_receipt(soft_state, receipt)
+                return receipt
+        except Exception as exc:
+            logger.debug("[booking_amendment] DB lookup failed for %s: %s", booking_id, exc)
+    latest = _latest_session_receipt(soft_state)
+    if latest:
+        _store_current_receipt(soft_state, latest)
+        return latest
+    for key in ("booking_review", "pending_booking"):
+        candidate = soft_state.get(key)
+        if isinstance(candidate, dict):
+            receipt = dict(candidate)
+            if receipt.get("total") is not None and receipt.get("total_amount") is None:
+                receipt["total_amount"] = receipt.get("total")
+            receipt.setdefault("status", soft_state.get("booking_status") or cfg.booking_confirmed_status)
+            if soft_state.get("booking_registration_id"):
+                receipt.setdefault("booking_id", soft_state.get("booking_registration_id"))
+            return receipt
+    return None
+
+
+def _has_booking_amendment_context(message: str, soft_state: Dict[str, Any]) -> bool:
+    if _extract_booking_id(message):
+        return True
+    if not isinstance(soft_state, dict):
+        return False
+    if isinstance(soft_state.get("booking_receipt"), dict):
+        return True
+    if soft_state.get("booking_registration_id"):
+        return True
+    return bool(soft_state.get("pending_booking") or soft_state.get("booking_review"))
+
+
+def _has_booking_reference_marker(message: str) -> bool:
+    if _extract_booking_id(message):
+        return True
+    normalized = _normalize(message)
+    markers = get_amendment_context_markers()
+    if not markers:
+        markers = ["this booking", "my booking", "reservation"]
+    return any(re.search(rf"\b{re.escape(_normalize(marker))}\b", normalized) for marker in markers)
+
+
+def detect_booking_amendment_intent(message: str, soft_state: Dict[str, Any]) -> bool:
+    if not _has_booking_amendment_context(message, soft_state):
+        return False
+    normalized = _normalize(message)
+    if not normalized:
+        return False
+    fields = _amendment_fields_from_message(message)
+    if fields and _has_booking_reference_marker(message):
+        return True
+    verbs = get_amendment_intent_verbs()
+    if not verbs:
+        verbs = ["change", "update", "edit", "modify", "fix", "correct"]
+    return any(re.search(rf"\b{re.escape(verb)}\b", normalized) for verb in verbs)
+
+
+def _amendment_choice_reply() -> str:
+    labels = [get_amendment_display_name(field) for field in get_amendable_fields()]
+    if len(labels) > 1:
+        formatted = ", ".join(labels[:-1]) + f", or {labels[-1]}"
+    else:
+        formatted = labels[0] if labels else "booking details"
+    return f"Which booking detail would you like to change? You can change {formatted}."
+
+
+def _amendable_field_alias_map() -> Dict[str, List[str]]:
+    base_aliases = _field_alias_map()
+    allowed = set(get_amendable_fields())
+    return {
+        field: aliases
+        for field, aliases in base_aliases.items()
+        if field in allowed
+    }
+
+
+def _amendment_fields_from_message(message: str) -> List[str]:
+    normalized = _normalize(message)
+    if not normalized:
+        return []
+    fields: List[str] = []
+    allowed = set(get_amendable_fields())
+    for group in get_amendment_field_groups().values():
+        aliases = group.get("aliases", [])
+        if any(re.search(rf"\b{re.escape(_normalize(alias))}\b", normalized) for alias in aliases):
+            for field in group.get("fields", []):
+                if field in allowed:
+                    fields.append(field)
+    for field, aliases in _amendable_field_alias_map().items():
+        for alias in aliases:
+            if re.search(rf"\b{re.escape(_normalize(alias))}\b", normalized):
+                fields.append(field)
+                break
+    ordered_unique_fields = list(dict.fromkeys(fields))
+    field_order = {field: index for index, field in enumerate(get_amendable_fields())}
+    return sorted(
+        ordered_unique_fields,
+        key=lambda field: field_order.get(field, len(field_order)),
+    )
+
+
+def _sanitize_message_for_amendment_extraction(message: str) -> str:
+    sanitized = BOOKING_ID_PATTERN.sub("", message or "")
+    return re.sub(r"\s+", " ", sanitized).strip()
+
+
+_AMENDMENT_NAME_VALUE_PATTERNS = (
+    re.compile(
+        r"\b(?:change|update|modify|set|edit)\s+(?:my\s+)?(?:full\s+)?name\s+(?:to|as)\s+"
+        r"([a-z][a-z .'-]+?)(?=\s+\band\b|\s+for\b|\s+in\b|[,.;]|$)",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:change|update|modify|set|edit)\s+full\s+name\s+(?:to|as)\s+"
+        r"([a-z][a-z .'-]+?)(?=\s+\band\b|\s+for\b|\s+in\b|[,.;]|$)",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:full\s+)?name\s+(?:is|as)\s+"
+        r"([a-z][a-z .'-]+?)(?=\s+\band\b|\s+for\b|\s+in\b|[,.;]|$)",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:full\s+)?name\s*:\s*"
+        r"([a-z][a-z .'-]+?)(?=\s+\band\b|\s+for\b|\s+in\b|[,.;]|$)",
+        re.I,
+    ),
+    re.compile(
+        r"\bset\s+full\s+name\s+as\s+"
+        r"([a-z][a-z .'-]+?)(?=\s+\band\b|\s+for\b|\s+in\b|[,.;]|$)",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:my\s+)?(?:full\s+)?name\s+is\s+"
+        r"([a-z][a-z .'-]+?)(?=\s+\band\b|\s+for\b|\s+in\b|[,.;]|$)",
+        re.I,
+    ),
+)
+
+
+def _extract_amendment_name_value(text: str) -> Optional[str]:
+    if not (text or "").strip():
+        return None
+    for pattern in _AMENDMENT_NAME_VALUE_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        value = match.group(1).strip(" ,.;:'\"")
+        if _is_valid_candidate_for_field("guest_name", value):
+            return value
+    return None
+
+
+def _extract_amendment_phone_value(text: str) -> Optional[str]:
+    return _extract_phone(text)
+
+
+def _extract_amendment_field_value(
+    sanitized_message: str,
+    field: str,
+) -> Tuple[Optional[Any], Optional[str]]:
+    if field == "guest_name":
+        value = _extract_amendment_name_value(sanitized_message)
+        return value, None
+
+    if field == "guest_phone":
+        return _extract_amendment_phone_value(sanitized_message), None
+
+    if field == "guest_email":
+        return _extract_email(sanitized_message), None
+
+    field_updates, _, field_errors = _extract_updates_from_message(sanitized_message, field)
+    if field in field_updates:
+        return field_updates[field], None
+    if field in field_errors:
+        return None, field_errors[field]
+    return None, None
+
+
+def _extract_amendment_updates(
+    message: str,
+    fields: List[str],
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    sanitized = _sanitize_message_for_amendment_extraction(message)
+    updates: Dict[str, Any] = {}
+    errors: Dict[str, str] = {}
+    for field in fields:
+        value, error = _extract_amendment_field_value(sanitized, field)
+        if value is not None:
+            updates[field] = value
+        elif error:
+            errors[field] = error
+    return updates, errors
+
+
+def _missing_amendment_fields(fields: List[str], updates: Dict[str, Any], errors: Dict[str, str]) -> List[str]:
+    missing = []
+    for field in fields:
+        if field == "property_id":
+            continue
+        if field not in updates and field not in errors:
+            missing.append(field)
+    return missing
+
+
+def _amendment_values_reply(fields: List[str]) -> str:
+    if not fields:
+        return _amendment_choice_reply()
+    if len(fields) == 1:
+        return _friendly_prompt_for_field(fields[0])
+    labels = [get_field_display_name(field).lower() for field in fields]
+    return f"Please provide the updated {', '.join(labels[:-1])} and {labels[-1]}."
+
+
+def _receipt_review_from_candidate(receipt: Dict[str, Any]) -> str:
+    return (
+        "Please review your updated booking details:\n"
+        f"- Registration ID: {receipt.get('booking_id') or ''}\n"
+        f"- Property: {receipt.get('property_title') or ''}\n"
+        f"- Full name: {receipt.get('guest_name') or ''}\n"
+        f"- Email: {receipt.get('guest_email') or ''}\n"
+        f"- Phone: {receipt.get('guest_phone') or ''}\n"
+        f"- Check-in: {_format_display_date(str(receipt.get('check_in') or ''))}\n"
+        f"- Check-out: {_format_display_date(str(receipt.get('check_out') or ''))}\n"
+        f"- Guests: {receipt.get('guests') or ''}\n"
+        f"- Nights: {receipt.get('nights') or ''}\n"
+        f"- Price per night: {_format_money(receipt.get('price_per_night'))}\n"
+        f"- Total: {_format_money(receipt.get('total_amount'))}"
+        + "\n\nPlease confirm if these updated booking details are correct."
+    )
+
+
+def _validate_amendment_candidate(
+    receipt: Dict[str, Any],
+    updates: Dict[str, Any],
+    extraction_errors: Dict[str, str],
+    soft_state: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    candidate = dict(receipt)
+    errors: Dict[str, str] = dict(extraction_errors)
+    allowed = set(get_amendable_fields())
+
+    for field, value in updates.items():
+        if field not in allowed or field == "property_id":
+            continue
+        temp = dict(candidate)
+        temp[field] = value
+        ok, err = validate_field(field, value, current_state=temp)
+        if ok:
+            candidate[field] = value
+        else:
+            errors[field] = err or _friendly_prompt_for_field(field)
+
+    guests_value = _coerce_int(candidate.get("guests"))
+    selected_property = _selected_property(soft_state)
+    occupancy_max = _coerce_int(selected_property.get("occupancy_max")) if isinstance(selected_property, dict) else None
+    if occupancy_max is not None and guests_value is not None and guests_value > occupancy_max:
+        candidate["guests"] = receipt.get("guests")
+        errors["guests"] = _occupancy_validation_message(occupancy_max)
+
+    check_in = candidate.get("check_in")
+    check_out = candidate.get("check_out")
+    if check_in and check_out:
+        try:
+            check_in_dt = datetime.strptime(str(check_in), cfg.date_format)
+            check_out_dt = datetime.strptime(str(check_out), cfg.date_format)
+            if check_out_dt <= check_in_dt:
+                invalid_field = "check_out" if "check_out" in updates else "check_in"
+                candidate[invalid_field] = receipt.get(invalid_field)
+                errors[invalid_field] = (
+                    _checkout_validation_message(str(candidate.get("check_in") or check_in))
+                    or "Check-out must be after check-in."
+                )
+        except Exception:
+            pass
+
+    if "check_in" in candidate and "check_out" in candidate and not any(
+        field in errors for field in ("check_in", "check_out")
+    ):
+        try:
+            check_in_dt = datetime.strptime(str(candidate["check_in"]), cfg.date_format)
+            check_out_dt = datetime.strptime(str(candidate["check_out"]), cfg.date_format)
+            nights = max((check_out_dt - check_in_dt).days, 1)
+            candidate["nights"] = nights
+            price = _coerce_float(candidate.get("price_per_night")) or 0.0
+            candidate["total_amount"] = round(nights * price, 2)
+        except Exception:
+            pass
+
+    candidate.setdefault("booking_id", receipt.get("booking_id"))
+    candidate.setdefault("status", receipt.get("status") or cfg.booking_confirmed_status)
+    return candidate, errors
+
+
+async def _confirm_amendment(soft_state: Dict[str, Any]) -> Dict[str, Any]:
+    pending = soft_state.get("pending_booking_amendment")
+    if not isinstance(pending, dict):
+        return {
+            "status": Status.GATHERING_INFO,
+            "deterministic_reply": _amendment_choice_reply(),
+        }
+    receipt = dict(pending.get("candidate_receipt") or {})
+    booking_id = str(receipt.get("booking_id") or "").strip()
+    if not booking_id:
+        return {
+            "status": Status.GATHERING_INFO,
+            "deterministic_reply": "Please share the booking ID for this amendment.",
+        }
+
+    changed_fields = list(pending.get("fields") or [])
+    changed_updates = {field: receipt.get(field) for field in changed_fields if field in receipt}
+    if any(field in changed_fields for field in ("check_in", "check_out")):
+        changed_updates["nights"] = receipt.get("nights")
+        changed_updates["total_amount"] = receipt.get("total_amount")
+    if any(field in changed_fields for field in ("guests", "property_id")):
+        changed_updates["total_amount"] = receipt.get("total_amount")
+    if "property_id" in changed_fields:
+        changed_updates["property_title"] = receipt.get("property_title")
+        changed_updates["price_per_night"] = receipt.get("price_per_night")
+
+    persisted = False
+    try:
+        from app.observability.db_logging import update_successful_booking
+
+        persisted = await update_successful_booking(
+            booking_id,
+            receipt_updates_to_successful_booking_columns(changed_updates),
+        )
+    except Exception as exc:
+        logger.warning("[booking_flow] Could not persist booking amendment: %s", exc)
+
+    if not persisted:
+        soft_state["booking_stage"] = "awaiting_amendment_confirmation"
+        soft_state["active_flow"] = "booking"
+        return {
+            "status": Status.ERROR,
+            "receipt": receipt,
+            "deterministic_reply": (
+                "I couldn't save the updated booking details right now. "
+                "Your amendment is still pending; please try confirming again."
+            ),
+        }
+
+    _store_current_receipt(soft_state, receipt)
+    soft_state.pop("pending_booking_amendment", None)
+    clear_awaiting_field(soft_state)
+    return {
+        "status": Status.BOOKING_CONFIRMED,
+        "receipt": receipt,
+        "deterministic_reply": _receipt_reply(receipt),
+    }
+
+
+async def handle_booking_amendment_turn(
+    message: str,
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    stage = str(soft_state.get("booking_stage") or "").strip()
+
+    if not has_post_confirmation_amendment_context(message, soft_state):
+        return None
+
+    normalized = _normalize(message)
+
+    if stage == "awaiting_amendment_confirmation":
+        if re.search(r"\b(yes|confirm|correct|looks good|proceed|ok|okay)\b", normalized):
+            return await _confirm_amendment(soft_state)
+        if re.search(r"\b(no|change|update|edit|modify|fix|correct)\b", normalized):
+            pending = soft_state.get("pending_booking_amendment")
+            if isinstance(pending, dict):
+                fields = _amendment_fields_from_message(message) or list(pending.get("fields") or [])
+                soft_state["pending_booking_amendment"] = {
+                    "base_receipt": dict(pending.get("candidate_receipt") or pending.get("base_receipt") or {}),
+                    "fields": fields,
+                }
+                soft_state["booking_stage"] = "awaiting_amendment_values"
+                set_awaiting_field(soft_state, fields)
+                return {
+                    "status": Status.GATHERING_INFO,
+                    "missing_fields": fields,
+                    "deterministic_reply": _amendment_values_reply(fields),
+                }
+        return {
+            "status": Status.REVIEW_PENDING,
+            "deterministic_reply": "Please confirm if these updated booking details are correct, or tell me what to change.",
+        }
+
+    if stage == "awaiting_amendment_values":
+        pending = soft_state.get("pending_booking_amendment")
+        if not isinstance(pending, dict):
+            soft_state["booking_stage"] = "awaiting_amendment_choice"
+            return {
+                "status": Status.GATHERING_INFO,
+                "deterministic_reply": _amendment_choice_reply(),
+            }
+        base_receipt = pending.get("base_receipt")
+        if not isinstance(base_receipt, dict):
+            base_receipt = await _current_amendment_receipt(message, soft_state) or {}
+        receipt = dict(base_receipt)
+        fields = list(pending.get("fields") or [])
+    else:
+        if stage != "awaiting_amendment_choice" and not detect_booking_amendment_intent(message, soft_state):
+            return None
+        receipt = await _current_amendment_receipt(message, soft_state)
+        if not receipt:
+            return None
+        fields = _amendment_fields_from_message(message)
+        if not fields:
+            soft_state["booking_stage"] = "awaiting_amendment_choice"
+            soft_state["active_flow"] = "booking"
+            clear_awaiting_field(soft_state)
+            soft_state["pending_booking_amendment"] = {"base_receipt": dict(receipt), "fields": []}
+            return {
+                "status": Status.GATHERING_INFO,
+                "deterministic_reply": _amendment_choice_reply(),
+            }
+        if "property_id" in fields:
+            soft_state["booking_stage"] = "awaiting_property_reselection"
+            soft_state["pending_booking_amendment"] = {"base_receipt": dict(receipt), "fields": fields}
+            return return_to_previous_results(soft_state)
+
+    updates, extraction_errors = _extract_amendment_updates(message, fields)
+    missing_fields = _missing_amendment_fields(fields, updates, extraction_errors)
+    if missing_fields or extraction_errors:
+        ask_fields = list(dict.fromkeys(list(extraction_errors.keys()) + missing_fields))
+        soft_state["active_flow"] = "booking"
+        soft_state["booking_stage"] = "awaiting_amendment_values"
+        soft_state["pending_booking_amendment"] = {
+            "base_receipt": dict(receipt),
+            "fields": fields,
+        }
+        set_awaiting_field(soft_state, ask_fields)
+        reply = next(iter(extraction_errors.values()), None) or _amendment_values_reply(ask_fields)
+        return {
+            "status": Status.GATHERING_INFO,
+            "missing_fields": ask_fields,
+            "deterministic_reply": reply,
+        }
+
+    candidate, validation_errors = _validate_amendment_candidate(
+        receipt,
+        updates,
+        extraction_errors,
+        soft_state,
+    )
+    if validation_errors:
+        ask_fields = list(validation_errors.keys())
+        soft_state["active_flow"] = "booking"
+        soft_state["booking_stage"] = "awaiting_amendment_values"
+        soft_state["pending_booking_amendment"] = {
+            "base_receipt": dict(receipt),
+            "fields": fields,
+        }
+        set_awaiting_field(soft_state, ask_fields)
+        return {
+            "status": Status.GATHERING_INFO,
+            "missing_fields": ask_fields,
+            "deterministic_reply": next(iter(validation_errors.values())),
+        }
+
+    soft_state["active_flow"] = "booking"
+    soft_state["booking_stage"] = "awaiting_amendment_confirmation"
+    soft_state["pending_booking_amendment"] = {
+        "base_receipt": dict(receipt),
+        "candidate_receipt": dict(candidate),
+        "fields": fields,
+    }
+    soft_state["last_presented_view"] = "booking_receipt"
+    clear_awaiting_field(soft_state)
+    return {
+        "status": Status.REVIEW_PENDING,
+        "receipt": candidate,
+        "deterministic_reply": _receipt_review_from_candidate(candidate),
+    }
+
+
 async def handle_active_booking_turn(
     message: str,
     soft_state: Dict[str, Any],
@@ -1516,6 +2312,13 @@ async def handle_active_booking_turn(
     if stage not in _ACTIVE_BOOKING_STAGES:
         return None
     soft_state["active_flow"] = "booking"
+
+    if has_post_confirmation_amendment_context(message, soft_state):
+        amendment_payload = await handle_booking_amendment_turn(message, soft_state)
+        if amendment_payload:
+            return amendment_payload
+        if stage in _POST_CONFIRMATION_AMENDMENT_STAGES:
+            return None
 
     if _is_booking_faq(message):
         tool_context = SimpleNamespace(state={"soft_state": soft_state})
@@ -1604,3 +2407,178 @@ def list_available_cities_payload() -> Dict[str, Any]:
         else "I couldn't load the available cities right now."
     )
     return payload
+
+
+def _detect_booking_cancellation_intent(message: str) -> bool:
+    if not message:
+        return False
+    normalized = _normalize(message)
+    if not normalized:
+        return False
+    # Check for keywords cancel, delete, remove with booking or registration
+    cancel_patterns = [
+        r"\b(delete|cancel|remove)\s+(?:this\s+|my\s+|the\s+)?booking\b",
+        r"\b(delete|cancel|remove)\s+(?:this\s+|my\s+|the\s+)?registration\b",
+    ]
+    for p in cancel_patterns:
+        if re.search(p, normalized, re.I):
+            return True
+
+    # Also if they say delete/cancel/remove and a booking ID is present
+    if re.search(r"\b(delete|cancel|remove)\b", normalized, re.I) and BOOKING_ID_PATTERN.search(message):
+        return True
+
+    return False
+
+
+def _is_yes(message: str) -> bool:
+    if not message:
+        return False
+    normalized = _normalize(message)
+    yes_words = {"yes", "yeah", "sure", "confirm", "proceed", "correct", "ok", "okay"}
+    tokens = set(normalized.split())
+    if any(w in tokens for w in yes_words):
+        return True
+    # If they are in confirmation stage, saying "delete", "cancel", etc. implies yes
+    if re.search(r"\b(delete|cancel|remove)\b", normalized, re.I):
+        return True
+    return False
+
+
+def _is_no(message: str) -> bool:
+    if not message:
+        return False
+    normalized = _normalize(message)
+    no_words = {"no", "nope", "nah", "reject"}
+    tokens = set(normalized.split())
+    if any(w in tokens for w in no_words):
+        return True
+    # Also check if it says "dont", "don't", "keep"
+    if re.search(r"\b(don't|dont|keep|change\s+my\s+mind)\b", normalized, re.I):
+        return True
+    return False
+
+
+async def handle_booking_cancellation_turn(
+    message: str,
+    soft_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Deterministic booking cancellation/deletion handler.
+    """
+    is_cancel_intent = _detect_booking_cancellation_intent(message)
+    stage = soft_state.get("booking_cancellation_stage")
+
+    if not is_cancel_intent and not stage:
+        return None
+
+    from app.services.booking import get_booking_status, update_booking_status
+    from app.observability.db_logging import get_successful_booking_status, update_successful_booking
+
+    # If we are awaiting confirmation, check for confirmation/rejection
+    if stage == "awaiting_confirmation":
+        if _is_no(message):
+            # Keep booking unchanged. Clear deletion state.
+            soft_state.pop("booking_cancellation_pending", None)
+            soft_state.pop("booking_cancellation_stage", None)
+            soft_state.pop("booking_cancellation_id", None)
+            soft_state.pop("booking_cancellation_receipt", None)
+            return {
+                "status": "cancellation_rejected",
+                "deterministic_reply": "Okay, I have kept your booking unchanged."
+            }
+        elif _is_yes(message):
+            booking_id = soft_state.get("booking_cancellation_id")
+            if booking_id:
+                # Update DB using existing safe update functions
+                await update_successful_booking(booking_id, {"status": "cancelled"})
+                await update_booking_status(booking_id, "", "cancelled")
+                
+                # Update receipt status in session if present
+                if soft_state.get("booking_receipt", {}).get("booking_id") == booking_id:
+                    soft_state["booking_receipt"]["status"] = "cancelled"
+                if soft_state.get("booking_registration_id") == booking_id:
+                    soft_state["booking_status"] = "cancelled"
+                
+                # Clear deletion state
+                soft_state.pop("booking_cancellation_pending", None)
+                soft_state.pop("booking_cancellation_stage", None)
+                soft_state.pop("booking_cancellation_id", None)
+                soft_state.pop("booking_cancellation_receipt", None)
+                
+                return {
+                    "status": "cancelled",
+                    "deterministic_reply": f"Your booking {booking_id} has been successfully cancelled."
+                }
+            else:
+                # Fallback clean up
+                soft_state.pop("booking_cancellation_pending", None)
+                soft_state.pop("booking_cancellation_stage", None)
+                soft_state.pop("booking_cancellation_id", None)
+                soft_state.pop("booking_cancellation_receipt", None)
+                return {
+                    "status": "error",
+                    "deterministic_reply": "Something went wrong. Please try again."
+                }
+        else:
+            # Re-ask for confirmation
+            receipt = soft_state.get("booking_cancellation_receipt")
+            receipt_rendered = _receipt_reply(receipt) if receipt else ""
+            return {
+                "status": "awaiting_cancellation_confirmation",
+                "deterministic_reply": "I didn't quite get that. Please confirm if you want to cancel the booking. Say 'yes' to cancel or 'no' to keep it."
+            }
+
+    # Otherwise we are gathering booking ID or just starting
+    booking_id = _extract_booking_id(message)
+    if not booking_id:
+        # Check if we have it in soft_state/receipt
+        booking_id = soft_state.get("booking_cancellation_id") or soft_state.get("booking_registration_id") or soft_state.get("booking_receipt", {}).get("booking_id")
+
+    if not booking_id:
+        # Preserve state and ask only for booking ID
+        soft_state["booking_cancellation_pending"] = True
+        soft_state["booking_cancellation_stage"] = "awaiting_id"
+        return {
+            "status": "gathering_cancellation_id",
+            "deterministic_reply": "I'd be happy to help you cancel your booking. Could you please provide your booking registration ID? It looks like BK-YYYYMMDD-XXXXXXXX."
+        }
+
+    # We have a booking ID, load the details
+    db_row = await get_successful_booking_status(booking_id)
+    if db_row:
+        receipt = successful_booking_row_to_receipt(db_row)
+        receipt.setdefault("booking_id", booking_id)
+    else:
+        db_result = await get_booking_status(booking_id)
+        if db_result.get("ok"):
+            receipt = {
+                "booking_id": booking_id,
+                "status": db_result.get("status") or cfg.booking_confirmed_status,
+                "check_in": db_result.get("check_in") or "",
+                "check_out": db_result.get("check_out") or "",
+            }
+        else:
+            receipt = None
+
+    if not receipt:
+        # Booking not found. Ask for ID again, preserving the gathering_id stage.
+        soft_state["booking_cancellation_pending"] = True
+        soft_state["booking_cancellation_stage"] = "awaiting_id"
+        return {
+            "status": "booking_not_found",
+            "deterministic_reply": f"It looks like booking {booking_id} wasn't found in our system. Please double-check your registration ID and provide it again."
+        }
+
+    # Show receipt and ask for confirmation
+    receipt_rendered = _receipt_reply(receipt)
+    soft_state["booking_cancellation_pending"] = True
+    soft_state["booking_cancellation_stage"] = "awaiting_confirmation"
+    soft_state["booking_cancellation_id"] = booking_id
+    soft_state["booking_cancellation_receipt"] = receipt
+    
+    return {
+        "status": "awaiting_cancellation_confirmation",
+        "receipt": receipt,
+        "deterministic_reply": f"Here are your booking details:\n{receipt_rendered}\n\nAre you sure you want to cancel this booking? Please say 'yes' to confirm or 'no' to keep it."
+    }

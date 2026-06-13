@@ -123,6 +123,58 @@ class ExtractedConstraints:
         return not self.has_any_constraints()
 
 
+def _overlay_legacy_query_constraints(
+    message: str,
+    constraints: ExtractedConstraints,
+) -> ExtractedConstraints:
+    """
+    Compatibility bridge for old ExtractedConstraints callers.
+
+    Extraction stays schema/planner-driven. This only maps the newer
+    PropertySearchQuery shape back to the legacy dataclass fields used by
+    existing tests and older code paths.
+    """
+    try:
+        legacy_query = extract_property_search_query(message)
+    except Exception as exc:
+        logger.debug("[constraint_extractor] legacy overlay skipped: %s", exc)
+        return constraints
+
+    if legacy_query.city and not constraints.city:
+        constraints.city = legacy_query.city
+
+    if legacy_query.property_type and not constraints.property_type:
+        constraints.property_type = str(legacy_query.property_type).strip().lower()
+
+    for item in legacy_query.constraints:
+        field = item.field
+        operator = item.operator
+        value = item.value
+
+        if field == "price_per_night":
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                continue
+
+            if operator == "min":
+                constraints.price_min = numeric_value
+            else:
+                constraints.price_max = numeric_value
+
+        elif field == "occupancy_max":
+            try:
+                constraints.guests = int(float(value))
+            except (TypeError, ValueError):
+                continue
+
+        elif field == "amenities":
+            if value not in constraints.amenities:
+                constraints.amenities.append(value)
+
+    return constraints
+
+
 def extract_constraints_from_message(
     message: str,
     previous_constraints: Optional[ExtractedConstraints] = None,
@@ -194,6 +246,8 @@ def extract_constraints_from_message(
         else:
             constraints.amenities = [amenities]
     
+    constraints = _overlay_legacy_query_constraints(message, constraints)
+
     logger.info(
         "[constraint_extractor] final constraints: %s",
         constraints.to_dict()

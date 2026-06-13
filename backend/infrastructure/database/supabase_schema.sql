@@ -52,6 +52,7 @@ create table if not exists public.successful_bookings (
     city text,
     guests integer,
     nights integer,
+    price_per_night numeric(12,2),
     total_amount numeric(12,2),
     payment_url text,
     source text,

@@ -246,9 +246,13 @@ async def test_run_adk_turn_suppresses_voice_when_properties_found(monkeypatch):
     async def fake_get_session_snapshot(_sid):
         return {"state": {}, "history": [], "meta": {}}
 
+    async def fake_direct_property_search(*_args, **_kwargs):
+        return None
+
     monkeypatch.setattr(adk_runner, "route_pre_adk", fake_route_pre_adk)
     monkeypatch.setattr(adk_runner, "_build_invocation_state_delta", fake_build_invocation_state_delta)
     monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "maybe_handle_direct_property_search", fake_direct_property_search)
 
     chunks = []
     async for chunk in adk_runner.run_adk_turn("u1", "s1", "apartments in New York"):

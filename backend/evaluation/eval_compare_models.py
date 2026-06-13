@@ -1,5 +1,4 @@
 """
-─────────────────────────────────
 A/B comparison of two dispatcher models on the golden set.
 
 Usage:

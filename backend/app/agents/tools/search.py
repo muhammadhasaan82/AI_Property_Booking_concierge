@@ -1,11 +1,12 @@
 """
----------------------------
 Tools: search_properties, get_property_details, select_property, get_all_available_cities
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 import csv
 import logging
+import string
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -47,30 +48,120 @@ PROPERTY_RESULT_LIMIT_DEFAULT: int = cfg.search_result_limit
 PROPERTY_RESULT_LIMIT_MAX: int = cfg.search_result_limit_max
 PROPERTY_SUMMARY_THRESHOLD: int = cfg.search_summary_mode_threshold
 
-def _split_amenities_by_known(
-    amenities: Optional[List[str]],
-    dataset: Optional[List[Dict[str, Any]]],
-) -> tuple[List[str], List[str]]:
-    if not amenities:
-        return [], []
-    if not dataset:
-        return list(amenities), []
-    known: set[str] = set()
-    for row in dataset:
-        for item in row.get("amenities") or []:
-            if isinstance(item, str) and item.strip():
-                known.add(item.strip().lower())
-    hard_terms: List[str] = []
-    soft_terms: List[str] = []
-    for term in amenities:
-        cleaned = (term or "").strip()
-        if not cleaned:
+
+def _normalize_search_value(value: Any) -> str:
+    """
+    Generic deterministic normalization for schema/entity comparison.
+
+    This does not encode business rules.
+    It only normalizes casing, surrounding punctuation, and whitespace.
+    """
+    text = str(value or "").strip().lower()
+    text = text.strip(string.whitespace + string.punctuation)
+    return " ".join(text.split())
+
+
+def _split_amenity_input(value: Any) -> list[str]:
+    """
+    Normalize structured amenity candidate input.
+
+    This intentionally expects already-extracted candidate terms.
+    Natural-language understanding belongs to the planner/model, not here.
+    """
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        text = value.replace(";", ",")
+        rows = csv.reader([text], skipinitialspace=True)
+        parts = next(rows, [])
+        return [
+            normalized
+            for item in parts
+            if (normalized := _normalize_search_value(item))
+        ]
+
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray)):
+        terms: list[str] = []
+        for item in value:
+            terms.extend(_split_amenity_input(item))
+        return _dedupe_preserve_order(terms)
+
+    normalized = _normalize_search_value(value)
+    return [normalized] if normalized else []
+
+
+def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for value in values:
+        normalized = _normalize_search_value(value)
+        if not normalized or normalized in seen:
             continue
-        if cleaned.lower() in known:
-            hard_terms.append(cleaned)
+        seen.add(normalized)
+        result.append(normalized)
+
+    return result
+
+
+def _split_amenities_by_known(
+    candidate_terms: Any,
+    *,
+    known_amenities: Iterable[str],
+) -> tuple[list[str], list[str]]:
+    """
+    Split model/planner-extracted amenity candidates into hard and soft terms.
+
+    Contract:
+    - known_amenities comes from schema/config/taxonomy
+    - matching known terms become hard filters
+    - unknown terms remain soft ranking terms
+    - no natural-language phrase parsing
+    - no regex
+    - no fixed amenity list
+    """
+    known = {
+        _normalize_search_value(item)
+        for item in known_amenities
+        if _normalize_search_value(item)
+    }
+
+    hard_terms: list[str] = []
+    soft_terms: list[str] = []
+
+    for term in _split_amenity_input(candidate_terms):
+        normalized = _normalize_search_value(term)
+
+        if normalized in known:
+            hard_terms.append(normalized)
         else:
-            soft_terms.append(cleaned)
-    return hard_terms, soft_terms
+            soft_terms.append(normalized)
+
+    return (
+        _dedupe_preserve_order(hard_terms),
+        _dedupe_preserve_order(soft_terms),
+    )
+
+
+def _known_amenities_from_dataset(dataset: Optional[List[Dict[str, Any]]]) -> list[str]:
+    """
+    Derive known amenity values dynamically from the loaded dataset.
+
+    This keeps hard-filter eligibility data-driven:
+    - no fixed amenity list
+    - no natural-language parsing
+    - no regex
+    """
+    if not dataset:
+        return []
+
+    terms: list[str] = []
+    for row in dataset:
+        if isinstance(row, dict):
+            terms.extend(_split_amenity_input(row.get("amenities")))
+
+    return _dedupe_preserve_order(terms)
 
 
 def _build_vibe_query(soft_terms: List[str], free_text: Optional[str]) -> str:
@@ -221,52 +312,45 @@ def _get_active_option_window(
     return max(shown_count, 0), max(total_found, 0)
 
 
+_DEFAULT_SEARCH_PAGE_SIZE = 5
+_DEFAULT_SEARCH_PAGE_SIZE_MAX = 25
+
+
 def _resolve_page_size_max() -> int:
     """
-    Determine the maximum allowed page size from configuration.
-    
-    Coerces `cfg.page_size_max` to an integer, uses 25 if the configured value is missing or invalid, and enforces a minimum value of 1.
-    
-    Returns:
-        int: The maximum page size (always >= 1).
+    Resolve the maximum page size from config.
+
+    A configured zero/negative value is clamped to 1. A missing value falls
+    back to the legacy-safe maximum.
     """
-    configured = _coerce_int(getattr(cfg, "page_size_max", None)) or 25
+    configured = _coerce_int(getattr(cfg, "page_size_max", None))
+    if configured is None:
+        configured = _DEFAULT_SEARCH_PAGE_SIZE_MAX
     return max(configured, 1)
 
 
 def _resolve_page_size() -> int:
     """
-    Determine the effective page size for pagination, clamped to allowed bounds.
-    
-    Reads the configured page size and falls back to the configured maximum if
-    the default is missing or invalid, then clamps the result to the range
-    [1, page_size_max].
-    
-    Returns:
-        int: An integer page size between 1 and the configured maximum.
+    Resolve default page size.
+
+    Config still controls this dynamically. When config is missing or invalid,
+    we fall back to the legacy default expected by pagination callers.
     """
     configured = _coerce_int(getattr(cfg, "page_size", None))
     max_size = _resolve_page_size_max()
     if configured is None or configured <= 0:
-        configured = max_size
+        configured = _DEFAULT_SEARCH_PAGE_SIZE
     return max(1, min(configured, max_size))
 
 
 def _resolve_page_size_from(value: Any) -> int:
     """
-    Resolve an input into a valid page size bounded by configured defaults and maximum.
-    
-    Parameters:
-        value (Any): Candidate page size; will be coerced to an integer.
-    
-    Returns:
-        int: A page size integer at least 1 and at most the configured maximum. If `value` is missing, invalid, or <= 0, the configured default page size is returned.
+    Resolve a requested/stored page size, falling back to the configured default.
     """
     configured = _coerce_int(value)
     if configured is None or configured <= 0:
         return _resolve_page_size()
     return max(1, min(configured, _resolve_page_size_max()))
-
 
 def _search_display_cfg() -> Any:
     return getattr(cfg, "search_display", None)
@@ -380,6 +464,7 @@ def _build_search_page_payload(
     page_size: Optional[int] = None,
     search_limit: int = PROPERTY_RESULT_LIMIT_DEFAULT,
     summary_threshold: int = PROPERTY_SUMMARY_THRESHOLD,
+    all_matching_display: bool = False,
 ) -> tuple[Dict[str, Any], list[Dict[str,Any]], Dict[str, Dict[str, Any]]]:
     """
     Builds a paginated search payload, the visible results for the requested page, and an option map for quick lookup.
@@ -406,7 +491,7 @@ def _build_search_page_payload(
     total_found = len(results)
     pagination_enabled = _search_display_pagination_enabled()
     max_inline_results = _search_display_max_inline_results()
-    all_matching_display = _uses_all_matching_display()
+    all_matching_display = bool(all_matching_display)
 
     if all_matching_display:
         safe_page = 1
@@ -487,68 +572,23 @@ def paginate_stored_results(
 ) -> Optional[Dict[str, Any]]:
     """
     Advance or rewind the current paginated search results stored in session soft state.
-    
-    Updates the provided `soft_state` to reflect the new page and returns a payload describing the page.
-    
-    Parameters:
-        soft_state (Optional[Dict[str, Any]]): Session soft state containing `all_search_results` and pagination keys; must be a dict with a non-empty `all_search_results` list.
-        direction (str): "next" to advance a page or "previous" to go back one page.
-    
-    Returns:
-        Optional[Dict[str, Any]]: A payload dictionary with pagination metadata, visible `properties`, and memory instructions, or `None` if `soft_state` is invalid or has no stored results.
-    
-    Side effects:
-        - Mutates `soft_state` setting keys such as `active_flow`, `current_page`, `page_size`, `visible_results`, `option_map`, `active_property_options_*`, and `active_property_options_generated_at`.
-        - Caches the updated last search via `_set_cached_last_search`.
     """
     if not isinstance(soft_state, dict):
         return None
- 
+
     all_results = soft_state.get("all_search_results") or []
     if not isinstance(all_results, list) or not all_results:
         return None
 
-    last_payload = soft_state.get("last_search")
-    pagination_state = (
-        last_payload.get("pagination", {}) if isinstance(last_payload, dict) else {}
-    )
-    if not _search_display_pagination_enabled() or (
-        direction != "previous" and not bool(pagination_state.get("has_more", False))
-    ):
-        return {
-            "status": Status.PROPERTIES_FOUND,
-            "deterministic_reply": cfg.msg_all_results_already_shown,
-            "message": cfg.msg_all_results_already_shown,
-            "properties": [],
-            "total_found": len(all_results),
-            "shown_count": len(soft_state.get("visible_results") or []),
-            "pagination": {
-                "current_page": _coerce_int(soft_state.get("current_page")) or 1,
-                "page_size": len(soft_state.get("visible_results") or []),
-                "page_start": 1 if all_results else 0,
-                "page_end": len(soft_state.get("visible_results") or []),
-                "total_pages": 1,
-                "has_more": False,
-                "has_next": False,
-                "has_prev": False,
-                "pagination_enabled": False,
-            },
-            "source": Source.MEMORY,
-            "memory": {
-                "read_from": "soft_state.all_search_results",
-                "state_available": True,
-            },
-        }
- 
     current_page = max(_coerce_int(soft_state.get("current_page")) or 1, 1)
     page_size = _resolve_page_size_from(soft_state.get("page_size"))
     filters = soft_state.get("last_filters") or {}
- 
+
     if direction == "previous":
         target_page = max(current_page - 1, 1)
     else:
         target_page = current_page + 1
- 
+
     payload, visible_results, option_map = _build_search_page_payload(
         results=all_results,
         filters=filters,
@@ -556,19 +596,30 @@ def paginate_stored_results(
         page_size=page_size,
         search_limit=_resolve_result_limit(None),
         summary_threshold=PROPERTY_SUMMARY_THRESHOLD,
+        all_matching_display=False,
     )
- 
+
+    if (
+        direction != "previous"
+        and payload.get("pagination", {}).get("current_page") == current_page
+        and not payload.get("pagination", {}).get("has_next")
+    ):
+        payload["deterministic_reply"] = "All matching properties are already shown."
+
     soft_state["active_flow"] = "search"
     soft_state["current_page"] = payload["pagination"]["current_page"]
-    soft_state["page_size"] = page_size
+    soft_state["page_size"] = payload["pagination"]["page_size"]
     soft_state["visible_results"] = visible_results
+    soft_state["last_visible_results"] = list(visible_results)
     soft_state["option_map"] = option_map
     soft_state["active_property_options_map"] = option_map
     soft_state["active_property_options_shown_count"] = payload["shown_count"]
     soft_state["active_property_options_total_found"] = payload["total_found"]
     soft_state["active_property_options_generated_at"] = time.time()
- 
+    sync_alias_keys(soft_state)
+
     _set_cached_last_search(soft_state, dict(payload))
+
     payload["source"] = Source.MEMORY
     payload["memory"] = {
         "read_from": "soft_state.all_search_results",
@@ -820,7 +871,6 @@ async def search_properties(
     context_flag: Optional[str] = None,
     sort_preferences: Optional[List[Dict[str, str]]] = None,
     search_path: str = "tool",
-    search_plan: Optional[SearchPlan] = None,
     tool_context: Optional[ToolContext] = None,
 ) -> dict:
     """
@@ -897,7 +947,16 @@ async def search_properties(
     if resolved_city:
         city = resolved_city
 
-    raw_amenities = [a.strip() for a in (amenities or "").split(",") if a.strip()]
+    raw_amenities = _split_amenity_input(amenities)
+    known_amenities = _known_amenities_from_dataset(_DATASET or None)
+    hard_amenities, soft_terms = _split_amenities_by_known(
+        raw_amenities,
+        known_amenities=known_amenities,
+    )
+    amenity_list = hard_amenities or None
+    vibe_query = _build_vibe_query(soft_terms, free_text)
+    should_rerank = bool(vibe_query)
+
     constraints = _build_dynamic_constraints_from_inputs(
         city=city,
         budget=budget_value,
@@ -908,36 +967,20 @@ async def search_properties(
         guests=guests_value,
         guests_operator=guests_operator,
         property_type=normalized_property_type,
-        amenities=raw_amenities,
+        amenities=hard_amenities,
     )
-    if search_plan is not None:
-        plan = search_plan
-        if sort_preferences is not None:
-            plan = SearchPlan(
-                constraints=plan.constraints,
-                trace=plan.trace,
-                session_id=plan.session_id,
-                user_message=plan.user_message,
-                sort_preferences=list(sort_preferences),
-            )
-            plan.trace.sort_preferences = list(sort_preferences)
-    else:
-        plan = _search_plan_from_constraints(
-            constraints,
-            search_path=search_path,
-            user_message=free_text or "",
-            sort_preferences=sort_preferences,
-        )
+    plan = _search_plan_from_constraints(
+        constraints,
+        search_path=search_path,
+        user_message=free_text or "",
+        sort_preferences=sort_preferences,
+    )
 
     requested_limit = _coerce_int(max_results)
     search_limit = _resolve_result_limit(requested_limit)
     summary_threshold = max(PROPERTY_SUMMARY_THRESHOLD, 1)
     base_beds_value = beds_value if (beds_operator or "exact") in {"exact", "min"} else None
 
-    hard_amenities, soft_terms = _split_amenities_by_known(raw_amenities, _DATASET or None)
-    amenity_list = hard_amenities or None
-    vibe_query = _build_vibe_query(soft_terms, free_text)
-    should_rerank = bool(vibe_query)
 
     results = None
     if not _uses_all_matching_display():
@@ -1025,8 +1068,10 @@ async def search_properties(
     if guests_value is not None:
         filters["guests"] = guests_value
         filters["guests_operator"] = guests_operator
-    if raw_amenities:
-        filters["amenities"] = list(raw_amenities)
+    if hard_amenities:
+        filters["amenities"] = list(hard_amenities)
+    if soft_terms:
+        filters["soft_amenity_terms"] = list(soft_terms)
     page_size = _search_display_max_inline_results() or _resolve_page_size()
     payload, visible_results, option_map = _build_search_page_payload(
         results=results,
@@ -1035,6 +1080,7 @@ async def search_properties(
         page_size=page_size,
         search_limit=len(results) if _uses_all_matching_display() else search_limit,
         summary_threshold=summary_threshold,
+        all_matching_display=_uses_all_matching_display(),
     )
     payload["query_context"] = {
         **dict(payload.get("query_context") or {}),

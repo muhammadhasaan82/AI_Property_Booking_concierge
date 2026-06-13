@@ -273,6 +273,14 @@ def _compile_pattern(template: str) -> re.Pattern:
 
 
 def _spec_body(body: Any) -> Dict[str, Any]:
+    if body is not None and not isinstance(body, dict):
+        return {
+            "requires_state": [],
+            "requires_any_state": [],
+            "examples": [],
+            "patterns": [],
+        }
+
     """
     Normalize a shortcut YAML "body" into a dict that guarantees canonical list fields.
 
@@ -517,6 +525,15 @@ def match_shortcut(
     Returns:
         Optional[ShortcutMatch]: A `ShortcutMatch` containing the matched shortcut's `intent`, `action`, optional `direction`, optional integer `selection_number`, and the spec's `requires_state` / `requires_any_state` lists; `None` if no shortcut matches.
     """
+    global shortcut_router
+
+    # Self-heal after tests/runtime reload the global router from a missing YAML.
+    # reload() is still allowed to create an empty router, but match_shortcut()
+    # should not let that stale empty router permanently disable YAML shortcuts
+    # once the configured shortcuts file exists again.
+    if not getattr(shortcut_router, "specs", None) and _SHORTCUTS_PATH.exists():
+        shortcut_router = _load()
+
     return shortcut_router.match(message, soft_state)
 
 

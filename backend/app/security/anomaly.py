@@ -177,7 +177,7 @@ async def check_tool_loop(
         if tn == tool_name and p == ph and ts >= window_cutoff
     )
 
-    if identical_count >= TOOL_LOOP_THRESHOLD:
+    if identical_count > TOOL_LOOP_THRESHOLD:
         logger.warning(
             "[ROUTING_ANOMALY] session=%s tool=%s params_hash=%s count=%d within %ds (threshold=%d)",
             session_id,

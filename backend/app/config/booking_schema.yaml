@@ -108,7 +108,44 @@ booking:
     check_in: ["check in", "check-in", "check in date", "check-in date", "arrival", "arrival date"]
     check_out: ["check out", "check-out", "check out date", "check-out date", "departure", "departure date"]
     guests: ["guest", "guests", "people", "persons", "party size"]
-    property_id: ["property"]
+    property_id: ["property", "property id"]
+
+  amendable_fields:
+    - guest_name
+    - guest_email
+    - guest_phone
+    - check_in
+    - check_out
+    - guests
+
+  amendment_display_names:
+    guest_name: "full name"
+    guest_email: "email"
+    guest_phone: "phone number"
+    check_in: "check-in date"
+    check_out: "check-out date"
+    guests: "guests"
+
+  amendment_intent_verbs:
+    - change
+    - update
+    - edit
+    - modify
+    - fix
+    - correct
+
+  amendment_context_markers:
+    - "this booking"
+    - "my booking"
+    - "this reservation"
+    - "my reservation"
+    - "reservation"
+
+  amendment_field_groups:
+    dates:
+      display_name: "dates"
+      fields: [check_in, check_out]
+      aliases: ["dates", "booking dates", "stay dates"]
 
   
   date_format: "%Y-%m-%d"
