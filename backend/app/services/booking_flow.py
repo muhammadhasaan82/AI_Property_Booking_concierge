@@ -93,6 +93,35 @@ _MONTHS = {
 }
 
 
+_POST_CONFIRMATION_AMENDMENT_STAGES = {
+    "confirmed",
+    "awaiting_amendment_choice",
+    "awaiting_amendment_values",
+    "awaiting_amendment_confirmation",
+}
+
+
+def has_post_confirmation_amendment_context(
+    message: str,
+    soft_state: Dict[str, Any],
+) -> bool:
+    if _extract_booking_id(message):
+        return True
+
+    if not isinstance(soft_state, dict):
+        return False
+
+    stage = str(soft_state.get("booking_stage") or "").strip()
+    if stage in _POST_CONFIRMATION_AMENDMENT_STAGES:
+        return True
+
+    if isinstance(soft_state.get("booking_receipt"), dict):
+        return True
+
+    if soft_state.get("booking_registration_id"):
+        return True
+
+    return False
 def _normalize(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
@@ -1885,7 +1914,12 @@ def _amendment_fields_from_message(message: str) -> List[str]:
             if re.search(rf"\b{re.escape(_normalize(alias))}\b", normalized):
                 fields.append(field)
                 break
-    return list(dict.fromkeys(fields))
+    ordered_unique_fields = list(dict.fromkeys(fields))
+    field_order = {field: index for index, field in enumerate(get_amendable_fields())}
+    return sorted(
+        ordered_unique_fields,
+        key=lambda field: field_order.get(field, len(field_order)),
+    )
 
 
 def _sanitize_message_for_amendment_extraction(message: str) -> str:
@@ -2145,6 +2179,10 @@ async def handle_booking_amendment_turn(
     soft_state: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
     stage = str(soft_state.get("booking_stage") or "").strip()
+
+    if not has_post_confirmation_amendment_context(message, soft_state):
+        return None
+
     normalized = _normalize(message)
 
     if stage == "awaiting_amendment_confirmation":
@@ -2275,11 +2313,11 @@ async def handle_active_booking_turn(
         return None
     soft_state["active_flow"] = "booking"
 
-    if stage in {"confirmed", "awaiting_amendment_choice", "awaiting_amendment_values", "awaiting_amendment_confirmation"} or detect_booking_amendment_intent(message, soft_state):
+    if has_post_confirmation_amendment_context(message, soft_state):
         amendment_payload = await handle_booking_amendment_turn(message, soft_state)
         if amendment_payload:
             return amendment_payload
-        if stage == "confirmed":
+        if stage in _POST_CONFIRMATION_AMENDMENT_STAGES:
             return None
 
     if _is_booking_faq(message):

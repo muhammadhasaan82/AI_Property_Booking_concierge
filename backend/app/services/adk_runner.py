@@ -65,6 +65,7 @@ from app.services.booking_flow import (
     confirm_booking_review as _confirm_booking_review,
     handle_active_booking_turn as _handle_active_booking_turn,
     handle_booking_amendment_turn as _handle_booking_amendment_turn,
+    has_post_confirmation_amendment_context as _has_post_confirmation_amendment_context,
     handle_booking_status_check as _handle_booking_status_check,
     handle_review_modification_request as _handle_review_modification_request,
     has_active_booking_session as _has_active_booking_session,
@@ -1405,6 +1406,9 @@ async def _maybe_handle_booking_amendment_turn(
         soft_state = state["soft_state"]
     else:
         soft_state = dict(state)
+
+    if not _has_post_confirmation_amendment_context(message, soft_state):
+        return None
 
     payload = await _handle_booking_amendment_turn(message, soft_state)
     if not payload:
