@@ -2,6 +2,9 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
+from app.config.env_loader import load_backend_env
+load_backend_env()
+
 from . import db_client
 
 
@@ -81,12 +84,17 @@ create table if not exists public.successful_bookings (
   city text,
   guests int,
   nights int,
+  price_per_night numeric(12,2),
   total_amount numeric(12,2),
   payment_url text,
   source text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Ensure existing database table has price_per_night column
+alter table public.successful_bookings add column if not exists price_per_night numeric(12,2);
+
 
 -- RLS and permissive policies for local dev (optional)
 alter table public.users enable row level security;

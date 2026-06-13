@@ -338,6 +338,7 @@ async def process_v2_booking(
             "check_out": check_out,
             "guests": guests_value,
             "nights": nights,
+            "price_per_night": price_value,
             "total_amount": total_price,
             "status": cfg.booking_confirmed_status,
             "source": cfg.booking_source_tag,

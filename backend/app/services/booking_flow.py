@@ -268,6 +268,14 @@ _BOOKING_STATUS_INTENT_PATTERNS = [
         r"\bi\s+want\s+to\s+check\s+my\s+booking\s+status\b",
         r"\bstatus\s+of\s+my\s+booking\b",
         r"\bbooking\s+status\b",
+        r"\bmy\s+boking\s+id\s+is\b",
+        r"\bboking\s+id\b",
+        r"\bcheck\s+my\s+boking\s+status\b",
+        r"\bcheck\s+boking\s+status\b",
+        r"\bmy\s+boking\s+status\b",
+        r"\bi\s+want\s+to\s+check\s+my\s+boking\s+status\b",
+        r"\bstatus\s+of\s+my\s+boking\b",
+        r"\bboking\s+status\b",
     ]
 ]
 
@@ -503,8 +511,24 @@ async def handle_booking_status_check(
                     "check_out": db_row.get("check_out") or "",
                     "guest_name": db_row.get("user_name") or "",
                     "guest_email": db_row.get("user_email") or "",
+                    "guest_phone": db_row.get("user_phone") or "",
                     "property_title": db_row.get("property_title") or "",
+                    "guests": db_row.get("guests"),
+                    "nights": db_row.get("nights"),
+                    "price_per_night": db_row.get("price_per_night"),
+                    "total_amount": db_row.get("total_amount"),
                 }
+                if hasattr(merged["check_in"], "isoformat"):
+                    merged["check_in"] = merged["check_in"].isoformat()
+                if hasattr(merged["check_out"], "isoformat"):
+                    merged["check_out"] = merged["check_out"].isoformat()
+                for key in ("price_per_night", "total_amount"):
+                    val = merged[key]
+                    if val is not None and not isinstance(val, (int, float, str)):
+                        try:
+                            merged[key] = float(val)
+                        except Exception:
+                            pass
                 return {
                     "status": Status.FOUND,
                     "receipt": merged,
@@ -1576,6 +1600,7 @@ async def confirm_booking_review(soft_state: Dict[str, Any]) -> Optional[Dict[st
                 "check_out": summary.get("check_out"),
                 "guests": summary.get("guests"),
                 "nights": summary.get("nights"),
+                "price_per_night": summary.get("price_per_night"),
                 "total_amount": summary.get("total"),
                 "status": cfg.booking_confirmed_status,
                 "source": cfg.booking_source_tag,

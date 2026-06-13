@@ -69,7 +69,7 @@ async def get_successful_booking_status(booking_id: str) -> Optional[Dict[str, A
     try:
         return await db_client.fetch_one(
             """
-            select booking_id,status,check_in,check_out,user_email,user_name,property_title,city,payment_url
+            select booking_id,status,check_in,check_out,user_email,user_name,user_phone,property_title,city,payment_url,guests,nights,price_per_night,total_amount
             from public.successful_bookings
             where booking_id = %s
             limit 1;
