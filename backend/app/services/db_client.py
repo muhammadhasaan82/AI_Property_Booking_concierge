@@ -6,6 +6,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
+from app.config.env_loader import load_backend_env
+
+load_backend_env()
+
 try:
     import psycopg
     from psycopg.rows import dict_row
