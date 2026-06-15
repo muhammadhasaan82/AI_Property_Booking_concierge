@@ -331,3 +331,52 @@ async def escalate_to_human(
         {"status": Status.HANDOFF_REQUIRED, "reason": reason_value},
         action_intent, context_flag,
     )
+
+# Compatibility wrapper: prefer YAML-backed canonical FAQ if the primary path falls through.
+_check_faq_original_canonical_v1 = check_faq
+
+async def check_faq(
+    question: Optional[str] = None,
+    action_intent: Optional[str] = None,
+    context_flag: Optional[str] = None,
+    tool_context: Optional[ToolContext] = None,
+) -> dict:
+    result = await _check_faq_original_canonical_v1(
+        question=question,
+        action_intent=action_intent,
+        context_flag=context_flag,
+        tool_context=tool_context,
+    )
+
+    if isinstance(result, dict) and str(result.get("status")) == str(Status.ANSWERED):
+        return result
+
+    soft_state = _get_soft_state(tool_context)
+    in_booking_flow = isinstance(soft_state, dict) and any(
+        soft_state.get(key)
+        for key in ("booking_state", "pending_booking", "awaiting_field")
+    )
+    has_active_search = isinstance(soft_state, dict) and any(
+        soft_state.get(key)
+        for key in ("all_search_results", "visible_results", "option_map", "last_search")
+    )
+    faq_context_flag = "faq_answered" if (in_booking_flow or has_active_search) else context_flag
+
+    try:
+        from app.components.faq_enhanced import lookup_canonical_faq
+
+        canonical = lookup_canonical_faq(question or "")
+        if isinstance(canonical, dict) and canonical.get("answer"):
+            return _faq_payload(
+                answer=str(canonical["answer"]).strip(),
+                source=Source.RAG,
+                soft_state=soft_state,
+                action_intent=action_intent,
+                context_flag=faq_context_flag,
+                faq_intent=str(canonical.get("id") or "") or None,
+                retrieval_source="canonical_faq",
+            )
+    except Exception as exc:
+        logger.warning("Canonical FAQ compatibility fallback failed: %s", exc)
+
+    return result

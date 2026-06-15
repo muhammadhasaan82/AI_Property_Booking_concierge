@@ -38,6 +38,7 @@ class ExtractedConstraints:
     city: Optional[str] = None
     property_type: Optional[str] = None
     bedrooms: Optional[int] = None
+    bathrooms: Optional[int] = None
     bedrooms_operator: str = "exact"
     price_max: Optional[float] = None
     price_min: Optional[float] = None
@@ -306,6 +307,8 @@ def constraints_to_search_kwargs(constraints: ExtractedConstraints) -> Dict[str,
             kwargs["beds"] = constraints.bedrooms
         elif constraints.bedrooms_operator == "exact":
             kwargs["beds"] = constraints.bedrooms
+    if constraints.bathrooms is not None:
+        kwargs["bathrooms"] = constraints.bathrooms
     if constraints.price_max is not None:
         kwargs["budget"] = constraints.price_max
     if constraints.amenities:

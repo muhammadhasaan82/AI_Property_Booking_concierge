@@ -227,3 +227,7 @@ def _build_canonical_documents() -> List[Document]:
 
 from pathlib import Path
 _FAQ_CANONICAL_PATH = Path('app/config/faq_canonical.yaml')  # noqa: F401
+
+# Compatibility override: canonical FAQ YAML lives under backend/data after the split.
+_FAQ_CANONICAL_CACHE: Dict[str, Any] = {}
+_FAQ_CANONICAL_PATH = _BACKEND_ROOT / "data" / "faq_canonical.yaml"

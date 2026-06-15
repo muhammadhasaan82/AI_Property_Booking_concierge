@@ -223,3 +223,27 @@ async def run_adk_turn(*args, **kwargs):
     _sync_booking_cancellation_monkeypatches_v5()
     async for chunk in _run_adk_turn_impl_v5(*args, **kwargs):
         yield chunk
+
+# Compatibility wrapper v6: direct helper calls must also sync facade monkeypatches.
+from app.services.adk_runner.handlers import (
+    _maybe_handle_faq_resume_turn as _maybe_handle_faq_resume_turn_impl_v6,
+    _maybe_handle_search_state_shortcut as _maybe_handle_search_state_shortcut_impl_v6,
+    _maybe_handle_booking_status_check as _maybe_handle_booking_status_check_impl_v6,
+)
+
+def _sync_all_facade_compat_v6() -> None:
+    _sync_facade_monkeypatches_to_adk_modules_v3()
+    _sync_booking_flow_facade_to_booking_modules_v4()
+    _sync_booking_cancellation_monkeypatches_v5()
+
+async def _maybe_handle_faq_resume_turn(*args, **kwargs):
+    _sync_all_facade_compat_v6()
+    return await _maybe_handle_faq_resume_turn_impl_v6(*args, **kwargs)
+
+async def _maybe_handle_search_state_shortcut(*args, **kwargs):
+    _sync_all_facade_compat_v6()
+    return await _maybe_handle_search_state_shortcut_impl_v6(*args, **kwargs)
+
+async def _maybe_handle_booking_status_check(*args, **kwargs):
+    _sync_all_facade_compat_v6()
+    return await _maybe_handle_booking_status_check_impl_v6(*args, **kwargs)
