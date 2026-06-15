@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Real-Time Anomaly Detection — Phase 3 OODA Loop Protection.
 
@@ -8,7 +9,6 @@ forces a graceful fallback response.
 
 All operations are in-memory (dict + hash) — O(1) per check, <1μs.
 """
-from __future__ import annotations
 
 import hashlib
 import json
@@ -160,7 +160,7 @@ async def check_tool_loop(
     """Check if invoking this tool would constitute a routing anomaly.
 
     Returns True if the same (tool_name, param_hash) has been seen
-    ≥ TOOL_LOOP_THRESHOLD times within TIME_WINDOW_SECONDS.
+    more than TOOL_LOOP_THRESHOLD times within TIME_WINDOW_SECONDS.
     This prevents false positives from legitimate re-searches over longer periods.
     """
     if tool_name in EXEMPT_TOOLS:

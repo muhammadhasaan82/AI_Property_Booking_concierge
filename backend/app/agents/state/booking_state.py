@@ -1,9 +1,7 @@
+from __future__ import annotations
 """
-app/agents/state/booking_state.py
----------------------------------
 Canonical booking state helpers for soft-state persistence.
 """
-from __future__ import annotations
 
 import time
 from typing import Any, Dict, List, Optional

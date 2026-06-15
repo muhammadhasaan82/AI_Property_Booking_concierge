@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Loads tool_registry.yaml and provides:
   - registry.tools           dict[str, ToolSpec]
@@ -8,7 +9,6 @@ Loads tool_registry.yaml and provides:
 Phase 1: agents/adk_agents.py uses resolve_callables() to build its tool list,
 so adding a tool no longer requires Python edits in adk_agents.py.
 """
-from __future__ import annotations
 import importlib
 import logging
 from pathlib import Path

@@ -1,7 +1,7 @@
+from __future__ import annotations
 """
 Lightweight prompt loader with safe fallback behavior.
 """
-from __future__ import annotations
 
 import logging
 from pathlib import Path

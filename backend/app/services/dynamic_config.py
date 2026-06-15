@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Dynamic configuration loader — typed, validated, hot-reloadable.
 
@@ -10,7 +11,6 @@ Usage:
 
 Set LEGACY_RULES=true in .env to fall back to hardcoded in-source values.
 """
-from __future__ import annotations
 
 import os
 import re

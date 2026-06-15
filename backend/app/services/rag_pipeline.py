@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Advanced RAG Pipeline Utilities
 - Query rewriting
@@ -8,7 +9,6 @@ Advanced RAG Pipeline Utilities
 - Answer grounding verification
 - CAG (Cache-Augmented Generation)
 """
-from __future__ import annotations
 import multiprocessing
 import hashlib
 import os

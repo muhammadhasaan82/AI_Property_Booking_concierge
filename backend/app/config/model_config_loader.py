@@ -1,10 +1,10 @@
+from __future__ import annotations
 """
 Central, secret-safe model resolution for runtime LLM configuration.
 
 Environment variables win over YAML. This module exposes only resolved model
 identifiers and provider names; it never reads or returns API keys or URLs.
 """
-from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass

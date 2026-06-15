@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 YAML-driven service coverage guard.
 
@@ -5,7 +6,6 @@ Region detection terms (cities, country aliases, codes) are loaded from
 service_coverage.yaml. Python only normalizes text, matches configured terms,
 and applies deterministic supported/unsupported routing.
 """
-from __future__ import annotations
 
 import logging
 import re

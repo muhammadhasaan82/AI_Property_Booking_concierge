@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Loads response_policies.yaml and exposes a single helper:
     render_policy_snippet(status: str) -> str
@@ -5,7 +6,6 @@ Loads response_policies.yaml and exposes a single helper:
 The snippet is injected into concierge_voice's system prompt at runtime so
 styling stays consistent without prompt edits per status.
 """
-from __future__ import annotations
 import json
 import logging
 from pathlib import Path

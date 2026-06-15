@@ -27,10 +27,6 @@ from app.config.conversation_shortcuts_loader import (
 )
 
 
-# ---------------------------------------------------------------------------
-# _as_str_list
-# ---------------------------------------------------------------------------
-
 
 class TestAsStrList:
     def test_none_returns_empty_list(self):
@@ -66,15 +62,9 @@ class TestAsStrList:
         assert result == ["42"]
 
     def test_list_with_none_items_filtered(self):
-        # None becomes "None" which is non-empty after strip
         result = _as_str_list([None])
-        # "None".strip() == "None" which is truthy → kept
         assert result == ["None"]
 
-
-# ---------------------------------------------------------------------------
-# _normalize
-# ---------------------------------------------------------------------------
 
 
 class TestNormalize:
@@ -99,10 +89,6 @@ class TestNormalize:
     def test_tabs_and_newlines_collapsed(self):
         assert _normalize("hello\tworld\n") == "hello world"
 
-
-# ---------------------------------------------------------------------------
-# _compile_pattern
-# ---------------------------------------------------------------------------
 
 
 class TestCompilePattern:
@@ -131,9 +117,7 @@ class TestCompilePattern:
         assert pattern.search("option abc") is None
 
     def test_pattern_case_insensitive_handling(self):
-        # _compile_pattern lowercases the template
         pattern = _compile_pattern("Option {number}")
-        # match against lowercased text
         m = pattern.search("option 5")
         assert m is not None
 
@@ -147,10 +131,6 @@ class TestCompilePattern:
         pattern = _compile_pattern("show me more")
         assert isinstance(pattern, re.Pattern)
 
-
-# ---------------------------------------------------------------------------
-# _spec_body
-# ---------------------------------------------------------------------------
 
 
 class TestSpecBody:
@@ -183,10 +163,6 @@ class TestSpecBody:
         assert result["examples"] == ["ok"]
 
 
-# ---------------------------------------------------------------------------
-# ShortcutMatch model
-# ---------------------------------------------------------------------------
-
 
 class TestShortcutMatch:
     def test_minimal_construction(self):
@@ -211,9 +187,6 @@ class TestShortcutMatch:
         assert m.requires_any_state == ["option_map", "active_property_options_map"]
 
 
-# ---------------------------------------------------------------------------
-# ShortcutSpec model
-# ---------------------------------------------------------------------------
 
 
 class TestShortcutSpec:
@@ -228,11 +201,6 @@ class TestShortcutSpec:
     def test_entity_schema_stored(self):
         spec = ShortcutSpec(intent="x", action="y", entity_schema={"selection_number": "integer"})
         assert spec.entity_schema["selection_number"] == "integer"
-
-
-# ---------------------------------------------------------------------------
-# _ShortcutRouter construction
-# ---------------------------------------------------------------------------
 
 
 class TestShortcutRouterConstruction:
@@ -266,12 +234,10 @@ class TestShortcutRouterConstruction:
         with caplog.at_level(logging.WARNING, logger="app.config.conversation_shortcuts_loader"):
             router = _ShortcutRouter({
                 "shortcuts": {
-                    "bad_spec": None,  # _spec_body(None) produces valid spec with empty fields
-                    "another_bad": 42,  # non-dict → _spec_body returns {}
+                    "bad_spec": None,  
+                    "another_bad": 42,  
                 }
             })
-        # Router should not raise; may have empty specs or skipped ones
-        # (None becomes {} via _spec_body which is valid with just intent)
         assert isinstance(router.specs, list)
 
     def test_valid_spec_creates_spec_entry(self):
@@ -289,10 +255,6 @@ class TestShortcutRouterConstruction:
         assert router.specs[0].intent == "pagination_next"
         assert router.specs[0].action == "paginate_results"
 
-
-# ---------------------------------------------------------------------------
-# _ShortcutRouter._state_ok
-# ---------------------------------------------------------------------------
 
 
 class TestShortcutRouterStateOk:
@@ -335,9 +297,7 @@ class TestShortcutRouterStateOk:
     def test_requires_any_state_one_present(self):
         router = _ShortcutRouter({})
         spec = self._make_spec(requires_any_state=["option_map", "active_property_options_map"])
-        # option_map present
         assert router._state_ok(spec, {"option_map": {"1": {}}}) is True
-        # active_property_options_map present
         assert router._state_ok(spec, {"active_property_options_map": {"1": {}}}) is True
 
     def test_requires_any_state_none_present(self):
@@ -349,7 +309,7 @@ class TestShortcutRouterStateOk:
     def test_requires_any_state_with_falsy_value_fails(self):
         router = _ShortcutRouter({})
         spec = self._make_spec(requires_any_state=["option_map"])
-        assert router._state_ok(spec, {"option_map": {}}) is False  # empty dict is falsy
+        assert router._state_ok(spec, {"option_map": {}}) is False 
         assert router._state_ok(spec, {"option_map": None}) is False
 
     def test_requires_both_state_and_any_state_both_must_pass(self):
@@ -358,20 +318,14 @@ class TestShortcutRouterStateOk:
             requires_state=["all_search_results"],
             requires_any_state=["option_map", "active_property_options_map"],
         )
-        # requires_state present but requires_any_state missing → False
         assert router._state_ok(spec, {"all_search_results": [1]}) is False
-        # requires_any_state present but requires_state missing → False
         assert router._state_ok(spec, {"option_map": {"1": {}}}) is False
-        # Both present → True
         assert router._state_ok(
             spec,
             {"all_search_results": [1], "option_map": {"1": {}}},
         ) is True
 
 
-# ---------------------------------------------------------------------------
-# _ShortcutRouter.match
-# ---------------------------------------------------------------------------
 
 
 class TestShortcutRouterMatch:
@@ -405,7 +359,6 @@ class TestShortcutRouterMatch:
 
     def test_non_dict_soft_state_treated_as_empty(self):
         router = self._pagination_router()
-        # State not present → no match
         assert router.match("show me more", None) is None
         assert router.match("show me more", "not-a-dict") is None
 
@@ -486,15 +439,9 @@ class TestShortcutRouterMatch:
                 },
             }
         })
-        # Only spec_a state present → spec_a wins
         m = router.match("trigger", {"key_a": True})
         assert m is not None
         assert m.action == "action_a"
-
-
-# ---------------------------------------------------------------------------
-# match_shortcut (public API) uses the real YAML
-# ---------------------------------------------------------------------------
 
 
 class TestMatchShortcutPublicApi:
@@ -534,16 +481,11 @@ class TestMatchShortcutPublicApi:
         assert match_shortcut("show me more", None) is None
 
 
-# ---------------------------------------------------------------------------
-# reload function
-# ---------------------------------------------------------------------------
-
 
 class TestReload:
     def test_reload_does_not_raise(self):
         """reload() should silently succeed when YAML file exists."""
-        reload()  # uses real YAML file
-
+        reload()
     def test_reload_updates_global_router(self):
         """After reload, match_shortcut still works correctly."""
         reload()
@@ -557,13 +499,9 @@ class TestReload:
         monkeypatch.setattr(loader, "_SHORTCUTS_PATH", fake_path)
         loader.reload()
         assert loader.match_shortcut("show me more", {"all_search_results": [1]}) is None
-        # Restore
-        loader.reload.__module__  # just access to confirm module is ok
+        loader.reload.__module__ 
 
 
-# ---------------------------------------------------------------------------
-# Regression: resume_booking_selection uses requires_any_state (not requires_state)
-# ---------------------------------------------------------------------------
 
 
 class TestRequiresAnyStateRegression:

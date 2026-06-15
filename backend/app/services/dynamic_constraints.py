@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Schema-driven dynamic constraint container.
 
@@ -6,7 +7,6 @@ this module stores constraints as a dynamic dictionary validated against
 the property schema. Constraints are discovered from user messages and
 dataset metadata, not predefined in code.
 """
-from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Iterator, List, Optional, Set
@@ -37,7 +37,6 @@ class DynamicConstraints:
         """
         self._schema = schema or get_property_schema()
         self._constraints: Dict[str, Dict[str, Any]] = {}
-        # _constraints structure: {field_name: {"value": value, "operator": operator}}
     
     def set(self, field_name: str, value: Any, operator: str = "exact") -> None:
         """
@@ -53,7 +52,6 @@ class DynamicConstraints:
         """
         if not self._schema.is_searchable(field_name):
             logger.warning(f"Field '{field_name}' is not searchable in schema")
-            # Still allow setting it, but log a warning
         
         field_schema = self._schema.get_field(field_name)
         if field_schema and not field_schema.validate_value(value):
@@ -159,35 +157,27 @@ class DynamicConstraints:
         """
         merged = DynamicConstraints(schema=self._schema)
         
-        # Start with self constraints
         for field_name, constraint in self._constraints.items():
             merged._constraints[field_name] = dict(constraint)
         
-        # Merge other constraints
         for field_name, other_constraint in other._constraints.items():
             other_value = other_constraint["value"]
             other_operator = other_constraint["operator"]
             
             if field_name in merged._constraints:
-                # Field exists in merged
                 existing = merged._constraints[field_name]
                 existing_value = existing["value"]
                 
                 if override:
-                    # Override with new value
                     if accumulate_lists and isinstance(existing_value, list) and isinstance(other_value, list):
-                        # Merge lists (union with dedup)
                         merged_list = list(set(existing_value + other_value))
                         merged.set(field_name, merged_list, other_operator)
                     else:
-                        # Replace value
                         merged.set(field_name, other_value, other_operator)
                 else:
-                    # Only fill if missing (None or empty)
                     if existing_value is None or existing_value == [] or existing_value == "":
                         merged.set(field_name, other_value, other_operator)
             else:
-                # New field, just add it
                 merged.set(field_name, other_value, other_operator)
         
         return merged
@@ -216,7 +206,6 @@ class DynamicConstraints:
             operator = constraint["operator"]
             value = constraint["value"]
             
-            # Hard filters: exact matches, contains, min/max
             if operator in ("exact", "contains", "min", "max"):
                 hard_filters[field_name] = {
                     "value": value,
@@ -240,7 +229,6 @@ class DynamicConstraints:
             operator = constraint["operator"]
             value = constraint["value"]
             
-            # Soft filters: fuzzy matches
             if operator == "fuzzy":
                 soft_filters[field_name] = {
                     "value": value,
@@ -296,7 +284,6 @@ def create_constraints_from_dict(
             constraints.set(field_name, value.get("value"), operator)
             continue
 
-        # Infer operator based on field type
         field_schema = constraints._schema.get_field(field_name)
         if field_schema:
             if field_schema.filter_type == FilterType.RANGE:

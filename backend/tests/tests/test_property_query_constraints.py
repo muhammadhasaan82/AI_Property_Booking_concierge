@@ -89,11 +89,6 @@ def test_extracts_amenity_pet_friendly():
     assert amenities.value == "pet_friendly"
 
 
-# ===========================================================================
-# Tests for _canonical_city() — added in this PR
-# ===========================================================================
-
-
 class TestCanonicalCity:
     """Unit tests for the _canonical_city() helper."""
 
@@ -138,19 +133,14 @@ class TestCanonicalCity:
     def test_hyphenated_city(self):
         """Title-casing a hyphenated city — Python's str.title() handles each segment."""
         result = _canonical_city("abu-dhabi")
-        # str.title() capitalises after hyphens: "Abu-Dhabi"
         assert result == "Abu-Dhabi"
 
 
-# ===========================================================================
-# Tests for extract_property_search_query() city title-casing (end-to-end)
-# ===========================================================================
 
 
 def test_city_is_title_cased_in_query_result():
     """City extracted via extract_property_search_query must be title-cased."""
     query = extract_property_search_query("show me apartments in new york city")
-    # The _canonical_city wrapper ensures title-case
     assert query.city is None or query.city[0].isupper()
 
 
@@ -158,5 +148,4 @@ def test_city_returned_as_title_case_not_lowercase():
     """Regression: city must NOT be returned in all-lowercase."""
     query = extract_property_search_query("find a flat in new york")
     if query.city is not None:
-        # First character must be uppercase (title-case)
         assert query.city[0] == query.city[0].upper()

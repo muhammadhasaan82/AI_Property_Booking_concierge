@@ -38,9 +38,12 @@ async def _run_cancellation_turn(
     monkeypatch,
     snapshot: dict,
     message: str,
-) -> str:
+    *,
+    mock_update_sb=None,
+    mock_update_b=None,
+):
     """
-    Run a single turn through run_adk_turn and return the reply.
+    Run a single turn through run_adk_turn and return the reply plus routing mocks.
     """
     async def fake_get_session_snapshot(_session_id):
         return snapshot
@@ -53,18 +56,29 @@ async def _run_cancellation_turn(
     def fail_get_runner():
         raise AssertionError("ADK runner must not be invoked for booking-cancellation")
 
+    direct_search = AsyncMock(return_value=None)
+    route_pre_adk = AsyncMock(return_value=None)
+
     monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
     monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
-    monkeypatch.setattr(adk_runner, "maybe_handle_direct_property_search", AsyncMock(return_value=None))
+    monkeypatch.setattr(adk_runner, "maybe_handle_direct_property_search", direct_search)
+    monkeypatch.setattr(adk_runner, "route_pre_adk", route_pre_adk)
     monkeypatch.setattr(adk_runner, "_get_runner", fail_get_runner)
     monkeypatch.setattr(adk_runner, "sanitize_input", lambda msg: (msg, True))
     monkeypatch.setattr(adk_runner, "sanitize_output", lambda msg: msg)
 
-    chunks = []
-    async for chunk in adk_runner.run_adk_turn("u-cancellation", "s-cancellation", message):
-        chunks.append(chunk)
+    from contextlib import ExitStack
 
-    return "".join(chunks)
+    chunks = []
+    with ExitStack() as stack:
+        if mock_update_sb is not None:
+            stack.enter_context(patch("app.observability.db_logging.update_successful_booking", mock_update_sb))
+        if mock_update_b is not None:
+            stack.enter_context(patch("app.services.booking.update_booking_status", mock_update_b))
+        async for chunk in adk_runner.run_adk_turn("u-cancellation", "s-cancellation", message):
+            chunks.append(chunk)
+
+    return "".join(chunks), direct_search, route_pre_adk
 
 @pytest.mark.asyncio
 async def test_delete_request_without_id_asks_for_booking_id(monkeypatch):
@@ -72,7 +86,7 @@ async def test_delete_request_without_id_asks_for_booking_id(monkeypatch):
     1. delete request without ID asks for booking ID
     """
     snapshot = _build_cancellation_snapshot({})
-    reply = await _run_cancellation_turn(monkeypatch, snapshot, "delete booking")
+    reply, _, _ = await _run_cancellation_turn(monkeypatch, snapshot, "delete booking")
     
     assert "please provide your booking registration id" in reply.lower()
     assert snapshot["state"]["soft_state"].get("booking_cancellation_pending") is True
@@ -91,7 +105,7 @@ async def test_delete_request_with_current_receipt_asks_for_confirmation(monkeyp
         patch("app.observability.db_logging.get_successful_booking_status", AsyncMock(return_value=_TEST_RECEIPT)),
         patch("app.services.booking.get_booking_status", AsyncMock(return_value={"ok": True, "status": "confirmed"}))
     ):
-        reply = await _run_cancellation_turn(monkeypatch, snapshot, "cancel booking")
+        reply, _, _ = await _run_cancellation_turn(monkeypatch, snapshot, "cancel booking")
         
     assert "Are you sure you want to cancel this booking?" in reply
     assert snapshot["state"]["soft_state"].get("booking_cancellation_pending") is True
@@ -105,34 +119,32 @@ async def test_screenshot_flow_cancellation_success(monkeypatch):
     """
     snapshot = _build_cancellation_snapshot({})
     
-    # Step 1: User says "delete booking".
-    reply1 = await _run_cancellation_turn(monkeypatch, snapshot, "delete booking")
+    reply1, _, _ = await _run_cancellation_turn(monkeypatch, snapshot, "delete booking")
     assert "please provide your booking registration id" in reply1.lower()
     assert snapshot["state"]["soft_state"].get("booking_cancellation_stage") == "awaiting_id"
     
-    # Step 2: User provides booking ID.
     with (
         patch("app.observability.db_logging.get_successful_booking_status", AsyncMock(return_value=_TEST_RECEIPT)),
         patch("app.services.booking.get_booking_status", AsyncMock(return_value={"ok": True, "status": "confirmed"}))
     ):
-        reply2 = await _run_cancellation_turn(monkeypatch, snapshot, "BK-20260601-12345678")
+        reply2, _, _ = await _run_cancellation_turn(monkeypatch, snapshot, "BK-20260601-12345678")
     assert "Are you sure you want to cancel this booking?" in reply2
     assert snapshot["state"]["soft_state"].get("booking_cancellation_stage") == "awaiting_confirmation"
     
-    # Step 3: User says "yes delete this booking please".
     mock_update_sb = AsyncMock(return_value=True)
     mock_update_b = AsyncMock(return_value={"ok": True})
-    with (
-        patch("app.observability.db_logging.update_successful_booking", mock_update_sb),
-        patch("app.services.booking.update_booking_status", mock_update_b)
-    ):
-        reply3 = await _run_cancellation_turn(monkeypatch, snapshot, "yes delete this booking please")
-        
+    reply3, _, _ = await _run_cancellation_turn(
+        monkeypatch,
+        snapshot,
+        "yes delete this booking please",
+        mock_update_sb=mock_update_sb,
+        mock_update_b=mock_update_b,
+    )
+
     assert "successfully cancelled" in reply3
-    mock_update_sb.assert_called_once_with("BK-20260601-12345678", {"status": "cancelled"})
-    mock_update_b.assert_called_once_with("BK-20260601-12345678", "", "cancelled")
+    mock_update_sb.assert_awaited_once_with("BK-20260601-12345678", {"status": "cancelled"})
+    mock_update_b.assert_awaited_once_with("BK-20260601-12345678", "", "cancelled")
     
-    # State variables should be cleared
     assert "booking_cancellation_pending" not in snapshot["state"]["soft_state"]
     assert "booking_cancellation_stage" not in snapshot["state"]["soft_state"]
     assert "booking_cancellation_id" not in snapshot["state"]["soft_state"]
@@ -151,15 +163,17 @@ async def test_rejection_keeps_booking_unchanged(monkeypatch):
     
     mock_update_sb = AsyncMock(return_value=True)
     mock_update_b = AsyncMock(return_value={"ok": True})
-    with (
-        patch("app.observability.db_logging.update_successful_booking", mock_update_sb),
-        patch("app.services.booking.update_booking_status", mock_update_b)
-    ):
-        reply = await _run_cancellation_turn(monkeypatch, snapshot, "no")
-        
+    reply, _, _ = await _run_cancellation_turn(
+        monkeypatch,
+        snapshot,
+        "no",
+        mock_update_sb=mock_update_sb,
+        mock_update_b=mock_update_b,
+    )
+
     assert "kept your booking unchanged" in reply
-    mock_update_sb.assert_not_called()
-    mock_update_b.assert_not_called()
+    mock_update_sb.assert_not_awaited()
+    mock_update_b.assert_not_awaited()
     
     assert "booking_cancellation_pending" not in snapshot["state"]["soft_state"]
     assert "booking_cancellation_stage" not in snapshot["state"]["soft_state"]
@@ -178,12 +192,74 @@ async def test_yes_delete_does_not_route_to_search(monkeypatch):
     
     mock_update_sb = AsyncMock(return_value=True)
     mock_update_b = AsyncMock(return_value={"ok": True})
-    with (
-        patch("app.observability.db_logging.update_successful_booking", mock_update_sb),
-        patch("app.services.booking.update_booking_status", mock_update_b)
-    ):
-        # The fail_get_runner check in _run_cancellation_turn ensures that
-        # _get_runner is never invoked (i.e. the LLM/router/property search is not called).
-        reply = await _run_cancellation_turn(monkeypatch, snapshot, "yes delete this booking please")
-        
+    reply, direct_search, route_pre_adk = await _run_cancellation_turn(
+        monkeypatch,
+        snapshot,
+        "yes delete this booking please",
+        mock_update_sb=mock_update_sb,
+        mock_update_b=mock_update_b,
+    )
+
     assert "successfully cancelled" in reply
+    direct_search.assert_not_awaited()
+    route_pre_adk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "do not cancel",
+        "don't cancel",
+        "dont delete",
+        "do not delete",
+        "keep it",
+        "nevermind",
+    ],
+)
+async def test_negated_cancellation_is_rejection(monkeypatch, message):
+    snapshot = _build_cancellation_snapshot({
+        "booking_cancellation_pending": True,
+        "booking_cancellation_stage": "awaiting_confirmation",
+        "booking_cancellation_id": "BK-20260601-12345678",
+        "booking_cancellation_receipt": dict(_TEST_RECEIPT),
+    })
+
+    mock_update_sb = AsyncMock(return_value=True)
+    mock_update_b = AsyncMock(return_value={"ok": True})
+    reply, _, _ = await _run_cancellation_turn(
+        monkeypatch,
+        snapshot,
+        message,
+        mock_update_sb=mock_update_sb,
+        mock_update_b=mock_update_b,
+    )
+
+    assert "kept your booking unchanged" in reply
+    mock_update_sb.assert_not_awaited()
+    mock_update_b.assert_not_awaited()
+    assert snapshot["state"]["soft_state"].get("booking_cancellation_stage") is None
+
+
+@pytest.mark.asyncio
+async def test_db_failure_keeps_pending_cancellation_state(monkeypatch):
+    snapshot = _build_cancellation_snapshot({
+        "booking_cancellation_pending": True,
+        "booking_cancellation_stage": "awaiting_confirmation",
+        "booking_cancellation_id": "BK-20260601-12345678",
+        "booking_cancellation_receipt": dict(_TEST_RECEIPT),
+    })
+
+    mock_update_sb = AsyncMock(return_value=False)
+    mock_update_b = AsyncMock(return_value={"ok": False})
+    reply, _, _ = await _run_cancellation_turn(
+        monkeypatch,
+        snapshot,
+        "yes",
+        mock_update_sb=mock_update_sb,
+        mock_update_b=mock_update_b,
+    )
+
+    assert "try confirming the cancellation again" in reply.lower()
+    assert snapshot["state"]["soft_state"].get("booking_cancellation_stage") == "awaiting_confirmation"
+    assert snapshot["state"]["soft_state"].get("booking_cancellation_id") == "BK-20260601-12345678"

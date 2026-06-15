@@ -1,10 +1,10 @@
+from __future__ import annotations
 """
 Langfuse Prompt Registry
 
 Provides optional fetching of prompts from Langfuse. Local prompts remain the
 default source of truth. Never makes app boot depend on Langfuse availability.
 """
-from __future__ import annotations
 
 import logging
 import os

@@ -1,5 +1,5 @@
-"""FastAPI chat routes backed by the shared ADK runner service."""
 from __future__ import annotations
+"""FastAPI chat routes backed by the shared ADK runner service."""
 
 from typing import Optional
 from uuid import uuid4

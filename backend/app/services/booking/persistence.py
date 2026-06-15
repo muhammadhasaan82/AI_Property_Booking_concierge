@@ -1,11 +1,10 @@
 from __future__ import annotations
-
 import logging
 import uuid
 from typing import Any, Dict, Optional
 
-from .config import MOCK_MODE, PAYMENT_BASE_URL
-from . import db_client
+from ..config import MOCK_MODE, PAYMENT_BASE_URL
+from .. import db_client
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +204,7 @@ async def delete_booking(booking_id: str) -> Dict[str, Any]:
         return {"ok": True}
 
     try:
-        from . import db_client
+        from .. import db_client
         rowcount = await db_client.execute(
             """
             delete from public.bookings

@@ -12,7 +12,6 @@ backend_root = str(Path(__file__).resolve().parents[1])
 if backend_root not in sys.path:
     sys.path.insert(0, backend_root)
 
-s
 env_path = Path(__file__).resolve().parents[1] / ".env"
 if env_path.exists():
     load_dotenv(env_path)

@@ -586,7 +586,6 @@ class TestShouldSample:
         """LANGFUSE_SAMPLE_RATE=0.0 must always return False."""
         from app.services.observability.langfuse_observer import _should_sample
         with patch('app.services.observability.langfuse_observer.LANGFUSE_SAMPLE_RATE', 0.0):
-            # random.random() always returns a value in [0.0, 1.0), so 0.0 < 0.0 is never True
             for _ in range(20):
                 assert _should_sample() is False
 
@@ -627,7 +626,7 @@ class TestObservedTraceMetadataMerge:
     def test_metadata_dicts_are_merged_not_replaced(self):
         """Two update(metadata=…) calls must produce a merged metadata dict."""
         trace = _ObservedTrace(name="t", initial_payload={}, client=None)
-        trace._in_context = True  # prevent emit during update()
+        trace._in_context = True
         trace.update(metadata={"a": 1})
         trace.update(metadata={"b": 2})
         assert trace._payload["metadata"] == {"a": 1, "b": 2}
@@ -646,7 +645,6 @@ class TestObservedTraceMetadataMerge:
         trace._in_context = True
         trace.update(metadata={"key": "val"})
         trace.update(metadata="plain-string")
-        # sanitize_for_observability("plain-string") → "plain-string" (no PII)
         assert trace._payload["metadata"] == "plain-string"
 
     def test_non_metadata_keys_stored_directly(self):
@@ -665,7 +663,6 @@ class TestObservedTraceMetadataMerge:
             client=None,
         )
         trace._in_context = True
-        # No update yet — payload from __init__ must be intact
         assert trace._payload.get("metadata", {}).get("source") == "init"
 
     def test_initial_payload_metadata_merged_with_update(self):
@@ -721,7 +718,7 @@ class TestObservedSpan:
         """end() must be a no-op and must not raise."""
         trace = self._make_trace()
         span = _ObservedSpan(parent=trace, name="s")
-        span.end()  # must not raise
+        span.end()
 
     def test_span_context_manager_is_safe(self):
         """_ObservedSpan as a context manager must not raise even on exception."""

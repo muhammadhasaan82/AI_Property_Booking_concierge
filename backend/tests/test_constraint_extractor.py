@@ -187,7 +187,7 @@ class TestMergeConstraints:
         merged = merge_constraints(previous, current)
         assert merged.city == "Seattle"
         assert merged.property_type == "villa"
-        assert merged.bedrooms == 3  # Overridden
+        assert merged.bedrooms == 3         
 
     def test_merge_amenities_accumulates(self):
         """Test that amenities accumulate across turns."""
@@ -241,10 +241,8 @@ class TestConversationTurnScenarios:
 
     def test_initial_search_then_refinement(self):
         """Test initial search followed by refinement."""
-        # Turn 1: Initial search
         constraints1 = extract_constraints_from_message("villa in Seattle")
         
-        # Turn 2: Refine with bedrooms
         constraints2 = extract_constraints_from_message("with 3 bedrooms")
         merged = merge_constraints(constraints1, constraints2)
         
@@ -254,10 +252,8 @@ class TestConversationTurnScenarios:
 
     def test_search_then_price_constraint(self):
         """Test search followed by price constraint."""
-        # Turn 1: Initial search
         constraints1 = extract_constraints_from_message("apartment in New York")
         
-        # Turn 2: Add price constraint
         constraints2 = extract_constraints_from_message("under $200 per night")
         merged = merge_constraints(constraints1, constraints2)
         
@@ -267,10 +263,8 @@ class TestConversationTurnScenarios:
 
     def test_search_then_amenities(self):
         """Test search followed by amenity constraints."""
-        # Turn 1: Initial search
         constraints1 = extract_constraints_from_message("house in Portland")
         
-        # Turn 2: Add amenities
         constraints2 = extract_constraints_from_message("with pool and gym")
         merged = merge_constraints(constraints1, constraints2)
         
@@ -281,10 +275,8 @@ class TestConversationTurnScenarios:
 
     def test_change_property_type_mid_conversation(self):
         """Test changing property type mid-conversation."""
-        # Turn 1: Search for villa
         constraints1 = extract_constraints_from_message("villa in Seattle")
         
-        # Turn 2: Change to apartment
         constraints2 = extract_constraints_from_message("actually, I want an apartment")
         merged = merge_constraints(constraints1, constraints2)
         
@@ -293,10 +285,8 @@ class TestConversationTurnScenarios:
 
     def test_change_city_mid_conversation(self):
         """Test changing city mid-conversation."""
-        # Turn 1: Search in Seattle
         constraints1 = extract_constraints_from_message("villa in Seattle")
         
-        # Turn 2: Change to Portland
         constraints2 = extract_constraints_from_message("actually, look in Portland")
         merged = merge_constraints(constraints1, constraints2)
         
@@ -305,22 +295,17 @@ class TestConversationTurnScenarios:
 
     def test_multiple_refinements(self):
         """Test multiple constraint refinements."""
-        # Turn 1: Initial search
         constraints1 = extract_constraints_from_message("villa in Seattle")
         
-        # Turn 2: Add bedrooms
         constraints2 = extract_constraints_from_message("with 3 bedrooms")
         merged2 = merge_constraints(constraints1, constraints2)
         
-        # Turn 3: Add bathrooms
         constraints3 = extract_constraints_from_message("and 2 bathrooms")
         merged3 = merge_constraints(merged2, constraints3)
         
-        # Turn 4: Add price constraint
         constraints4 = extract_constraints_from_message("under $400 per night")
         merged4 = merge_constraints(merged3, constraints4)
         
-        # Turn 5: Add amenities
         constraints5 = extract_constraints_from_message("with pool")
         merged5 = merge_constraints(merged4, constraints5)
         

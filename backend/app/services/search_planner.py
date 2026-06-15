@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Schema-driven search planner.
 
@@ -10,7 +11,6 @@ Orchestrates the full search flow:
 
 This replaces hardcoded search logic with a dynamic, schema-driven approach.
 """
-from __future__ import annotations
 
 import logging
 import re
@@ -55,7 +55,7 @@ class SearchTrace:
     post_filter_count: int = 0
     final_count: int = 0
     filter_effectiveness: float = 0.0
-    search_path: str = ""  # "direct", "tool", "rust"
+    search_path: str = ""
     
     def log(self, msg: str) -> None:
         """Add a log message."""
@@ -305,7 +305,6 @@ class SearchPlanner:
         trace = SearchTrace(session_id=session_id or "unknown", user_message=message)
         trace.log(f"Planning search for message: '{message}'")
         
-        # Step 1: Extract constraints from message
         extracted = self.extract_constraints(message)
         sort_preferences = self.extract_sort_preferences(message)
         trace.extracted_constraints = extracted.to_dict()
@@ -314,7 +313,6 @@ class SearchPlanner:
             trace.sort_preferences = list(sort_preferences)
             trace.log(f"Sort preferences: {sort_preferences}")
         
-        # Step 2: Merge with session constraints
         if session_constraints and not session_constraints.is_empty():
             merged = session_constraints.merge_with(extracted, override=True)
             trace.log(f"Merged with session constraints: {merged.to_dict()}")
@@ -324,7 +322,6 @@ class SearchPlanner:
         
         trace.merged_constraints = merged.to_dict()
         
-        # Step 3: Separate hard and soft filters
         hard_filters = merged.get_hard_filters()
         soft_filters = merged.get_soft_filters()
         
@@ -405,7 +402,6 @@ class SearchPlanner:
             prop_value = prop.get(field_name)
             
             if operator == "exact":
-                # Exact match (case-insensitive for strings)
                 if isinstance(value, str) and isinstance(prop_value, str):
                     if value.lower() != prop_value.lower():
                         return False
@@ -413,10 +409,8 @@ class SearchPlanner:
                     return False
             
             elif operator == "contains":
-                # List contains value
                 if isinstance(prop_value, list):
                     if isinstance(value, list):
-                        # All values must be in list
                         normalized_prop = {str(v).strip().lower() for v in prop_value}
                         if not all(str(v).strip().lower() in normalized_prop for v in value):
                             return False
@@ -428,7 +422,6 @@ class SearchPlanner:
                     return False
             
             elif operator == "min":
-                # Value must be >= constraint
                 try:
                     if float(prop_value or 0) < float(value):
                         return False
@@ -436,7 +429,6 @@ class SearchPlanner:
                     return False
             
             elif operator == "max":
-                # Value must be <= constraint
                 try:
                     if float(prop_value or float('inf')) > float(value):
                         return False
@@ -471,14 +463,12 @@ class SearchPlanner:
         
         plan.trace.log("Applying soft filters for ranking")
         
-        # Sort by relevance score based on soft filters
         def relevance_score(prop: Dict[str, Any]) -> float:
             score = 0.0
             for field_name, filter_spec in soft_filters.items():
                 value = filter_spec["value"]
                 prop_value = prop.get(field_name, "")
                 
-                # Simple fuzzy match scoring
                 if isinstance(value, str) and isinstance(prop_value, str):
                     if value.lower() in prop_value.lower():
                         score += 1.0
@@ -517,10 +507,8 @@ class SearchPlanner:
         """
         plan.trace.log(f"Executing search on {len(properties)} properties")
         
-        # Step 1: Enforce hard filters
         filtered = self.enforce_hard_filters(properties, plan)
         
-        # Step 2: Apply soft filters for ranking
         ranked = self.apply_soft_filters(filtered, plan)
         
         plan.trace.log(f"Search complete: {len(ranked)} properties returned")
@@ -528,7 +516,6 @@ class SearchPlanner:
         return ranked, plan.trace
 
 
-# Global singleton instance
 _planner_instance: Optional[SearchPlanner] = None
 
 

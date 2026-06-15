@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Loads agent_config.yaml once at startup and makes it available as a
 single frozen config object throughout the application.
@@ -15,7 +16,6 @@ Usage:
     cfg.status.properties_found
     cfg.intent_routing.history_action_intents
 """
-from __future__ import annotations
 
 import os
 from pathlib import Path

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Hard-coded dataset loader for property listings → Chroma (via services.retrieval.bulk_upsert).
 
@@ -6,7 +7,6 @@ Hard-coded dataset loader for property listings → Chroma (via services.retriev
 - Delegates embeddings + vector upserts to services.retrieval.bulk_upsert (Hugging Face + Chroma).
 """
 
-from __future__ import annotations
 import os
 from typing import Dict, List
 try:

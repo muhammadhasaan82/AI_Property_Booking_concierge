@@ -89,13 +89,11 @@ async def test_v25_smoke_deterministic_turns(monkeypatch):
          patch("app.agents.tools.rust_client.search_properties", return_value={"fallback": True}), \
          patch("app.agents.tools.rust_client.execute_tool", new=AsyncMock(return_value={"fallback": True})):
 
-        # Turn 1: search villas in Los Angeles using a short lexical variant
         reply_1, route_1 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "looking for villas los angeles")
         assert "LA Villa 1" in reply_1
         assert "LA Villa 5" in reply_1
         route_1.assert_not_awaited()
 
-        # Turn 2: option 5 selects the actual fifth result from stored search state
         reply_2, route_2 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "5")
         assert "LA Villa 5" in reply_2
         assert "Want to book this one?" in reply_2
@@ -105,13 +103,11 @@ async def test_v25_smoke_deterministic_turns(monkeypatch):
         assert soft_state["last_presented_view"] == "property_details"
         assert soft_state["last_selected_property_id"] == "la_villa_5"
 
-        # Turn 3: yes/book starts deterministic booking
         reply_3, route_3 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "yes please")
         assert "I'll help you book LA Villa 5" in reply_3 or "Please provide" in reply_3
         route_3.assert_not_awaited()
         assert soft_state["booking_stage"] == "collecting_details"
 
-        # Turn 4: invalid reversed dates asks for correction and preserves valid fields
         reply_4, route_4 = await _run_adk_turn_with_snapshot(
             monkeypatch,
             snapshot,
@@ -128,8 +124,6 @@ async def test_v25_smoke_deterministic_turns(monkeypatch):
         assert "check_out" not in booking_state
         route_4.assert_not_awaited()
 
-        # Turn 5: valid date completion reaches review and does not ask for check-in again
-        # July 13 is check-in, so check-out is July 24
         reply_5, route_5 = await _run_adk_turn_with_snapshot(monkeypatch, snapshot, "24 july")
         assert "Please confirm if everything is correct." in reply_5
         assert soft_state["booking_stage"] == "awaiting_confirmation"

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Loads booking_schema.yaml at startup. Provides typed validators and prompt
 lookup helpers consumed by the policy router (Phase 3) and downstream tools.
@@ -5,7 +6,6 @@ lookup helpers consumed by the policy router (Phase 3) and downstream tools.
 Keys that overlap with agent_config.yaml
 migration — see Phase 3 of the soft-coding roadmap.
 """
-from __future__ import annotations
 import logging 
 import os
 import re
@@ -45,6 +45,7 @@ class _BookingBlock(BaseModel):
     date_format: str = "%Y-%m-%d"
     source_tag: str = "v2_adk"
     confirmed_status: str = "confirmed"
+    flow: Dict[str, Any] = Field(default_factory=dict)
 
 class _BookingSchemaRoot(BaseModel):
     version: str = "1.0"
@@ -235,4 +236,9 @@ def reload() -> None:
     """Hot-reload helper used by phase 4's / admin/reload-config endpoint."""
     global booking_schema
     booking_schema = _load()
+    try:
+        from app.config.booking_flow_loader import reload_flow_config
+        reload_flow_config()
+    except Exception as exc:
+        logger.warning("[booking_schema] flow config reload failed: %s", exc)
     logger.info("[booking_schema] reloaded version=%s", booking_schema.version)

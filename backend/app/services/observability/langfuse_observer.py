@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Langfuse Observability Wrapper — SDK 4.7.1 Compatible
 
@@ -30,7 +31,6 @@ Design constraints:
   - ``_langfuse`` attribute on LangfuseObserver keeps working for prompt_registry.
   - If ``observe`` is None (import failed), all traces silently become NoOp.
 """
-from __future__ import annotations
 
 import logging
 import os

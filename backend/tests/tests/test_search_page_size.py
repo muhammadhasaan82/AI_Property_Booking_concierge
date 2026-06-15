@@ -28,10 +28,6 @@ from app.agents.tools.search import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _make_results(n: int) -> List[Dict[str, Any]]:
     return [
@@ -62,10 +58,6 @@ def _patch_cfg(page_size: int = 5, page_size_max: int = 25):
     )
 
 
-# ---------------------------------------------------------------------------
-# _resolve_page_size_max
-# ---------------------------------------------------------------------------
-
 
 class TestResolvePageSizeMax:
     def test_default_from_cfg(self, monkeypatch):
@@ -93,10 +85,6 @@ class TestResolvePageSizeMax:
         result = _resolve_page_size_max()
         assert isinstance(result, int)
 
-
-# ---------------------------------------------------------------------------
-# _resolve_page_size
-# ---------------------------------------------------------------------------
 
 
 class TestResolvePageSize:
@@ -139,11 +127,6 @@ class TestResolvePageSize:
         monkeypatch.setattr(search_module.cfg, "page_size", 5)
         monkeypatch.setattr(search_module.cfg, "page_size_max", 25)
         assert isinstance(_resolve_page_size(), int)
-
-
-# ---------------------------------------------------------------------------
-# _resolve_page_size_from
-# ---------------------------------------------------------------------------
 
 
 class TestResolvePageSizeFrom:
@@ -195,20 +178,14 @@ class TestResolvePageSizeFrom:
     def test_float_is_coerced_to_int(self, monkeypatch):
         monkeypatch.setattr(search_module.cfg, "page_size", 5)
         monkeypatch.setattr(search_module.cfg, "page_size_max", 25)
-        # _coerce_int handles floats
         result = _resolve_page_size_from(7.9)
         assert result == 7
 
     def test_result_always_at_least_1(self, monkeypatch):
         monkeypatch.setattr(search_module.cfg, "page_size", 5)
         monkeypatch.setattr(search_module.cfg, "page_size_max", 25)
-        # Even 0 returns at least 1 (via default path which gives 5)
         assert _resolve_page_size_from(0) >= 1
 
-
-# ---------------------------------------------------------------------------
-# _resolve_property_id_from_selection
-# ---------------------------------------------------------------------------
 
 
 class TestResolvePropertyIdFromSelection:
@@ -227,7 +204,6 @@ class TestResolvePropertyIdFromSelection:
 
     def test_option_map_key_not_found_falls_through(self):
         soft_state = {"option_map": {"1": {"property_id": "abc"}}}
-        # Number 5 not in option_map → falls through to next source
         result = _resolve_property_id_from_selection(5, soft_state, None)
         assert result is None
 
@@ -275,7 +251,6 @@ class TestResolvePropertyIdFromSelection:
             "option_map": {"1": {"property_id": None}},
             "active_property_options_map": {"1": {"property_id": "legacy-id"}},
         }
-        # option_map has property_id=None → should fall through to legacy
         result = _resolve_property_id_from_selection(1, soft_state, None)
         assert result == "legacy-id"
 
@@ -290,10 +265,6 @@ class TestResolvePropertyIdFromSelection:
         last_search = {"properties": [{"number": 3, "id": "ls-prop"}]}
         assert _resolve_property_id_from_selection(3, soft_state, last_search) == "ls-prop"
 
-
-# ---------------------------------------------------------------------------
-# _build_search_page_payload – page_size=None uses dynamic default
-# ---------------------------------------------------------------------------
 
 
 class TestBuildSearchPagePayload:
@@ -354,7 +325,6 @@ class TestBuildSearchPagePayload:
         monkeypatch.setattr(search_module.cfg, "page_size_max", 25)
         results = _make_results(7)
         payload, visible, _ = _build_search_page_payload(results=results, filters={}, page=2)
-        # Page 2: items 6-7 → 2 items
         assert len(visible) == 2
         assert payload["shown_count"] == 2
 
@@ -373,7 +343,7 @@ class TestBuildSearchPagePayload:
         monkeypatch.setattr(search_module.cfg, "page_size_max", 25)
         results = _make_results(10)
         payload, _, _ = _build_search_page_payload(results=results, filters={}, page=99)
-        assert payload["pagination"]["current_page"] == 2  # 10 items / 5 per page = 2 pages
+        assert payload["pagination"]["current_page"] == 2 
 
     def test_option_map_keys_are_strings(self, monkeypatch):
         monkeypatch.setattr(search_module.cfg, "page_size", 5)
@@ -391,10 +361,6 @@ class TestBuildSearchPagePayload:
         assert payload["pagination"]["page_start"] == 1
         assert payload["pagination"]["page_end"] == 5
 
-
-# ---------------------------------------------------------------------------
-# paginate_stored_results
-# ---------------------------------------------------------------------------
 
 
 class TestPaginateStoredResults:
@@ -494,7 +460,7 @@ class TestPaginateStoredResults:
         soft_state = {
             "all_search_results": _make_results(20),
             "current_page": 1,
-            "page_size": 10,  # stored page size
+            "page_size": 10,
         }
         payload = paginate_stored_results(soft_state, direction="next")
         assert payload is not None
@@ -506,11 +472,10 @@ class TestPaginateStoredResults:
         soft_state = {
             "all_search_results": _make_results(10),
             "current_page": 1,
-            "page_size": 0,  # invalid
+            "page_size": 0,
         }
         payload = paginate_stored_results(soft_state, direction="next")
         assert payload is not None
-        # Falls back to default page size of 5
         assert payload["pagination"]["page_size"] == 5
 
     def test_default_direction_is_next(self, monkeypatch):
@@ -521,7 +486,7 @@ class TestPaginateStoredResults:
             "current_page": 1,
             "page_size": 5,
         }
-        payload = paginate_stored_results(soft_state)  # no direction arg
+        payload = paginate_stored_results(soft_state)
         assert payload is not None
         assert payload["pagination"]["current_page"] == 2
 
@@ -537,10 +502,6 @@ class TestPaginateStoredResults:
         assert payload is not None
         assert payload.get("source") is not None
 
-
-# ---------------------------------------------------------------------------
-# Regression: duplicate option_map lookup removed in _resolve_property_id_from_selection
-# ---------------------------------------------------------------------------
 
 
 class TestResolvePropertyIdRegression:

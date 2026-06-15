@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Runtime configuration for backend services.
 
 This module exposes operational settings only.
@@ -5,21 +6,12 @@ Lexical intent aliases, regex patterns, property-type aliases, and dynamic
 business rules must live in spec/config YAML files, not here.
 """
 
-from __future__ import annotations
 
 import os
 from pathlib import Path
 from typing import Set
 
 from app.config.env_loader import load_backend_env
-
-
-# ---------------------------------------------------------------------------
-# Legacy dotenv path compatibility
-# ---------------------------------------------------------------------------
-# Older tests/callers introspect these paths directly. Keep them module-level.
-# Loading order remains broadest-to-narrowest:
-#   repo .env -> backend .env -> app/services .env
 
 _backend_root = Path(__file__).resolve().parents[1]
 _repo_root = Path(__file__).resolve().parents[2]
