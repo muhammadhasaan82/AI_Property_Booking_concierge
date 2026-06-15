@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -185,3 +186,42 @@ def _receipt_review_from_candidate(receipt: Dict[str, Any]) -> str:
         + "\n\nPlease confirm if these updated booking details are correct."
     )
 
+def _coerce_int(value):
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value):
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+try:
+    _coerce_int
+except NameError:
+    def _coerce_int(value):
+        try:
+            if value is None or value == "":
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+
+try:
+    _coerce_float
+except NameError:
+    def _coerce_float(value):
+        try:
+            if value is None or value == "":
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None

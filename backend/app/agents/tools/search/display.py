@@ -189,3 +189,5 @@ def _build_option_map_from_formatted(
         }
     return option_map
 
+_DEFAULT_SEARCH_PAGE_SIZE = 5
+_DEFAULT_SEARCH_PAGE_SIZE_MAX = 25

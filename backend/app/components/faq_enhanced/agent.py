@@ -89,7 +89,7 @@ def enhanced_faq_agent(user_text: str, context: Dict[str, Any] = None) -> Dict[s
         answer, sources = semantic_faq_search(user_text)
         
         top_score = float((sources[0] or {}).get("score", 0.0)) if sources else 0.0
-        from ..services.dynamic_config import get_thresholds
+        from app.services.dynamic_config import get_thresholds
         _faq_thresholds = get_thresholds().faq
         if sources and answer and top_score >= _faq_thresholds.high_confidence:
             result = {

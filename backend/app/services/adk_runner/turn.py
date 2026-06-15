@@ -678,3 +678,38 @@ async def run_adk_turn(
 from app.config.service_coverage_loader import evaluate_message_coverage  # noqa: F401
 
 from app.services.adk_runner.invocation import _build_invocation_state_delta  # noqa: F401
+
+def _extract_text_parts(event) -> str:
+    """Extract text from ADK/Event-like objects without assuming one shape."""
+    if event is None:
+        return ""
+
+    if isinstance(event, str):
+        return event
+
+    direct_text = (
+        event.get("text") if isinstance(event, dict) else getattr(event, "text", None)
+    )
+    if direct_text:
+        return str(direct_text)
+
+    if isinstance(event, dict):
+        content = event.get("content") or {}
+    else:
+        content = getattr(event, "content", None) or {}
+
+    if isinstance(content, dict):
+        parts = content.get("parts") or []
+    else:
+        parts = getattr(content, "parts", None) or []
+
+    texts = []
+    for part in parts:
+        if isinstance(part, dict):
+            text = part.get("text")
+        else:
+            text = getattr(part, "text", None)
+        if text:
+            texts.append(str(text))
+
+    return "\n".join(texts).strip()

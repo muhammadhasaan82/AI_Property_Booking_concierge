@@ -351,3 +351,21 @@ def return_to_previous_results(
     }
     return payload
 
+def _resolve_result_limit(value=None) -> int:
+    """Resolve max stored search results for pagination fallback."""
+    if value is None:
+        try:
+            from app.config.agent_config_loader import cfg
+            value = (
+                getattr(cfg, "search_result_limit", None)
+                or getattr(cfg, "result_limit", None)
+                or getattr(cfg, "max_search_results", None)
+                or 100
+            )
+        except Exception:
+            value = 100
+
+    try:
+        return max(1, int(value))
+    except Exception:
+        return 100

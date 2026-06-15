@@ -167,7 +167,7 @@ class FAQService:
 
         ranked: List[Tuple[int, float]] = []
         try:
-            from ..services.rag_pipeline import bm25_search
+            from app.services.rag_pipeline import bm25_search
 
             ranked = bm25_search(query, [doc.page_content for doc in docs], k=max(k, 1))
         except Exception as exc:
@@ -253,11 +253,11 @@ class FAQService:
 
 
     def semantic_search(self, question: str, k: int = 3, score_threshold: float = 0.5) -> Tuple[str, List[Dict[str, Any]]]:
-        from ..services.rag_pipeline import (
+        from app.services.rag_pipeline import (
             rewrite_query, hybrid_retrieve, rerank,
             compress_context, verify_grounding, get_cag_cache,
         )
-        from ..services.dynamic_config import get_retrieval_config
+        from app.services.dynamic_config import get_retrieval_config
 
         cache = get_cag_cache()
         cached = cache.get(question)

@@ -497,3 +497,57 @@ def _has_active_booking_session(soft_state: dict | None) -> bool:
     }
 
     return normalized_stage not in inactive_stages
+
+def _handle_review_modification_request(message: str, soft_state: dict):
+    """Handle review-screen modification shortcuts before ADK routing."""
+    if not isinstance(soft_state, dict):
+        return None
+
+    text = " ".join((message or "").strip().lower().split())
+    stage = str(soft_state.get("booking_stage") or "").strip().lower()
+
+    if stage not in {
+        "awaiting_confirmation",
+        "awaiting_modification_choice",
+        "review_pending",
+    }:
+        return None
+
+    if text in {"no", "nope", "not correct", "change", "modify", "edit"}:
+        soft_state["booking_stage"] = "awaiting_modification_choice"
+        soft_state["last_presented_view"] = "booking_review"
+        return {
+            "status": "gathering_info",
+            "deterministic_reply": "What would you like to change? You can say name, email, phone, dates, guests, or property.",
+        }
+
+    if "property" in text:
+        soft_state["booking_stage"] = "awaiting_property_reselection"
+        soft_state["last_presented_view"] = "property_list"
+
+        visible = (
+            soft_state.get("visible_results")
+            or soft_state.get("active_property_options")
+            or soft_state.get("all_search_results")
+            or []
+        )
+
+        lines = ["Please choose another property:"]
+        for idx, item in enumerate(visible[:5], start=1):
+            if isinstance(item, dict):
+                title = item.get("title") or item.get("property_title") or item.get("name") or f"Option {idx}"
+                price = item.get("price_per_night")
+                if price is not None:
+                    lines.append(f"{idx}. {title} - ${price}/night")
+                else:
+                    lines.append(f"{idx}. {title}")
+
+        if len(lines) == 1:
+            lines.append("Please search again or tell me what kind of property you prefer.")
+
+        return {
+            "status": "property_reselection",
+            "deterministic_reply": "\n".join(lines),
+        }
+
+    return None

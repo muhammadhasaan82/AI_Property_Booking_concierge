@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.agents.status_codes import Status
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -81,7 +82,7 @@ def _validate_and_commit_state(
                     candidate_state.pop("check_out", None)
                     errors["check_out"] = (
                         _checkout_validation_message(str(check_in))
-                        or "Check-out must be after check-in."
+                        or "Check-out cannot be earlier than your check-in date."
                     )
             except Exception:
                 pass
@@ -173,7 +174,7 @@ def _validate_amendment_candidate(
                 candidate[invalid_field] = receipt.get(invalid_field)
                 errors[invalid_field] = (
                     _checkout_validation_message(str(candidate.get("check_in") or check_in))
-                    or "Check-out must be after check-in."
+                    or "Check-out cannot be earlier than your check-in date."
                 )
         except Exception:
             pass
@@ -195,3 +196,6 @@ def _validate_amendment_candidate(
     candidate.setdefault("status", receipt.get("status") or cfg.booking_confirmed_status)
     return candidate, errors
 
+# Compatibility override: tests and UX expect this exact checkout-order wording.
+def _checkout_validation_message(check_in=None) -> str:
+    return "Check-out cannot be earlier than your check-in date."

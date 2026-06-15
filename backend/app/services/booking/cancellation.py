@@ -181,3 +181,116 @@ async def handle_booking_cancellation_turn(
         "deterministic_reply": f"Here are your booking details:\n{receipt_rendered}\n\nAre you sure you want to cancel this booking? Please say 'yes' to confirm or 'no' to keep it."
     }
 
+def _is_cancellation_confirmation(message: str) -> bool:
+    text = " ".join((message or "").strip().lower().split())
+    if text in {"yes", "y", "confirm", "yes cancel", "yes delete"}:
+        return True
+    return text.startswith("yes") and any(word in text for word in ("cancel", "delete", "booking"))
+
+
+def _is_cancellation_rejection(message: str) -> bool:
+    text = " ".join((message or "").strip().lower().split())
+    return text in {
+        "no",
+        "n",
+        "nope",
+        "do not cancel",
+        "don't cancel",
+        "dont cancel",
+        "do not delete",
+        "dont delete",
+        "don't delete",
+        "keep it",
+        "nevermind",
+        "never mind",
+    }
+
+# Compatibility wrapper: handle pending cancellation confirmation/rejection deterministically.
+_handle_booking_cancellation_turn_original_v1 = handle_booking_cancellation_turn
+
+async def handle_booking_cancellation_turn(message: str, soft_state: dict):
+    if not isinstance(soft_state, dict):
+        return await _handle_booking_cancellation_turn_original_v1(message, soft_state)
+
+    stage = str(soft_state.get("booking_cancellation_stage") or "").strip().lower()
+    pending = bool(soft_state.get("booking_cancellation_pending")) or stage == "awaiting_confirmation"
+    text = " ".join((message or "").strip().lower().split())
+
+    confirmations = {"yes", "y", "confirm", "yes cancel", "yes delete"}
+    rejections = {
+        "no",
+        "n",
+        "nope",
+        "do not cancel",
+        "don't cancel",
+        "dont cancel",
+        "do not delete",
+        "don't delete",
+        "dont delete",
+        "keep it",
+        "nevermind",
+        "never mind",
+    }
+
+    is_confirm = text in confirmations or (text.startswith("yes") and any(w in text for w in ("cancel", "delete", "booking")))
+    is_reject = text in rejections
+
+    if pending and stage == "awaiting_confirmation":
+        booking_id = soft_state.get("booking_cancellation_id")
+        if not booking_id:
+            receipt = soft_state.get("booking_cancellation_receipt")
+            if isinstance(receipt, dict):
+                booking_id = receipt.get("booking_id")
+
+        if is_reject:
+            for key in (
+                "booking_cancellation_pending",
+                "booking_cancellation_stage",
+                "booking_cancellation_id",
+                "booking_cancellation_receipt",
+            ):
+                soft_state.pop(key, None)
+
+            return {
+                "status": "cancelled_rejected",
+                "deterministic_reply": "I've kept your booking unchanged.",
+            }
+
+        if is_confirm:
+            from app.observability import db_logging
+            import app.services.booking as booking_pkg
+
+            sb_ok = await db_logging.update_successful_booking(str(booking_id), {"status": "cancelled"})
+            booking_ok = await booking_pkg.update_booking_status(str(booking_id), "", "cancelled")
+
+            booking_ok_bool = (
+                bool(booking_ok.get("ok"))
+                if isinstance(booking_ok, dict)
+                else bool(booking_ok)
+            )
+
+            if sb_ok and booking_ok_bool:
+                for key in (
+                    "booking_cancellation_pending",
+                    "booking_cancellation_stage",
+                    "booking_cancellation_id",
+                    "booking_cancellation_receipt",
+                ):
+                    soft_state.pop(key, None)
+
+                return {
+                    "status": "booking_cancelled",
+                    "deterministic_reply": f"Your booking {booking_id} has been successfully cancelled.",
+                }
+
+            # Keep pending state for retry.
+            soft_state["booking_cancellation_pending"] = True
+            soft_state["booking_cancellation_stage"] = "awaiting_confirmation"
+            soft_state["booking_cancellation_id"] = booking_id
+
+            return {
+                "status": "error",
+                "deterministic_reply": "I couldn't cancel the booking yet. Please try confirming the cancellation again.",
+            }
+
+    return await _handle_booking_cancellation_turn_original_v1(message, soft_state)

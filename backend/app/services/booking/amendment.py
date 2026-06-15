@@ -301,3 +301,97 @@ async def handle_booking_amendment_turn(
         "deterministic_reply": _receipt_review_from_candidate(candidate),
     }
 
+async def _current_amendment_receipt(message: str, soft_state: dict) -> dict | None:
+    """Resolve the current receipt for an amendment flow.
+
+    Priority:
+    1. existing soft_state["booking_receipt"]
+    2. pending amendment candidate receipt
+    3. booking id in message/state via successful_bookings lookup
+    """
+    import re
+
+    if not isinstance(soft_state, dict):
+        return None
+
+    pending = soft_state.get("pending_booking_amendment")
+    if isinstance(pending, dict):
+        candidate = pending.get("candidate_receipt")
+        if isinstance(candidate, dict) and candidate:
+            return dict(candidate)
+
+    receipt = soft_state.get("booking_receipt")
+    if isinstance(receipt, dict) and receipt:
+        return dict(receipt)
+
+    booking_id = (
+        soft_state.get("booking_registration_id")
+        or soft_state.get("booking_id")
+    )
+
+    if not booking_id:
+        match = re.search(r"\bBK-[A-Z0-9-]+\b", message or "", re.I)
+        if match:
+            booking_id = match.group(0).upper()
+
+    if not booking_id:
+        return None
+
+    from app.observability import db_logging
+
+    row = await db_logging.get_successful_booking_status(str(booking_id))
+    if not isinstance(row, dict) or not row:
+        return None
+
+    resolved = {
+        "booking_id": row.get("booking_id") or str(booking_id),
+        "property_title": row.get("property_title") or row.get("property_name") or "",
+        "guest_name": row.get("guest_name") or row.get("user_name") or row.get("full_name") or "",
+        "guest_email": row.get("guest_email") or row.get("user_email") or row.get("email") or "",
+        "guest_phone": row.get("guest_phone") or row.get("user_phone") or row.get("phone") or "",
+        "check_in": row.get("check_in") or row.get("checkin") or "",
+        "check_out": row.get("check_out") or row.get("checkout") or "",
+        "guests": row.get("guests") or row.get("guest_count") or "",
+        "nights": row.get("nights") or "",
+        "price_per_night": row.get("price_per_night") or 0.0,
+        "total_amount": row.get("total_amount") or row.get("total") or 0.0,
+        "status": row.get("status") or "confirmed",
+    }
+
+    soft_state["booking_receipt"] = dict(resolved)
+    soft_state["booking_registration_id"] = resolved["booking_id"]
+    soft_state["booking_status"] = resolved["status"]
+    soft_state["booking_stage"] = soft_state.get("booking_stage") or "confirmed"
+    soft_state["active_flow"] = "booking"
+
+    return resolved
+
+# Compatibility wrapper: ensure amended check-in/check-out recompute nights and total.
+from datetime import datetime as _amendment_datetime
+
+_validate_amendment_candidate_original_recompute_v1 = _validate_amendment_candidate
+
+def _validate_amendment_candidate(receipt, updates, extraction_errors, soft_state):
+    candidate, errors = _validate_amendment_candidate_original_recompute_v1(
+        receipt,
+        updates,
+        extraction_errors,
+        soft_state,
+    )
+
+    if not any(field in errors for field in ("check_in", "check_out")):
+        check_in = candidate.get("check_in")
+        check_out = candidate.get("check_out")
+        if check_in and check_out:
+            try:
+                check_in_dt = _amendment_datetime.strptime(str(check_in), cfg.date_format)
+                check_out_dt = _amendment_datetime.strptime(str(check_out), cfg.date_format)
+                if check_out_dt > check_in_dt:
+                    nights = max((check_out_dt - check_in_dt).days, 1)
+                    candidate["nights"] = nights
+                    price = _coerce_float(candidate.get("price_per_night")) or 0.0
+                    candidate["total_amount"] = round(nights * price, 2)
+            except Exception:
+                pass
+
+    return candidate, errors
