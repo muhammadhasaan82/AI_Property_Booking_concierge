@@ -1,7 +1,7 @@
+from __future__ import annotations
 """
 Tools: handle_small_talk, check_faq, check_booking_status, escalate_to_human
 """
-from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional

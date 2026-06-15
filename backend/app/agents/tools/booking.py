@@ -1,7 +1,7 @@
+from __future__ import annotations
 """
 Tools: request_booking_details, review_booking_details, process_v2_booking
 """
-from __future__ import annotations
 
 import logging
 import time

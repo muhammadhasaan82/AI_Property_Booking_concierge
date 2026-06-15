@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Phase 3: Deterministic policy router.
  
@@ -15,7 +16,6 @@ Operating modes (cfg.feature_policy_router_mode):
   enforce  : non-execute decisions replace router_output. Execute-tool
              disagreements are logged but not re-run (Phase 3 scope).
 """
-from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple, TypedDict, Union
 

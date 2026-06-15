@@ -1,4 +1,4 @@
-
+from __future__ import annotations
 """
 TOON (Token-Optimized Object Notation) serializer/deserializer.
 
@@ -22,7 +22,6 @@ Edge-case encoding:
   • null / bool / numbers       → inline as-is
 """
 
-from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional, Union

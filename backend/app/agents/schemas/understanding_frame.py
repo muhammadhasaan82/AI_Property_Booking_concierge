@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Structured understanding frame emitted by understanding_agent (Phase 2).
  
@@ -8,7 +9,6 @@ user means. The frame is consumed by:
   - policy_router  : (Phase 3) deterministic routing on top of the frame
   - telemetry      : DPO training signal (was the frame correct?)
 """
-from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field

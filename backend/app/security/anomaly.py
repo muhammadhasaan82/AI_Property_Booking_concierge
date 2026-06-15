@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Real-Time Anomaly Detection — Phase 3 OODA Loop Protection.
 
@@ -8,7 +9,6 @@ forces a graceful fallback response.
 
 All operations are in-memory (dict + hash) — O(1) per check, <1μs.
 """
-from __future__ import annotations
 
 import hashlib
 import json

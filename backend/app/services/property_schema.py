@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Dynamic property schema discovery from dataset metadata.
 
@@ -5,7 +6,6 @@ Instead of hardcoding searchable fields, this module discovers them from
 the actual dataset columns and their types. This makes the system adaptable
 to schema changes without code modifications.
 """
-from __future__ import annotations
 
 import csv
 import logging

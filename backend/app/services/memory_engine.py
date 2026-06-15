@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Local Cognitive Memory Engine powered by open-source Mem0.
 
@@ -10,7 +11,6 @@ Architecture:
     - All public functions are async and failure-safe.
     - Sync Mem0 SDK calls are offloaded with `asyncio.to_thread(...)`.
 """
-from __future__ import annotations
 
 import os
 

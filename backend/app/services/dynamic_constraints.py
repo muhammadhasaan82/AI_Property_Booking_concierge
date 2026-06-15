@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Schema-driven dynamic constraint container.
 
@@ -6,7 +7,6 @@ this module stores constraints as a dynamic dictionary validated against
 the property schema. Constraints are discovered from user messages and
 dataset metadata, not predefined in code.
 """
-from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Iterator, List, Optional, Set

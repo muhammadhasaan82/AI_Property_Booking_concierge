@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Schema-driven search planner.
 
@@ -10,7 +11,6 @@ Orchestrates the full search flow:
 
 This replaces hardcoded search logic with a dynamic, schema-driven approach.
 """
-from __future__ import annotations
 
 import logging
 import re

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 ADK 2.0 — Native V2 Agentic Architecture (Phase 2: 3-node pipeline)
  
@@ -16,7 +17,6 @@ FILE SIZE POLICY — this file contains ONLY agent wiring.
 │  NO hardcoded values exist in this file.                        │
 └─────────────────────────────────────────────────────────────────┘
 """
-from __future__ import annotations
 from doctest import OutputChecker
 import logging
 import os

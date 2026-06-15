@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Resolves raw user-supplied property type strings (including aliases and
 plurals) to canonical keys defined in config/property_type_taxonomy.yaml.
@@ -11,7 +12,6 @@ Usage:
     normalize_property_type("warehouse")    
     normalize_property_type(None)           
 """
-from __future__ import annotations
 import logging
 import re
 from difflib import SequenceMatcher

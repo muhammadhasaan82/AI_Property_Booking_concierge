@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Input / Output Guardrails
 - Sanitize user input (prompt injection, script injection, excessive length)
@@ -6,7 +7,6 @@ Input / Output Guardrails
 Patterns are loaded from config/guardrails.yaml at runtime.
 """
 
-from __future__ import annotations
 
 import logging
 import re

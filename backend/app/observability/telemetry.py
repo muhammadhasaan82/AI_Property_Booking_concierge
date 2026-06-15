@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 DPO Telemetry Pipeline — Phase 3 Continuous Learning.
 
@@ -8,7 +9,6 @@ Direct Preference Optimization (DPO) fine-tuning of the GPT-5 Nano router.
 Storage: SQLite primary (zero-dependency), Supabase mirror (if available).
 All writes are fire-and-forget — ZERO impact on user-facing latency.
 """
-from __future__ import annotations
 
 import asyncio
 import json

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 YAML-driven deterministic shortcut matcher.
 
@@ -8,7 +9,6 @@ tool executor. No shortcut-specific logic is encoded in Python: any new
 intent, phrase, pattern, or semantic cue can be added or removed by editing
 the YAML alone.
 """
-from __future__ import annotations
 
 import logging
 import re

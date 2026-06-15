@@ -1,10 +1,10 @@
+from __future__ import annotations
 """
 Schema-aware deterministic extraction of property search constraints.
 
 This module keeps extraction deterministic and independent from Langfuse runtime state.
 Langfuse tracing is optional and non-blocking through extract_constraints_with_tracing().
 """
-from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field

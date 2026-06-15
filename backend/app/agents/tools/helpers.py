@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Shared utility helpers used across all tool modules.
 
@@ -11,7 +12,6 @@ Contains:
                   _sanitize_soft_state_for_model, _build_active_options,
                   _diff_booking_summary, _extract_json_dict)
 """
-from __future__ import annotations
 
 import json
 import time

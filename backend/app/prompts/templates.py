@@ -1,8 +1,8 @@
+from __future__ import annotations
 """
 Centralised prompt templates for all agents.
 Import from here instead of embedding strings in agent modules.
 """
-from __future__ import annotations
 TRIAGE_ROUTER_INSTRUCTION = """
 You are the AI Concierge Triage Router for a property booking platform.
 Your job is to classify user intent and call the appropriate tool.

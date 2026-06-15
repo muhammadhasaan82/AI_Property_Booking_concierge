@@ -1,10 +1,10 @@
+from __future__ import annotations
 """
 Admin endpoints for hot-reloading soft-coded configuration.
  
 Auth: Bearer token via `ADMIN_TOKEN` env var. If unset, all admin routes are
 disabled (return 503) — fail-safe for misconfigured environments.
 """
-from __future__ import annotations
 import logging
 import os 
 import time

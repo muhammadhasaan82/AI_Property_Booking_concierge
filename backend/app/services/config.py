@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Runtime configuration for backend services.
 
 This module exposes operational settings only.
@@ -5,7 +6,6 @@ Lexical intent aliases, regex patterns, property-type aliases, and dynamic
 business rules must live in spec/config YAML files, not here.
 """
 
-from __future__ import annotations
 
 import os
 from pathlib import Path

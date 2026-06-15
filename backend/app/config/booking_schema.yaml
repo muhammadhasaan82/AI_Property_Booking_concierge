@@ -151,3 +151,71 @@ booking:
   date_format: "%Y-%m-%d"
   source_tag: v2_adk
   confirmed_status: confirmed
+
+  # Booking flow routing, stages, and phrase catalogs (consumed by app/services/booking/)
+  flow:
+    active_stages:
+      - collecting_details
+      - awaiting_confirmation
+      - awaiting_modification_choice
+      - modifying_details
+      - awaiting_property_reselection
+      - confirmed
+      - awaiting_amendment_choice
+      - awaiting_amendment_values
+      - awaiting_amendment_confirmation
+    post_confirmation_amendment_stages:
+      - confirmed
+      - awaiting_amendment_choice
+      - awaiting_amendment_values
+      - awaiting_amendment_confirmation
+    faq_keywords:
+      - pet
+      - pets
+      - parking
+      - cancellation
+      - refund
+      - policy
+      - policies
+      - check-in time
+      - check in time
+      - check-out time
+      - check out time
+      - smoking
+      - wifi
+      - amenities
+      - payment
+      - accessibility
+      - allowed
+    check_in_date_pattern: '\b(check[- ]?in(?: date)?|arrival(?: date)?)\b'
+    check_out_date_pattern: '\b(check[- ]?out(?: date)?|checkout(?: date)?|departure(?: date)?)\b'
+    confirmation_yes_tokens: [yes, yeah, sure, confirm, proceed, correct, ok, okay]
+    confirmation_no_tokens: [no, nope, nah, reject]
+    cancellation_patterns:
+      - '\b(delete|cancel|remove)\s+(?:this\s+|my\s+|the\s+)?booking\b'
+      - '\b(delete|cancel|remove)\s+(?:this\s+|my\s+|the\s+)?registration\b'
+    negated_cancellation_patterns:
+      - '\b(?:do\s+not|don''?t|dont)\s+(?:cancel|delete|remove)\b'
+      - '\bkeep\s+it\b'
+      - '\bnever\s*mind\b'
+      - '\bnevermind\b'
+      - '\bchange\s+my\s+mind\b'
+    status_intent_patterns:
+      - '\bmy\s+booking\s+id\s+is\b'
+      - '\bbooking\s+id\b'
+      - '\bcheck\s+my\s+booking\s+status\b'
+      - '\bcheck\s+booking\s+status\b'
+      - '\bmy\s+booking\s+status\b'
+      - '\bregistration\s+id\b'
+      - '\bmy\s+registration\s+id\s+is\b'
+      - '\bi\s+want\s+to\s+check\s+my\s+booking\s+status\b'
+      - '\bstatus\s+of\s+my\s+booking\b'
+      - '\bbooking\s+status\b'
+      - '\bmy\s+boking\s+id\s+is\b'
+      - '\bboking\s+id\b'
+      - '\bcheck\s+my\s+boking\s+status\b'
+      - '\bcheck\s+boking\s+status\b'
+      - '\bmy\s+boking\s+status\b'
+      - '\bi\s+want\s+to\s+check\s+my\s+boking\s+status\b'
+      - '\bstatus\s+of\s+my\s+boking\b'
+      - '\bboking\s+status\b'
