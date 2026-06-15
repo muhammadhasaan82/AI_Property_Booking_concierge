@@ -75,9 +75,12 @@ def _extract_phone(text: str) -> Optional[str]:
     return stripped if len(digits) >= 7 else None
 
 def _extract_guests(text: str) -> Optional[int]:
+    # Prefer explicit labels first so date years like "2026\nGuests: 5"
+    # are not misread as "2026 guests".
     patterns = (
-        r"\b(?:we are|for|around|approximately|about)?\s*(\d+)\s+(?:guest|guests|people|persons)\b",
         r"\bguests?\s*(?:is|are|to|:)?\s*(\d+)\b",
+        r"\b(?:we are|for|around|approximately|about)\s+(?!\d{4}\b)(\d+)\s+(?:guest|guests|people|persons)\b",
+        r"\b(?!\d{4}\b)(\d+)\s+(?:guest|guests|people|persons)\b",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.I)
@@ -196,6 +199,42 @@ def _extract_updates_from_message(
     errors: Dict[str, str] = {}
     segments = _field_segments(message)
     normalized = message or ""
+
+    # Accept multiline label-value input, e.g.:
+    # Full name: Jonathan Banks
+    # Email: jonathan.banks@gmail.com
+    # Phone: 03312223366
+    # Check-in: June 19, 2026
+    # Check-out: June 30, 2026
+    # Guests: 5
+    for field, raw_segment in segments.items():
+        value = (raw_segment or "").strip(" ,.;:-")
+        if not value:
+            continue
+
+        if field == "guest_name":
+            if _is_valid_candidate_for_field(field, value):
+                updates.setdefault(field, value)
+                mentioned_fields.append(field)
+
+        elif field == "guest_email":
+            email_value = _extract_email(value)
+            if email_value and _is_valid_candidate_for_field(field, email_value):
+                updates.setdefault(field, email_value)
+                mentioned_fields.append(field)
+
+        elif field == "guest_phone":
+            phone_value = _extract_phone(value) or value
+            if _is_valid_candidate_for_field(field, phone_value):
+                updates.setdefault(field, phone_value)
+                mentioned_fields.append(field)
+
+        elif field == "guests":
+            guest_value = _coerce_int(value)
+            if guest_value is not None:
+                updates.setdefault(field, guest_value)
+                mentioned_fields.append(field)
+
 
     if _extract_name(normalized):
         updates["guest_name"] = _extract_name(normalized)
