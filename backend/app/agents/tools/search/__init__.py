@@ -34,18 +34,13 @@ __all__ = [
     "_resolve_property_id_from_selection",
 ]
 
-# Backward-compatible globals/helpers expected by legacy imports and tests.
-from app.config.agent_config_loader import cfg  # noqa: F401
-from app.agents.tools.search.normalize import _split_amenity_input  # noqa: F401
-from app.agents.tools.search.display import _search_display_pagination_enabled  # noqa: F401
+from app.config.agent_config_loader import cfg 
+from app.agents.tools.search.normalize import _split_amenity_input
+from app.agents.tools.search.display import _search_display_pagination_enabled
 
-from app.agents.tools.search.display import _search_display_mode  # noqa: F401
+from app.agents.tools.search.display import _search_display_mode
 
-from app.agents.tools.search.display import _search_display_max_inline_results  # noqa: F401
-
-# Compatibility wrapper: legacy tests monkeypatch app.agents.tools.search.*.
-# The split implementation uses core/display/pagination module globals, so sync
-# facade-level monkeypatches into those modules before each call.
+from app.agents.tools.search.display import _search_display_max_inline_results 
 from app.agents.tools.search.core import search_properties as _search_properties_impl
 from app.agents.tools.search.core import select_property as _select_property_impl
 from app.agents.tools.search.core import get_property_details as _get_property_details_impl

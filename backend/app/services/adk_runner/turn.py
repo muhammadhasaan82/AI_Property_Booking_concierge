@@ -675,9 +675,9 @@ async def run_adk_turn(
     
     trace.end()
 
-from app.config.service_coverage_loader import evaluate_message_coverage  # noqa: F401
+from app.config.service_coverage_loader import evaluate_message_coverage 
 
-from app.services.adk_runner.invocation import _build_invocation_state_delta  # noqa: F401
+from app.services.adk_runner.invocation import _build_invocation_state_delta 
 
 def _extract_text_parts(event) -> str:
     """Extract text from ADK/Event-like objects without assuming one shape."""

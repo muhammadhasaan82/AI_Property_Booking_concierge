@@ -49,20 +49,18 @@ __all__ = [
 ]
 
 
-# Backward-compatible private helpers used by existing tests/imports.
-from app.services.booking.extraction import (  # noqa: F401
+from app.services.booking.extraction import ( 
     _extract_amendment_name_value,
     _extract_amendment_updates,
     _sanitize_message_for_amendment_extraction,
 )
-from app.services.booking.receipt import (  # noqa: F401
+from app.services.booking.receipt import (
     receipt_updates_to_successful_booking_columns,
     successful_booking_row_to_receipt,
 )
 
-from app.agents.tools.search import get_all_available_cities  # noqa: F401
+from app.agents.tools.search import get_all_available_cities
 
-# Compatibility wrapper: tests monkeypatch booking_flow.get_all_available_cities.
 async def list_available_cities_payload():
     result = await get_all_available_cities()
 
@@ -96,8 +94,6 @@ async def list_available_cities_payload():
         "cities": cities,
     }
 
-# Compatibility wrapper: legacy tests call this synchronously and monkeypatch
-# booking_flow.get_all_available_cities.
 def list_available_cities_payload():
     import asyncio
     import inspect
@@ -159,7 +155,6 @@ async def check_faq(*args, **kwargs):
         return await result
     return result
 
-# Compatibility override: local canonical FAQ fallback for booking interruption flow.
 async def check_faq(message: str, *args, **kwargs):
     from pathlib import Path
     from app.agents.status_codes import Status
@@ -199,7 +194,6 @@ async def check_faq(message: str, *args, **kwargs):
 
     return None
 
-# Compatibility override v2: accept both message positional and question= keyword.
 async def check_faq(message: str | None = None, *args, **kwargs):
     from pathlib import Path
     from app.agents.status_codes import Status

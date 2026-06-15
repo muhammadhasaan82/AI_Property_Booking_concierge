@@ -41,24 +41,20 @@ __all__ = [
     "_state_with_persisted_soft_state",
 ]
 
-# Compatibility exports for legacy adk_runner.py imports/tests.
-from app.services.adk_runner.invocation import APP_NAME  # noqa: F401
-from app.services.redis_store import get_session_snapshot  # noqa: F401
-from app.services.redis_store import save_session_snapshot  # noqa: F401
-from app.services.redis_store import clear_session_snapshot  # noqa: F401
-from app.services.pre_router import route_pre_adk  # noqa: F401
-from app.security.guardrails import sanitize_input  # noqa: F401
-from app.security.guardrails import sanitize_output  # noqa: F401
-from app.services.property_query_constraints import get_observer  # noqa: F401
-from app.services.booking.creation import start_booking_for_selected_property as _start_booking_for_selected_property  # noqa: F401
+from app.services.adk_runner.invocation import APP_NAME 
+from app.services.redis_store import get_session_snapshot
+from app.services.redis_store import save_session_snapshot 
+from app.services.redis_store import clear_session_snapshot 
+from app.services.pre_router import route_pre_adk 
+from app.security.guardrails import sanitize_input 
+from app.security.guardrails import sanitize_output 
+from app.services.property_query_constraints import get_observer
+from app.services.booking.creation import start_booking_for_selected_property as _start_booking_for_selected_property 
 
-from app.services.adk_runner.rendering import _render_voice_from_router_output  # noqa: F401
-from app.services.adk_runner.invocation import _build_invocation_state_delta  # noqa: F401
-from app.services.direct_property_search import maybe_handle_direct_property_search  # noqa: F401
+from app.services.adk_runner.rendering import _render_voice_from_router_output 
+from app.services.adk_runner.invocation import _build_invocation_state_delta 
+from app.services.direct_property_search import maybe_handle_direct_property_search  
 
-# Compatibility wrapper: legacy tests monkeypatch app.services.adk_runner.*.
-# The split implementation lives in app.services.adk_runner.turn, so copy
-# facade-level monkeypatches into that module before each turn.
 from app.services.adk_runner.turn import run_adk_turn as _run_adk_turn_impl
 
 def _sync_facade_monkeypatches_to_turn_module() -> None:
@@ -89,7 +85,6 @@ async def run_adk_turn(*args, **kwargs):
     async for chunk in _run_adk_turn_impl(*args, **kwargs):
         yield chunk
 
-# Compatibility wrapper v2: sync facade monkeypatches into all split ADK modules.
 from app.services.adk_runner.turn import run_adk_turn as _run_adk_turn_impl_v2
 
 def _sync_facade_monkeypatches_to_adk_modules() -> None:
@@ -131,7 +126,6 @@ async def run_adk_turn(*args, **kwargs):
     async for chunk in _run_adk_turn_impl_v2(*args, **kwargs):
         yield chunk
 
-# Compatibility wrapper v3: include runner/session-service monkeypatches.
 from app.services.adk_runner.turn import run_adk_turn as _run_adk_turn_impl_v3
 
 def _sync_facade_monkeypatches_to_adk_modules_v3() -> None:
@@ -168,7 +162,6 @@ def _sync_facade_monkeypatches_to_adk_modules_v3() -> None:
         if hasattr(facade, name):
             value = getattr(facade, name)
             for module in modules:
-                # Set unconditionally; split modules may reference names dynamically.
                 setattr(module, name, value)
 
 async def run_adk_turn(*args, **kwargs):
@@ -176,7 +169,6 @@ async def run_adk_turn(*args, **kwargs):
     async for chunk in _run_adk_turn_impl_v3(*args, **kwargs):
         yield chunk
 
-# Compatibility wrapper v4: sync booking_flow.check_faq monkeypatch into split booking modules.
 from app.services.adk_runner.turn import run_adk_turn as _run_adk_turn_impl_v4
 
 def _sync_booking_flow_facade_to_booking_modules_v4() -> None:
@@ -198,7 +190,6 @@ async def run_adk_turn(*args, **kwargs):
     async for chunk in _run_adk_turn_impl_v4(*args, **kwargs):
         yield chunk
 
-# Compatibility wrapper v5: sync booking cancellation monkeypatches.
 from app.services.adk_runner.turn import run_adk_turn as _run_adk_turn_impl_v5
 
 def _sync_booking_cancellation_monkeypatches_v5() -> None:
@@ -224,7 +215,6 @@ async def run_adk_turn(*args, **kwargs):
     async for chunk in _run_adk_turn_impl_v5(*args, **kwargs):
         yield chunk
 
-# Compatibility wrapper v6: direct helper calls must also sync facade monkeypatches.
 from app.services.adk_runner.handlers import (
     _maybe_handle_faq_resume_turn as _maybe_handle_faq_resume_turn_impl_v6,
     _maybe_handle_search_state_shortcut as _maybe_handle_search_state_shortcut_impl_v6,

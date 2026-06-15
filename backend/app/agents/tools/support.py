@@ -332,7 +332,6 @@ async def escalate_to_human(
         action_intent, context_flag,
     )
 
-# Compatibility wrapper: prefer YAML-backed canonical FAQ if the primary path falls through.
 _check_faq_original_canonical_v1 = check_faq
 
 async def check_faq(
