@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Fail if any Python file under app/ exceeds the line budget (excluding test/eval paths)."""
 from __future__ import annotations
 

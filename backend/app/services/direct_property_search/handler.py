@@ -234,7 +234,6 @@ async def maybe_handle_direct_property_search(
     )
     return payload
 
-# Compatibility wrapper: direct-search payloads must persist nested state["soft_state"].
 _maybe_handle_direct_property_search_impl = maybe_handle_direct_property_search
 
 async def maybe_handle_direct_property_search(*args, **kwargs):

@@ -196,6 +196,5 @@ def _validate_amendment_candidate(
     candidate.setdefault("status", receipt.get("status") or cfg.booking_confirmed_status)
     return candidate, errors
 
-# Compatibility override: tests and UX expect this exact checkout-order wording.
 def _checkout_validation_message(check_in=None) -> str:
     return "Check-out cannot be earlier than your check-in date."

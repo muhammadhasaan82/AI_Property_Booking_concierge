@@ -75,8 +75,7 @@ def _extract_phone(text: str) -> Optional[str]:
     return stripped if len(digits) >= 7 else None
 
 def _extract_guests(text: str) -> Optional[int]:
-    # Prefer explicit labels first so date years like "2026\nGuests: 5"
-    # are not misread as "2026 guests".
+
     patterns = (
         r"\bguests?\s*(?:is|are|to|:)?\s*(\d+)\b",
         r"\b(?:we are|for|around|approximately|about)\s+(?!\d{4}\b)(\d+)\s+(?:guest|guests|people|persons)\b",
@@ -200,13 +199,6 @@ def _extract_updates_from_message(
     segments = _field_segments(message)
     normalized = message or ""
 
-    # Accept multiline label-value input, e.g.:
-    # Full name: Jonathan Banks
-    # Email: jonathan.banks@gmail.com
-    # Phone: 03312223366
-    # Check-in: June 19, 2026
-    # Check-out: June 30, 2026
-    # Guests: 5
     for field, raw_segment in segments.items():
         value = (raw_segment or "").strip().strip(" ,.;:-").strip()
         if not value:
