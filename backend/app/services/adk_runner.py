@@ -1698,6 +1698,18 @@ async def run_adk_turn(
         yield str(deterministic_reply)
         return
 
+    with trace.span(name="booking_status_check"):
+        status_payload = await _maybe_handle_booking_status_check(
+            session_id=session_id,
+            message=cleaned_message,
+        )
+    if status_payload:
+        deterministic_reply = status_payload.get("deterministic_reply")
+        if deterministic_reply:
+            trace.end()
+            yield str(deterministic_reply)
+            return
+
     with trace.span(name="direct_property_search"):
         direct_search_payload = await maybe_handle_direct_property_search(
             cleaned_message,
@@ -1747,17 +1759,6 @@ async def run_adk_turn(
                 yield deterministic_reply
                 return
 
-    with trace.span(name="booking_status_check"):
-        status_payload = await _maybe_handle_booking_status_check(
-            session_id=session_id,
-            message=cleaned_message,
-        )
-    if status_payload:
-        deterministic_reply = status_payload.get("deterministic_reply")
-        if deterministic_reply:
-            trace.end()
-            yield str(deterministic_reply)
-            return
     with trace.span(name="faq_retrieval"):
         pre_routed = await route_pre_adk(
             message=cleaned_message,

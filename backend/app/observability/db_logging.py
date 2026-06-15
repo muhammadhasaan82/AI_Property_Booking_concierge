@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional, Dict, Any
 
 from ..services import db_client
+
+logger = logging.getLogger(__name__)
 
 
 SUCCESSFUL_BOOKING_UPDATE_COLUMNS = {
@@ -92,7 +95,8 @@ async def get_successful_booking_status(booking_id: str) -> Optional[Dict[str, A
             """,
             (str(booking_id),),
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("[db_logging] get_successful_booking_status failed for %s: %s", booking_id, exc)
         return None
 
 
@@ -123,7 +127,8 @@ async def update_successful_booking(booking_id: str, updates: Dict[str, Any]) ->
             values,
         )
         return rowcount > 0
-    except Exception:
+    except Exception as exc:
+        logger.warning("[db_logging] update_successful_booking failed for %s: %s", booking_id, exc)
         return False
 
 

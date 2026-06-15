@@ -574,6 +574,22 @@ async def handle_booking_status_check(
     if not _detect_booking_status_intent(message):
         return None
 
+    if soft_state.get("booking_cancellation_stage") or soft_state.get("booking_cancellation_pending"):
+        return None
+    if soft_state.get("pending_booking_amendment"):
+        return None
+    amendment_stages = {
+        "awaiting_amendment_choice",
+        "awaiting_amendment_values",
+        "awaiting_amendment_confirmation",
+    }
+    if str(soft_state.get("booking_stage") or "") in amendment_stages:
+        return None
+    if _detect_booking_cancellation_intent(message):
+        return None
+    if detect_booking_amendment_intent(message, soft_state):
+        return None
+
     booking_id = _extract_booking_id(message)
 
     if booking_id:
@@ -598,6 +614,7 @@ async def handle_booking_status_check(
                     "check_in": db_result.get("check_in") or "",
                     "check_out": db_result.get("check_out") or "",
                 }
+                _store_current_receipt(soft_state, merged)
                 return {
                     "status": Status.FOUND,
                     "receipt": merged,
@@ -1140,9 +1157,12 @@ def _is_valid_candidate_for_field(field: str, val: str) -> bool:
             return False
         return not bool(re.search(r"[a-zA-Z]", val_str))
     elif f_type == "date":
-        parsed = _parse_single_structured_date(val_str)
-        if parsed:
-            return True
+        structured_match = re.search(
+            r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b",
+            val_str,
+        )
+        if structured_match:
+            return _parse_single_structured_date(structured_match.group(0)) is not None
         parsed_nat = _parse_natural_date(val_str)
         return parsed_nat is not None
     elif f_type == "number":
@@ -2453,8 +2473,17 @@ def _is_no(message: str) -> bool:
     tokens = set(normalized.split())
     if any(w in tokens for w in no_words):
         return True
-    # Also check if it says "dont", "don't", "keep"
-    if re.search(r"\b(don't|dont|keep|change\s+my\s+mind)\b", normalized, re.I):
+    negated_cancellation_patterns = [
+        r"\b(?:do\s+not|don'?t|dont)\s+(?:cancel|delete|remove)\b",
+        r"\bkeep\s+it\b",
+        r"\bnever\s*mind\b",
+        r"\bnevermind\b",
+        r"\bchange\s+my\s+mind\b",
+    ]
+    for pattern in negated_cancellation_patterns:
+        if re.search(pattern, normalized, re.I):
+            return True
+    if re.search(r"\b(don't|dont|keep)\b", normalized, re.I):
         return True
     return False
 
@@ -2490,25 +2519,32 @@ async def handle_booking_cancellation_turn(
         elif _is_yes(message):
             booking_id = soft_state.get("booking_cancellation_id")
             if booking_id:
-                # Update DB using existing safe update functions
-                await update_successful_booking(booking_id, {"status": "cancelled"})
-                await update_booking_status(booking_id, "", "cancelled")
-                
-                # Update receipt status in session if present
+                sb_ok = await update_successful_booking(booking_id, {"status": "cancelled"})
+                booking_result = await update_booking_status(booking_id, "", "cancelled")
+                bookings_ok = isinstance(booking_result, dict) and bool(booking_result.get("ok"))
+
+                if not sb_ok and not bookings_ok:
+                    return {
+                        "status": "error",
+                        "deterministic_reply": (
+                            "I couldn't cancel your booking right now. "
+                            "Please try confirming the cancellation again."
+                        ),
+                    }
+
                 if soft_state.get("booking_receipt", {}).get("booking_id") == booking_id:
                     soft_state["booking_receipt"]["status"] = "cancelled"
                 if soft_state.get("booking_registration_id") == booking_id:
                     soft_state["booking_status"] = "cancelled"
-                
-                # Clear deletion state
+
                 soft_state.pop("booking_cancellation_pending", None)
                 soft_state.pop("booking_cancellation_stage", None)
                 soft_state.pop("booking_cancellation_id", None)
                 soft_state.pop("booking_cancellation_receipt", None)
-                
+
                 return {
                     "status": "cancelled",
-                    "deterministic_reply": f"Your booking {booking_id} has been successfully cancelled."
+                    "deterministic_reply": f"Your booking {booking_id} has been successfully cancelled.",
                 }
             else:
                 # Fallback clean up

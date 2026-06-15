@@ -396,6 +396,8 @@ def constraints_from_soft_state(soft_state: Dict[str, Any]) -> ExtractedConstrai
         ExtractedConstraints from stored filters
     """
     last_filters = soft_state.get("last_filters", {})
+    if not isinstance(last_filters, dict):
+        last_filters = {}
     
     return ExtractedConstraints(
         city=last_filters.get("city"),
