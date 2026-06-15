@@ -23,10 +23,6 @@ from app.config.model_config_loader import (
     load_model_config,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 _MODEL_ENV_KEYS = (
     "ADK_DISPATCHER_MODEL",
     "ADK_VOICE_MODEL",
@@ -40,8 +36,6 @@ def _clear_model_env(monkeypatch):
     for key in _MODEL_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
 
-
-# Minimal raw config that mirrors agent_config.yaml models section
 _MINIMAL_RAW: Dict[str, Any] = {
     "models": {
         "dispatcher": {
@@ -66,11 +60,6 @@ _MINIMAL_RAW: Dict[str, Any] = {
         },
     }
 }
-
-
-# ---------------------------------------------------------------------------
-# _env_str
-# ---------------------------------------------------------------------------
 
 
 class TestEnvStr:
@@ -99,11 +88,6 @@ class TestEnvStr:
         assert _env_str("TEST_KEY_ABC", "fallback") == "fallback"
 
 
-# ---------------------------------------------------------------------------
-# _dict
-# ---------------------------------------------------------------------------
-
-
 class TestDictHelper:
     def test_plain_dict_is_returned(self):
         d = {"a": 1}
@@ -127,11 +111,6 @@ class TestDictHelper:
         assert _dict({}) == {}
 
 
-# ---------------------------------------------------------------------------
-# _resolve_model_entry
-# ---------------------------------------------------------------------------
-
-
 class TestResolveModelEntry:
     def test_uses_env_key_from_entry_when_env_var_set(self, monkeypatch):
         monkeypatch.setenv("MY_MODEL_KEY", "custom/model")
@@ -147,13 +126,12 @@ class TestResolveModelEntry:
         monkeypatch.delenv("ADK_DISPATCHER_MODEL", raising=False)
         monkeypatch.delenv("MY_MODEL_KEY", raising=False)
         entry = {"env_key": "MY_MODEL_KEY"}
-        # entry.get("default") is None → safety_default used
         result = _resolve_model_entry(entry, default_env_key="ADK_DISPATCHER_MODEL", safety_default="openai/gpt-5-nano")
         assert result == "openai/gpt-5-nano"
 
     def test_fallback_to_default_env_key_when_entry_has_no_env_key(self, monkeypatch):
         monkeypatch.setenv("DEFAULT_KEY", "from-default-key")
-        entry = {}  # no env_key in entry
+        entry = {} 
         result = _resolve_model_entry(entry, default_env_key="DEFAULT_KEY", safety_default="safe")
         assert result == "from-default-key"
 
@@ -161,11 +139,6 @@ class TestResolveModelEntry:
         monkeypatch.delenv("ADK_DISPATCHER_MODEL", raising=False)
         result = _resolve_model_entry({}, default_env_key="ADK_DISPATCHER_MODEL", safety_default="safe-model")
         assert result == "safe-model"
-
-
-# ---------------------------------------------------------------------------
-# _normalize_provider_model
-# ---------------------------------------------------------------------------
 
 
 class TestNormalizeProviderModel:
@@ -176,7 +149,6 @@ class TestNormalizeProviderModel:
         assert _normalize_provider_model("groq/llama-3.1-8b-instant", "groq") == "groq/llama-3.1-8b-instant"
 
     def test_empty_model_falls_back_to_lightweight(self):
-        # empty model → _LIGHTWEIGHT_GROQ_MODEL = "llama-3.1-8b-instant"
         result = _normalize_provider_model("", "groq")
         assert result == "groq/llama-3.1-8b-instant"
 
@@ -203,13 +175,7 @@ class TestNormalizeProviderModel:
         assert result == "openai/gpt-4o-mini"
 
     def test_already_prefixed_with_different_provider(self):
-        # slash present → preserved even if provider differs
         assert _normalize_provider_model("openai/gpt-4", "groq") == "openai/gpt-4"
-
-
-# ---------------------------------------------------------------------------
-# load_model_config with custom raw dict (no file IO)
-# ---------------------------------------------------------------------------
 
 
 class TestLoadModelConfigWithCustomRaw:
@@ -241,7 +207,6 @@ class TestLoadModelConfigWithCustomRaw:
     def test_mem0_model_gets_provider_prefix(self, monkeypatch):
         _clear_model_env(monkeypatch)
         result = load_model_config(_MINIMAL_RAW)
-        # bare "llama-3.1-8b-instant" + provider "groq" → "groq/llama-3.1-8b-instant"
         assert result.mem0_llm_model == "groq/llama-3.1-8b-instant"
 
     def test_dispatcher_env_overrides_yaml(self, monkeypatch):
@@ -286,7 +251,7 @@ class TestLoadModelConfigWithCustomRaw:
         _clear_model_env(monkeypatch)
         result = load_model_config(None)
         assert isinstance(result, ResolvedModelConfig)
-        assert result.dispatcher_model  # non-empty
+        assert result.dispatcher_model 
 
     def test_empty_raw_dict_uses_safety_defaults(self, monkeypatch):
         """An empty dict means no models section → safety defaults apply."""
@@ -295,11 +260,6 @@ class TestLoadModelConfigWithCustomRaw:
         assert result.dispatcher_model == "openai/gpt-5-nano"
         assert result.voice_model == "groq/llama-3.1-8b-instant"
         assert result.mem0_llm_model == "groq/llama-3.1-8b-instant"
-
-
-# ---------------------------------------------------------------------------
-# ResolvedModelConfig properties
-# ---------------------------------------------------------------------------
 
 
 class TestResolvedModelConfig:
@@ -317,7 +277,7 @@ class TestResolvedModelConfig:
     def test_is_frozen_dataclass(self):
         cfg = self._make()
         with pytest.raises((AttributeError, TypeError)):
-            cfg.dispatcher_model = "changed"  # type: ignore[misc]
+            cfg.dispatcher_model = "changed"
 
     def test_public_snapshot_contains_all_fields(self):
         cfg = self._make()
@@ -344,11 +304,6 @@ class TestResolvedModelConfig:
             assert forbidden not in serialized
 
 
-# ---------------------------------------------------------------------------
-# get_model_config_snapshot
-# ---------------------------------------------------------------------------
-
-
 class TestGetModelConfigSnapshot:
     def test_returns_dict(self):
         snap = get_model_config_snapshot()
@@ -367,11 +322,6 @@ class TestGetModelConfigSnapshot:
         for key, value in snap.items():
             assert isinstance(value, str), f"{key} must be a string"
             assert value.strip(), f"{key} must be non-empty"
-
-
-# ---------------------------------------------------------------------------
-# load_model_config uses real YAML file (integration)
-# ---------------------------------------------------------------------------
 
 
 class TestLoadModelConfigFromFile:

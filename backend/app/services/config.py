@@ -13,14 +13,6 @@ from typing import Set
 
 from app.config.env_loader import load_backend_env
 
-
-# ---------------------------------------------------------------------------
-# Legacy dotenv path compatibility
-# ---------------------------------------------------------------------------
-# Older tests/callers introspect these paths directly. Keep them module-level.
-# Loading order remains broadest-to-narrowest:
-#   repo .env -> backend .env -> app/services .env
-
 _backend_root = Path(__file__).resolve().parents[1]
 _repo_root = Path(__file__).resolve().parents[2]
 

@@ -119,35 +119,28 @@ def _merge_soft_state(existing: Any, updates: Any) -> Dict[str, Any]:
     if not isinstance(updates, dict):
         return base
     
-    # Special handling for last_filters - merge individual fields
     if "last_filters" in updates and isinstance(updates["last_filters"], dict):
         existing_filters = base.get("last_filters", {})
         if isinstance(existing_filters, dict):
-            # Merge: new non-None values override old
             merged_filters = dict(existing_filters)
             for key, value in updates["last_filters"].items():
                 if value is not None:
                     merged_filters[key] = value
             base["last_filters"] = merged_filters
-            # Remove last_filters from updates to avoid overwriting
             updates = dict(updates)
             updates.pop("last_filters", None)
     
-    # Special handling for last_search_filters - merge individual fields
     if "last_search_filters" in updates and isinstance(updates["last_search_filters"], dict):
         existing_filters = base.get("last_search_filters", {})
         if isinstance(existing_filters, dict):
-            # Merge: new non-None values override old
             merged_filters = dict(existing_filters)
             for key, value in updates["last_search_filters"].items():
                 if value is not None:
                     merged_filters[key] = value
             base["last_search_filters"] = merged_filters
-            # Remove last_search_filters from updates to avoid overwriting
             updates = dict(updates)
             updates.pop("last_search_filters", None)
     
-    # Standard update for other fields
     if updates:
         base.update(updates)
     

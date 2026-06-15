@@ -757,16 +757,14 @@ def _parse_yearless_month_day(day: int, month_raw: str) -> Optional[str]:
 
 
 def _parse_single_structured_date(token: str) -> Optional[date]:
-    # Try year first: YYYY-MM-DD or YYYY/MM/DD
+ 
     m1 = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", token.strip())
     if m1:
         try:
             return date(int(m1.group(1)), int(m1.group(2)), int(m1.group(3)))
         except ValueError:
             return None
-    # Try year last strictly as DD-MM-YYYY or DD/MM/YYYY.
-    # Do not silently guess MM-DD-YYYY; accepted user-facing year-last
-    # formats are day-first and normalized to cfg.date_format.
+
     m2 = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$", token.strip())
     if m2:
         d = int(m2.group(1))
@@ -795,7 +793,6 @@ def _parse_natural_date(text: str) -> Optional[str]:
         return None
     cleaned = re.sub(r"[\n\r]", " ", text).strip(" ,.;:")
     
-    # Try structured formats first
     structured_match = re.search(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", cleaned)
     if structured_match:
         parsed = _parse_single_structured_date(structured_match.group(0))
@@ -1291,10 +1288,8 @@ def _extract_updates_from_message(
                             errors.pop("check_out", None)
                             break
 
-    # Delimited fallback parsing using schema ask_order
     parts = [p.strip() for p in re.split(r'[,;|]', normalized) if p.strip()]
     
-    # Check if the message is a compact raw delimited list of values (not a sentence)
     is_compact_raw = False
     if len(parts) >= 2:
         is_compact_raw = True
@@ -1306,8 +1301,7 @@ def _extract_updates_from_message(
     if is_compact_raw:
         ask_order = get_ask_order()
         
-        # If the input is delimited raw, clear check_in/check_out from updates
-        # so they are determined strictly by the delimited parser positions
+
         updates.pop("check_in", None)
         updates.pop("check_out", None)
         if "check_in" in mentioned_fields:
@@ -1315,7 +1309,6 @@ def _extract_updates_from_message(
         if "check_out" in mentioned_fields:
             mentioned_fields.remove("check_out")
             
-        # Step 1: Detect explicit labels in parts first
         labeled_updates = {}
         unlabeled_parts = []
         for part in parts:
@@ -1338,7 +1331,6 @@ def _extract_updates_from_message(
             else:
                 unlabeled_parts.append(part)
                 
-        # Step 2: Classify the remaining unlabeled parts semantically
         email_parts = []
         phone_parts = []
         date_parts = []
@@ -1346,7 +1338,6 @@ def _extract_updates_from_message(
         text_parts = []
         
         for part in unlabeled_parts:
-            # Date candidate: matches structured regex pattern or natural month names
             is_date_candidate = bool(re.search(r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})\b", part))
             is_date_candidate = is_date_candidate or bool(re.search(r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b", part, re.I))
             
@@ -1361,7 +1352,6 @@ def _extract_updates_from_message(
             else:
                 text_parts.append(part)
                 
-        # Step 3: Map classified parts to unfilled fields of ask_order
         unfilled_fields = [field for field in ask_order if field not in updates and field not in labeled_updates]
         
         email_fields = [f for f in unfilled_fields if _field_type_from_schema(f) == "email"]
@@ -1386,7 +1376,6 @@ def _extract_updates_from_message(
             if i < len(text_parts):
                 labeled_updates[field] = text_parts[i]
                 
-        # Clean, validate, and normalize the delimited updates
         cleaned_delimited_updates = {}
         for field, val in labeled_updates.items():
             if _is_valid_candidate_for_field(field, val):
@@ -1405,7 +1394,6 @@ def _extract_updates_from_message(
                 else:
                     cleaned_delimited_updates[field] = val
                     
-        # Merge cleaned delimited updates
         for k, v in cleaned_delimited_updates.items():
             if k not in updates:
                 updates[k] = v
@@ -2435,7 +2423,6 @@ def _detect_booking_cancellation_intent(message: str) -> bool:
     normalized = _normalize(message)
     if not normalized:
         return False
-    # Check for keywords cancel, delete, remove with booking or registration
     cancel_patterns = [
         r"\b(delete|cancel|remove)\s+(?:this\s+|my\s+|the\s+)?booking\b",
         r"\b(delete|cancel|remove)\s+(?:this\s+|my\s+|the\s+)?registration\b",
@@ -2444,7 +2431,6 @@ def _detect_booking_cancellation_intent(message: str) -> bool:
         if re.search(p, normalized, re.I):
             return True
 
-    # Also if they say delete/cancel/remove and a booking ID is present
     if re.search(r"\b(delete|cancel|remove)\b", normalized, re.I) and BOOKING_ID_PATTERN.search(message):
         return True
 
@@ -2459,7 +2445,6 @@ def _is_yes(message: str) -> bool:
     tokens = set(normalized.split())
     if any(w in tokens for w in yes_words):
         return True
-    # If they are in confirmation stage, saying "delete", "cancel", etc. implies yes
     if re.search(r"\b(delete|cancel|remove)\b", normalized, re.I):
         return True
     return False
@@ -2504,10 +2489,8 @@ async def handle_booking_cancellation_turn(
     from app.services.booking import get_booking_status, update_booking_status
     from app.observability.db_logging import get_successful_booking_status, update_successful_booking
 
-    # If we are awaiting confirmation, check for confirmation/rejection
     if stage == "awaiting_confirmation":
         if _is_no(message):
-            # Keep booking unchanged. Clear deletion state.
             soft_state.pop("booking_cancellation_pending", None)
             soft_state.pop("booking_cancellation_stage", None)
             soft_state.pop("booking_cancellation_id", None)
@@ -2547,7 +2530,6 @@ async def handle_booking_cancellation_turn(
                     "deterministic_reply": f"Your booking {booking_id} has been successfully cancelled.",
                 }
             else:
-                # Fallback clean up
                 soft_state.pop("booking_cancellation_pending", None)
                 soft_state.pop("booking_cancellation_stage", None)
                 soft_state.pop("booking_cancellation_id", None)
@@ -2557,7 +2539,6 @@ async def handle_booking_cancellation_turn(
                     "deterministic_reply": "Something went wrong. Please try again."
                 }
         else:
-            # Re-ask for confirmation
             receipt = soft_state.get("booking_cancellation_receipt")
             receipt_rendered = _receipt_reply(receipt) if receipt else ""
             return {
@@ -2565,14 +2546,11 @@ async def handle_booking_cancellation_turn(
                 "deterministic_reply": "I didn't quite get that. Please confirm if you want to cancel the booking. Say 'yes' to cancel or 'no' to keep it."
             }
 
-    # Otherwise we are gathering booking ID or just starting
     booking_id = _extract_booking_id(message)
     if not booking_id:
-        # Check if we have it in soft_state/receipt
         booking_id = soft_state.get("booking_cancellation_id") or soft_state.get("booking_registration_id") or soft_state.get("booking_receipt", {}).get("booking_id")
 
     if not booking_id:
-        # Preserve state and ask only for booking ID
         soft_state["booking_cancellation_pending"] = True
         soft_state["booking_cancellation_stage"] = "awaiting_id"
         return {
@@ -2580,7 +2558,6 @@ async def handle_booking_cancellation_turn(
             "deterministic_reply": "I'd be happy to help you cancel your booking. Could you please provide your booking registration ID? It looks like BK-YYYYMMDD-XXXXXXXX."
         }
 
-    # We have a booking ID, load the details
     db_row = await get_successful_booking_status(booking_id)
     if db_row:
         receipt = successful_booking_row_to_receipt(db_row)
@@ -2598,7 +2575,6 @@ async def handle_booking_cancellation_turn(
             receipt = None
 
     if not receipt:
-        # Booking not found. Ask for ID again, preserving the gathering_id stage.
         soft_state["booking_cancellation_pending"] = True
         soft_state["booking_cancellation_stage"] = "awaiting_id"
         return {
@@ -2606,7 +2582,7 @@ async def handle_booking_cancellation_turn(
             "deterministic_reply": f"It looks like booking {booking_id} wasn't found in our system. Please double-check your registration ID and provide it again."
         }
 
-    # Show receipt and ask for confirmation
+  
     receipt_rendered = _receipt_reply(receipt)
     soft_state["booking_cancellation_pending"] = True
     soft_state["booking_cancellation_stage"] = "awaiting_confirmation"

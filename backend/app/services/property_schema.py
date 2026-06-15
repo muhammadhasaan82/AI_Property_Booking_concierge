@@ -22,17 +22,17 @@ class FieldType(Enum):
     STRING = "string"
     INTEGER = "integer"
     FLOAT = "float"
-    LIST = "list"  # semicolon/comma-separated values
+    LIST = "list"
     DATE = "date"
     BOOLEAN = "boolean"
 
 
 class FilterType(Enum):
     """How a field can be filtered."""
-    EXACT = "exact"  # exact match
-    CONTAINS = "contains"  # substring or list membership
-    RANGE = "range"  # min/max comparisons
-    FUZZY = "fuzzy"  # fuzzy text matching
+    EXACT = "exact"
+    CONTAINS = "contains"
+    RANGE = "range"
+    FUZZY = "fuzzy"
 
 
 @dataclass
@@ -103,14 +103,12 @@ class PropertySchema:
             reader = csv.DictReader(f)
             columns = reader.fieldnames or []
             
-            # Sample rows for type inference
             sample_rows = []
             for i, row in enumerate(reader):
-                if i >= 100:  # Sample first 100 rows
+                if i >= 100:
                     break
                 sample_rows.append(row)
         
-        # Infer schema for each column
         for column in columns:
             field_schema = self._infer_field_schema(column, sample_rows)
             if field_schema and field_schema.searchable:
@@ -128,15 +126,12 @@ class PropertySchema:
     def _infer_field_schema(self, column: str, sample_rows: List[Dict[str, str]]) -> Optional[FieldSchema]:
         """Infer field schema from sample data."""
         
-        # Extract sample values
         values = [row.get(column, "") for row in sample_rows if row.get(column)]
         if not values:
             return None
         
-        # Take first 10 non-empty values for analysis
         sample_values = values[:10]
         
-        # Skip internal IDs and metadata
         skip_columns = {"id", "property_id", "host_id", "created_at", "updated_at", "image_url", "images"}
         if column.lower() in skip_columns:
             return FieldSchema(
@@ -146,14 +141,11 @@ class PropertySchema:
                 searchable=False
             )
         
-        # Infer type
         field_type = self._infer_type(sample_values)
         filter_type = self._infer_filter_type(column, field_type, sample_values)
         
-        # Determine if searchable
         searchable = self._is_searchable(column, field_type)
         
-        # Determine if rankable (numeric fields used for sorting)
         rankable = field_type in (FieldType.INTEGER, FieldType.FLOAT) and column in {
             "price_per_night", "rating", "reviews_count", "bedrooms", "bathrooms"
         }
@@ -170,63 +162,52 @@ class PropertySchema:
     def _infer_type(self, values: List[str]) -> FieldType:
         """Infer field type from sample values."""
         
-        # Check for list (semicolon or comma separated)
         if any(";" in v or ("," in v and " " not in v) for v in values):
             return FieldType.LIST
         
-        # Check for integer
         try:
             [int(v) for v in values if v]
             return FieldType.INTEGER
         except ValueError:
             pass
         
-        # Check for float
         try:
             [float(v) for v in values if v]
             return FieldType.FLOAT
         except ValueError:
             pass
         
-        # Check for date patterns
         date_patterns = ["20", "19", "-"]
         if all(any(p in v for p in date_patterns) and len(v) <= 10 for v in values):
             return FieldType.DATE
         
-        # Check for boolean
         bool_values = {"true", "false", "yes", "no", "0", "1"}
         if all(v.lower() in bool_values for v in values):
             return FieldType.BOOLEAN
         
-        # Default to string
         return FieldType.STRING
     
     def _infer_filter_type(self, column: str, field_type: FieldType, values: List[str]) -> FilterType:
         """Infer filter type based on column name and type."""
         
-        # Range filters for numeric fields
         if field_type in (FieldType.INTEGER, FieldType.FLOAT):
             range_columns = {"price_per_night", "rating", "reviews_count", "bedrooms", "bathrooms", "guests", "occupancy"}
             if any(col in column.lower() for col in range_columns):
                 return FilterType.RANGE
         
-        # Contains filter for list fields
         if field_type == FieldType.LIST:
             return FilterType.CONTAINS
         
-        # Fuzzy filter for text fields
         if field_type == FieldType.STRING:
             text_columns = {"title", "description", "city", "neighborhood", "property_type"}
             if any(col in column.lower() for col in text_columns):
                 return FilterType.FUZZY
         
-        # Default to exact match
         return FilterType.EXACT
     
     def _is_searchable(self, column: str, field_type: FieldType) -> bool:
         """Determine if a field should be searchable."""
         
-        # Always searchable fields
         searchable_keywords = {
             "city", "location", "property_type", "title", "description",
             "bedrooms", "bathrooms", "price", "amenities", "features",
@@ -236,7 +217,6 @@ class PropertySchema:
         if any(keyword in column.lower() for keyword in searchable_keywords):
             return True
         
-        # Numeric and list fields are usually searchable
         if field_type in (FieldType.INTEGER, FieldType.FLOAT, FieldType.LIST):
             return True
         
@@ -279,7 +259,6 @@ class PropertySchema:
         return errors
 
 
-# Global singleton instance
 _schema_instance: Optional[PropertySchema] = None
 
 
@@ -289,7 +268,6 @@ def get_property_schema(dataset_path: Optional[Path] = None) -> PropertySchema:
     
     if _schema_instance is None:
         if dataset_path is None:
-            # Default dataset path
             dataset_path = Path(__file__).parent.parent.parent / "data" / "dataset.csv"
         _schema_instance = PropertySchema(dataset_path)
     

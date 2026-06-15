@@ -22,12 +22,6 @@ import pytest
 import app.services.config as config_module
 from app.services.pre_router import _detect_intent, _normalize
 
-
-# ---------------------------------------------------------------------------
-# services/config.py – _parse_bool and _parse_csv_set helpers
-# ---------------------------------------------------------------------------
-
-
 class TestParseBool:
     def test_true_values(self):
         from app.services.config import _parse_bool
@@ -73,10 +67,6 @@ class TestParseCsvSet:
         result = _parse_csv_set("  villa  ,  apartment  ")
         assert result == {"villa", "apartment"}
 
-
-# ---------------------------------------------------------------------------
-# services/config.py – _dotenv_paths list and loading structure
-# ---------------------------------------------------------------------------
 
 
 class TestConfigDotenvPaths:
@@ -141,10 +131,6 @@ class TestConfigDotenvPaths:
         assert len(paths) == len(set(paths)), "Duplicate .env paths detected"
 
 
-# ---------------------------------------------------------------------------
-# services/config.py – module constants are correctly typed
-# ---------------------------------------------------------------------------
-
 
 class TestConfigConstants:
     def test_dataset_path_is_str(self):
@@ -162,10 +148,6 @@ class TestConfigConstants:
     def test_adk_session_max_context_chars_is_int(self):
         assert isinstance(config_module.ADK_SESSION_MAX_CONTEXT_CHARS, int)
 
-
-# ---------------------------------------------------------------------------
-# services/pre_router.py – _normalize
-# ---------------------------------------------------------------------------
 
 
 class TestPreRouterNormalize:
@@ -188,16 +170,11 @@ class TestPreRouterNormalize:
         assert _normalize("!!! ???") == ""
 
     def test_non_string_is_cast(self):
-        # _normalize calls str(text) when not a string
         assert _normalize(42) == "42"
 
     def test_mixed_case_punctuation_spaces(self):
         assert _normalize("  What's   Up?  ") == "whats up"
 
-
-# ---------------------------------------------------------------------------
-# services/pre_router.py – _detect_intent
-# ---------------------------------------------------------------------------
 
 
 class TestPreRouterDetectIntent:
@@ -235,7 +212,6 @@ class TestPreRouterDetectIntent:
         mock_cfg = MagicMock()
         mock_cfg.pre_router.enabled = True
 
-        # intents with one entry that doesn't match
         intent_cfg = MagicMock()
         intent_cfg.match = MagicMock()
         intent_cfg.match.normalized_exact = []
@@ -245,11 +221,9 @@ class TestPreRouterDetectIntent:
 
         intents_obj = MagicMock()
         intents_obj.__iter__ = MagicMock(return_value=iter([]))
-        # vars(intents_obj) → {intent_name: intent_cfg}
         mock_cfg.pre_router.intents = intents_obj
 
         with patch("app.services.pre_router.cfg", mock_cfg):
-            # Even with empty intents iteration, should return None
             result = _detect_intent("some random message")
         assert result is None
 
@@ -258,7 +232,6 @@ class TestPreRouterDetectIntent:
         mock_cfg = MagicMock()
         mock_cfg.pre_router.enabled = True
 
-        # Create a real namespace object with vars() support
         class _IntentCfg:
             pass
 
@@ -278,13 +251,8 @@ class TestPreRouterDetectIntent:
 
         with patch("app.services.pre_router.cfg", mock_cfg):
             result = _detect_intent("hello")
-        # defer_to_adk=True → return None
         assert result is None
 
-
-# ---------------------------------------------------------------------------
-# services/pre_router.py – model resolution via load_model_config
-# ---------------------------------------------------------------------------
 
 
 class TestPreRouterModelResolution:
@@ -301,8 +269,6 @@ class TestPreRouterModelResolution:
             mem0_llm_provider="groq",
         )
 
-        # We just verify the function attempts to call load_model_config
-        # (not os.getenv) for the model name by mocking load_model_config
         models_called = []
 
         def _mock_load(raw=None):
@@ -318,7 +284,6 @@ class TestPreRouterModelResolution:
 
                 import asyncio
 
-                # Need cfg mock for _generate_reply
                 mock_cfg = MagicMock()
                 mock_cfg.pre_router.generator.temperature = 0.7
                 mock_cfg.pre_router.generator.max_tokens = 80
@@ -336,9 +301,6 @@ class TestPreRouterModelResolution:
         assert len(models_called) > 0, "_generate_reply did not call load_model_config()"
 
 
-# ---------------------------------------------------------------------------
-# adk_runner.py – _maybe_handle_search_state_shortcut null safety
-# ---------------------------------------------------------------------------
 
 
 class TestMaybeHandleSearchStateShortcut:
@@ -405,7 +367,7 @@ class TestMaybeHandleSearchStateShortcut:
         from app.services.adk_runner import _maybe_handle_search_state_shortcut
 
         snapshot = {
-            "state": {"soft_state": {}},  # empty state → no shortcut match
+            "state": {"soft_state": {}},
         }
 
         with patch(
@@ -422,7 +384,6 @@ class TestMaybeHandleSearchStateShortcut:
     async def test_returns_none_when_payload_is_empty(self):
         from app.services.adk_runner import _maybe_handle_search_state_shortcut
 
-        # Shortcut matches but tool returns nothing
         snapshot = {
             "state": {
                 "soft_state": {"all_search_results": [{"id": "1"}]}
@@ -511,7 +472,6 @@ class TestMaybeHandleSearchStateShortcut:
 
         call_kwargs = mock_save.call_args[1] if mock_save.call_args else {}
         metadata = call_kwargs.get("metadata", {})
-        # Only the known keys should be passed
         assert "internal_secret" not in metadata
         assert "app_name" in metadata
         assert "user_id" in metadata
@@ -535,10 +495,6 @@ class TestMaybeHandleSearchStateShortcut:
             )
         assert result is None
 
-
-# ---------------------------------------------------------------------------
-# services/config.py – module import does not call load_dotenv with bad paths
-# ---------------------------------------------------------------------------
 
 
 class TestConfigDotenvPathValidity:

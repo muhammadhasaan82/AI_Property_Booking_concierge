@@ -17,7 +17,6 @@ class TestPropertyTypeFiltering:
 
     def test_villa_search_returns_only_villas(self):
         """Test that searching for villa only returns villas."""
-        # Mock dataset with mixed property types
         mock_properties = [
             {"id": "1", "property_type": "villa", "city": "Seattle", "price_per_night": 300},
             {"id": "2", "property_type": "villa", "city": "Seattle", "price_per_night": 350},
@@ -26,7 +25,6 @@ class TestPropertyTypeFiltering:
             {"id": "5", "property_type": "villa", "city": "Seattle", "price_per_night": 320},
         ]
         
-        # Filter for villa
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
@@ -100,13 +98,11 @@ class TestPropertyTypeFiltering:
             {"id": "4", "property_type": "Apartment", "city": "Seattle", "price_per_night": 200},
         ]
         
-        # Search for "villa" (lowercase)
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
         ]
         
-        # Should match all three villa variants
         assert len(filtered) == 3
 
     def test_no_results_for_unavailable_property_type(self):
@@ -116,7 +112,6 @@ class TestPropertyTypeFiltering:
             {"id": "2", "property_type": "house", "city": "Seattle", "price_per_night": 400},
         ]
         
-        # Search for villa (not in dataset)
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
@@ -130,13 +125,11 @@ class TestPropertyTypeConstraintPreservation:
 
     def test_property_type_preserved_when_adding_bedrooms(self):
         """Test that property type is preserved when adding bedroom constraint."""
-        # Turn 1: Search for villa
         constraints1 = ExtractedConstraints(
             city="Seattle",
             property_type="villa"
         )
         
-        # Turn 2: Add bedrooms
         constraints2 = ExtractedConstraints(bedrooms=3)
         merged = constraints1.merge_with(constraints2)
         
@@ -146,13 +139,11 @@ class TestPropertyTypeConstraintPreservation:
 
     def test_property_type_preserved_when_adding_price(self):
         """Test that property type is preserved when adding price constraint."""
-        # Turn 1: Search for apartment
         constraints1 = ExtractedConstraints(
             city="New York",
             property_type="apartment"
         )
         
-        # Turn 2: Add price constraint
         constraints2 = ExtractedConstraints(price_max=250)
         merged = constraints1.merge_with(constraints2)
         
@@ -162,13 +153,11 @@ class TestPropertyTypeConstraintPreservation:
 
     def test_property_type_preserved_when_adding_amenities(self):
         """Test that property type is preserved when adding amenities."""
-        # Turn 1: Search for house
         constraints1 = ExtractedConstraints(
             city="Portland",
             property_type="house"
         )
         
-        # Turn 2: Add amenities
         constraints2 = ExtractedConstraints(amenities=["pool", "gym"])
         merged = constraints1.merge_with(constraints2)
         
@@ -179,13 +168,11 @@ class TestPropertyTypeConstraintPreservation:
 
     def test_property_type_can_be_overridden(self):
         """Test that property type can be explicitly overridden."""
-        # Turn 1: Search for villa
         constraints1 = ExtractedConstraints(
             city="Seattle",
             property_type="villa"
         )
         
-        # Turn 2: Change to apartment
         constraints2 = ExtractedConstraints(property_type="apartment")
         merged = constraints1.merge_with(constraints2)
         
@@ -205,7 +192,6 @@ class TestMultipleConstraintFiltering:
             {"id": "4", "property_type": "villa", "city": "Seattle", "price_per_night": 320},
         ]
         
-        # Filter for villa in Seattle
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
@@ -225,7 +211,6 @@ class TestMultipleConstraintFiltering:
             {"id": "4", "property_type": "villa", "city": "Seattle", "price_per_night": 350},
         ]
         
-        # Filter for villa under $400
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
@@ -245,7 +230,6 @@ class TestMultipleConstraintFiltering:
             {"id": "4", "property_type": "villa", "city": "Seattle", "bedrooms": 2},
         ]
         
-        # Filter for villa with 3 bedrooms
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
@@ -265,7 +249,6 @@ class TestMultipleConstraintFiltering:
             {"id": "4", "property_type": "villa", "city": "Seattle", "amenities": ["gym"]},
         ]
         
-        # Filter for villa with pool and gym
         required_amenities = {"pool", "gym"}
         filtered = [
             prop for prop in mock_properties
@@ -289,7 +272,6 @@ class TestEdgeCases:
             {"id": "2", "property_type": "villa", "city": "Seattle", "price_per_night": 300},
         ]
         
-        # Filter for villa
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
@@ -305,7 +287,6 @@ class TestEdgeCases:
             {"id": "2", "property_type": "villa", "city": "Seattle", "price_per_night": 300},
         ]
         
-        # Filter for villa
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
@@ -317,11 +298,10 @@ class TestEdgeCases:
     def test_missing_property_type_field(self):
         """Test handling of missing property type field."""
         mock_properties = [
-            {"id": "1", "city": "Seattle", "price_per_night": 200},  # No property_type field
+            {"id": "1", "city": "Seattle", "price_per_night": 200}, 
             {"id": "2", "property_type": "villa", "city": "Seattle", "price_per_night": 300},
         ]
         
-        # Filter for villa
         filtered = [
             prop for prop in mock_properties
             if normalize_property_type(prop.get("property_type")) == "villa"
@@ -334,11 +314,10 @@ class TestEdgeCases:
         """Test that unknown property types are not filtered out when not searching for specific type."""
         mock_properties = [
             {"id": "1", "property_type": "villa", "city": "Seattle", "price_per_night": 300},
-            {"id": "2", "property_type": "castle", "city": "Seattle", "price_per_night": 1000},  # Unknown type
+            {"id": "2", "property_type": "castle", "city": "Seattle", "price_per_night": 1000}, 
             {"id": "3", "property_type": "apartment", "city": "Seattle", "price_per_night": 200},
         ]
         
-        # No property type filter - should return all
         filtered = mock_properties
         
         assert len(filtered) == 3

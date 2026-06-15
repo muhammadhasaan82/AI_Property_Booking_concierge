@@ -771,10 +771,8 @@ async def test_lookup_booking_id_cross_session(monkeypatch):
     assert registration_id
     assert registration_id.startswith("BK-")
 
-    # Create a completely fresh, empty session/soft_state
     fresh_snapshot = _build_status_check_snapshot({})
 
-    # Ask status using the booking ID in the new session, using raw ID and spelling typos
     queries = [
         f"My boking ID is {registration_id}",
         f"booking id {registration_id}",

@@ -17,7 +17,6 @@ from app.services.dynamic_constraints import DynamicConstraints, create_constrai
 from app.services.search_planner import SearchPlanner, SearchPlan, get_search_planner
 from app.services.property_schema import get_property_schema
 
-# Backward compatibility imports
 from app.services.property_type_normalizer import normalize_property_type
 from app.services.direct_property_search import (
     resolve_supported_city_from_message,
@@ -39,8 +38,7 @@ class ExtractedConstraints:
     city: Optional[str] = None
     property_type: Optional[str] = None
     bedrooms: Optional[int] = None
-    bedrooms_operator: str = "exact"  # exact, min, max
-    bathrooms: Optional[int] = None
+    bedrooms_operator: str = "exact"
     price_max: Optional[float] = None
     price_min: Optional[float] = None
     guests: Optional[int] = None
@@ -77,24 +75,19 @@ class ExtractedConstraints:
             old_value = getattr(self, field_name)
             new_value = getattr(other, field_name)
             
-            # Special handling for lists (amenities)
             if field_name == "amenities":
-                # Always merge amenities (union) and remove duplicates
                 if old_value or new_value:
                     merged_amenities = list(set((old_value or []) + (new_value or [])))
                     setattr(merged, field_name, merged_amenities)
                 else:
                     setattr(merged, field_name, [])
             else:
-                # Standard field handling
                 if override:
-                    # New non-None values override old
                     if new_value is not None:
                         setattr(merged, field_name, new_value)
                     else:
                         setattr(merged, field_name, old_value)
                 else:
-                    # Only fill missing values
                     if old_value is None:
                         setattr(merged, field_name, new_value)
                     else:
@@ -104,7 +97,6 @@ class ExtractedConstraints:
     
     def has_any_constraints(self) -> bool:
         """Check if any constraints are set."""
-        # Metadata fields that don't count as constraints
         metadata_fields = {"bedrooms_operator"}
         
         for field_name in self.__dataclass_fields__:
@@ -192,46 +184,38 @@ def extract_constraints_from_message(
     Returns:
         ExtractedConstraints with all detected constraints
     """
-    # Use schema-driven extraction via SearchPlanner
     planner = get_search_planner()
     
-    # Convert previous constraints to DynamicConstraints if provided
     previous_dynamic = None
     if previous_constraints:
         previous_dynamic = previous_constraints.to_dynamic_constraints()
     
-    # Create search plan (this extracts and merges constraints)
     plan = planner.plan_search(
         message=message,
         session_constraints=previous_dynamic,
         session_id="extraction"
     )
     
-    # Log the extraction trace
     plan.trace.log(f"Extracted constraints from message: '{message}'")
     logger.info(
         "[constraint_extractor] schema-driven extraction: %s",
         plan.trace.extracted_constraints
     )
     
-    # Convert DynamicConstraints back to ExtractedConstraints for backward compatibility
     constraints = ExtractedConstraints()
     dynamic_dict = plan.constraints.to_dict()
     
-    # Map dynamic constraints to ExtractedConstraints fields
     if "city" in dynamic_dict:
         constraints.city = dynamic_dict["city"]
     if "property_type" in dynamic_dict:
         constraints.property_type = dynamic_dict["property_type"]
     if "bedrooms" in dynamic_dict:
         constraints.bedrooms = dynamic_dict["bedrooms"]
-        # Get operator from dynamic constraints
         operator = plan.constraints.get_operator("bedrooms", "exact")
         constraints.bedrooms_operator = operator
     if "bathrooms" in dynamic_dict:
         constraints.bathrooms = dynamic_dict["bathrooms"]
     if "price_per_night" in dynamic_dict:
-        # Determine if max or min based on operator
         operator = plan.constraints.get_operator("price_per_night", "exact")
         if operator == "max":
             constraints.price_max = dynamic_dict["price_per_night"]
@@ -318,12 +302,10 @@ def constraints_to_search_kwargs(constraints: ExtractedConstraints) -> Dict[str,
     if constraints.property_type:
         kwargs["property_type"] = constraints.property_type
     if constraints.bedrooms is not None:
-        # Map operator to appropriate parameter
         if constraints.bedrooms_operator == "min":
             kwargs["beds"] = constraints.bedrooms
         elif constraints.bedrooms_operator == "exact":
             kwargs["beds"] = constraints.bedrooms
-        # Note: max operator not currently supported by search_properties
     if constraints.price_max is not None:
         kwargs["budget"] = constraints.price_max
     if constraints.amenities:
@@ -347,7 +329,6 @@ def dynamic_constraints_to_search_kwargs(constraints: DynamicConstraints) -> Dic
     """
     kwargs = {}
     
-    # Map all constraints dynamically
     for field_name in constraints.fields():
         value = constraints.get(field_name)
         operator = constraints.get_operator(field_name)
@@ -355,8 +336,6 @@ def dynamic_constraints_to_search_kwargs(constraints: DynamicConstraints) -> Dic
         if value is None:
             continue
         
-        # Map field names to search parameter names
-        # This mapping can be extended based on schema metadata
         param_mapping = {
             "city": "city",
             "property_type": "property_type",
@@ -371,7 +350,6 @@ def dynamic_constraints_to_search_kwargs(constraints: DynamicConstraints) -> Dic
         
         param_name = param_mapping.get(field_name, field_name)
         
-        # Handle list values (e.g., amenities)
         if isinstance(value, list):
             if param_name == "amenities":
                 kwargs[param_name] = ",".join(value)

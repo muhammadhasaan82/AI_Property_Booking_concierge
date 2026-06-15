@@ -23,10 +23,6 @@ from app.services.adk_runner import _state_with_persisted_soft_state
 class TestStateWithPersistedSoftState:
     """Unit tests for _state_with_persisted_soft_state()."""
 
-    # ------------------------------------------------------------------
-    # Basic correctness
-    # ------------------------------------------------------------------
-
     def test_basic_merge_of_state_and_soft_state(self):
         """Normal state dict + soft_state dict produces a merged result."""
         state = {"user_id": "u1", "booking_ref": "B1"}
@@ -56,10 +52,6 @@ class TestStateWithPersistedSoftState:
         assert result["soft_state"] == {"fresh_key": "fresh_value"}
         assert "stale_key" not in result["soft_state"]
 
-    # ------------------------------------------------------------------
-    # Normalisation of invalid soft_state types
-    # ------------------------------------------------------------------
-
     def test_none_soft_state_normalises_to_empty_dict(self):
         """soft_state=None must produce soft_state={} in the result."""
         result = _state_with_persisted_soft_state({"k": "v"}, None)
@@ -80,10 +72,6 @@ class TestStateWithPersistedSoftState:
         result = _state_with_persisted_soft_state({"k": "v"}, 42)
         assert result["soft_state"] == {}
 
-    # ------------------------------------------------------------------
-    # Normalisation of invalid state types
-    # ------------------------------------------------------------------
-
     def test_none_state_produces_only_soft_state_key(self):
         """state=None should be treated as an empty dict by _filter_persistent_state."""
         soft = {"booking_stage": "confirmed"}
@@ -94,10 +82,6 @@ class TestStateWithPersistedSoftState:
         """Non-dict state must not crash; result must contain soft_state."""
         result = _state_with_persisted_soft_state("broken-state", {"x": 1})
         assert result["soft_state"] == {"x": 1}
-
-    # ------------------------------------------------------------------
-    # Temp key filtering
-    # ------------------------------------------------------------------
 
     def test_temp_keys_are_stripped_from_state(self):
         """Keys prefixed with 'temp:' must be excluded from the result."""
@@ -124,10 +108,6 @@ class TestStateWithPersistedSoftState:
         assert result["c"] == [1, 2, 3]
         assert result["soft_state"]["stage"] == "done"
 
-    # ------------------------------------------------------------------
-    # _jsonable pass-through
-    # ------------------------------------------------------------------
-
     def test_jsonable_conversion_applied_to_nested_soft_state(self):
         """Nested dict values inside soft_state survive _jsonable serialisation."""
         soft = {
@@ -146,10 +126,6 @@ class TestStateWithPersistedSoftState:
         """Both empty inputs must produce a result with an empty soft_state."""
         result = _state_with_persisted_soft_state({}, {})
         assert result == {"soft_state": {}}
-
-    # ------------------------------------------------------------------
-    # Regression: soft_state must not bleed into next call
-    # ------------------------------------------------------------------
 
     def test_successive_calls_do_not_share_soft_state_reference(self):
         """Each call must return an independent dict — no shared mutable state."""

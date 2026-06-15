@@ -119,12 +119,10 @@ async def test_screenshot_flow_cancellation_success(monkeypatch):
     """
     snapshot = _build_cancellation_snapshot({})
     
-    # Step 1: User says "delete booking".
     reply1, _, _ = await _run_cancellation_turn(monkeypatch, snapshot, "delete booking")
     assert "please provide your booking registration id" in reply1.lower()
     assert snapshot["state"]["soft_state"].get("booking_cancellation_stage") == "awaiting_id"
     
-    # Step 2: User provides booking ID.
     with (
         patch("app.observability.db_logging.get_successful_booking_status", AsyncMock(return_value=_TEST_RECEIPT)),
         patch("app.services.booking.get_booking_status", AsyncMock(return_value={"ok": True, "status": "confirmed"}))
@@ -133,7 +131,6 @@ async def test_screenshot_flow_cancellation_success(monkeypatch):
     assert "Are you sure you want to cancel this booking?" in reply2
     assert snapshot["state"]["soft_state"].get("booking_cancellation_stage") == "awaiting_confirmation"
     
-    # Step 3: User says "yes delete this booking please".
     mock_update_sb = AsyncMock(return_value=True)
     mock_update_b = AsyncMock(return_value={"ok": True})
     reply3, _, _ = await _run_cancellation_turn(
@@ -148,7 +145,6 @@ async def test_screenshot_flow_cancellation_success(monkeypatch):
     mock_update_sb.assert_awaited_once_with("BK-20260601-12345678", {"status": "cancelled"})
     mock_update_b.assert_awaited_once_with("BK-20260601-12345678", "", "cancelled")
     
-    # State variables should be cleared
     assert "booking_cancellation_pending" not in snapshot["state"]["soft_state"]
     assert "booking_cancellation_stage" not in snapshot["state"]["soft_state"]
     assert "booking_cancellation_id" not in snapshot["state"]["soft_state"]

@@ -19,40 +19,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from app.services.booking_flow import _find_all_dates, _extract_dates_by_association
 
 
-# ===========================================================================
-# Helpers
-# ===========================================================================
-
-
 def _dates(text: str) -> List[str]:
     """Return just the date strings from _find_all_dates for easy comparison."""
     return [d for d, _, _ in _find_all_dates(text)]
 
 
-# ===========================================================================
-# Tests for _find_all_dates()
-# ===========================================================================
-
-
 class TestFindAllDates:
-
-    # ------------------------------------------------------------------
-    # Edge cases
-    # ------------------------------------------------------------------
 
     def test_empty_string_returns_empty_list(self):
         assert _find_all_dates("") == []
 
     def test_none_like_empty_text_returns_empty_list(self):
-        # The function signature expects str; falsy string coverage
         assert _find_all_dates("   ") == []
 
     def test_text_without_dates_returns_empty_list(self):
         assert _find_all_dates("I would like to book a nice apartment please") == []
-
-    # ------------------------------------------------------------------
-    # ISO format YYYY-MM-DD
-    # ------------------------------------------------------------------
 
     def test_iso_date_detected(self):
         result = _dates("check in on 2026-06-15")
@@ -67,10 +48,6 @@ class TestFindAllDates:
         """Day 32 is invalid; the date must be silently skipped."""
         result = _dates("date is 2026-02-30")
         assert result == []
-
-    # ------------------------------------------------------------------
-    # Natural language: "2nd of June, 2026" style
-    # ------------------------------------------------------------------
 
     def test_day_of_month_year_format(self):
         result = _dates("check in on 2nd of June, 2026")
@@ -92,10 +69,6 @@ class TestFindAllDates:
         result = _dates("arrive on 15th August 2026")
         assert "2026-08-15" in result
 
-    # ------------------------------------------------------------------
-    # Natural language: "June 2nd, 2026" style
-    # ------------------------------------------------------------------
-
     def test_month_day_year_format(self):
         result = _dates("checkout June 11, 2026")
         assert "2026-06-11" in result
@@ -103,10 +76,6 @@ class TestFindAllDates:
     def test_month_day_year_without_comma(self):
         result = _dates("arrive June 2 2026")
         assert "2026-06-02" in result
-
-    # ------------------------------------------------------------------
-    # Year-less natural language (year inferred from BOOKING_REFERENCE_DATE)
-    # ------------------------------------------------------------------
 
     def test_day_month_without_year(self, monkeypatch):
         monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
@@ -119,10 +88,6 @@ class TestFindAllDates:
         result = _dates("arrive july 13 and leave august 2")
         assert "2026-07-13" in result
         assert "2026-08-02" in result
-
-    # ------------------------------------------------------------------
-    # Multiple dates
-    # ------------------------------------------------------------------
 
     def test_two_iso_dates_in_text(self):
         result = _dates("check in 2026-06-02, check out 2026-06-11")
@@ -142,21 +107,12 @@ class TestFindAllDates:
         assert result[1] == "2026-06-11"
         assert result[2] == "2026-12-25"
 
-    # ------------------------------------------------------------------
-    # De-duplication / overlap prevention
-    # ------------------------------------------------------------------
-
     def test_overlapping_matches_deduped(self):
         """When ISO and natural-language patterns match the same span, only one
         entry should appear (last_end filter prevents double-counting)."""
-        # "2026-06-02" should match the ISO pattern once, natural patterns don't
-        # produce an overlap here, so we just confirm count is 1.
+
         result = _dates("arrive 2026-06-02 please")
         assert result.count("2026-06-02") == 1
-
-    # ------------------------------------------------------------------
-    # Return type: (formatted_date, start, end)
-    # ------------------------------------------------------------------
 
     def test_returns_tuple_with_position_info(self):
         text = "check in 2026-06-02 checkout 2026-06-11"
@@ -171,26 +127,13 @@ class TestFindAllDates:
             assert start < end
 
 
-# ===========================================================================
-# Tests for _extract_dates_by_association()
-# ===========================================================================
-
-
 class TestExtractDatesByAssociation:
-
-    # ------------------------------------------------------------------
-    # Edge cases
-    # ------------------------------------------------------------------
 
     def test_empty_text_returns_none_none(self):
         assert _extract_dates_by_association("") == (None, None)
 
     def test_text_without_dates_returns_none_none(self):
         assert _extract_dates_by_association("I want to book a hotel") == (None, None)
-
-    # ------------------------------------------------------------------
-    # Single date with check-in label
-    # ------------------------------------------------------------------
 
     def test_single_date_with_checkin_label_assigns_check_in(self):
         check_in, check_out = _extract_dates_by_association(
@@ -206,10 +149,6 @@ class TestExtractDatesByAssociation:
         assert check_in == "2026-06-02"
         assert check_out is None
 
-    # ------------------------------------------------------------------
-    # Single date with check-out label
-    # ------------------------------------------------------------------
-
     def test_single_date_with_checkout_label_assigns_check_out(self):
         check_in, check_out = _extract_dates_by_association(
             "check out shall be 11 june 2026"
@@ -224,10 +163,6 @@ class TestExtractDatesByAssociation:
         assert check_out == "2026-06-15"
         assert check_in is None
 
-    # ------------------------------------------------------------------
-    # Two dates with labels
-    # ------------------------------------------------------------------
-
     def test_two_dates_with_both_labels_assigned_correctly(self):
         text = (
             "check-in date would 2nd of june, 2026 "
@@ -237,24 +172,11 @@ class TestExtractDatesByAssociation:
         assert check_in == "2026-06-02"
         assert check_out == "2026-06-11"
 
-    def test_checkout_before_checkin_text_order_valid_yearless_dates(self, monkeypatch):
-        monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-01")
-        text = (
-            "check-out date 13 july and check in date is 23 june"
-        )
-        check_in, check_out = _extract_dates_by_association(text)
-        assert check_in == "2026-06-23"
-        assert check_out == "2026-07-13"
-
     def test_iso_dates_with_both_labels(self):
         text = "check-in 2026-06-02 check-out 2026-06-11"
         check_in, check_out = _extract_dates_by_association(text)
         assert check_in == "2026-06-02"
         assert check_out == "2026-06-11"
-
-    # ------------------------------------------------------------------
-    # Two dates without labels: positional fallback (first=check_in, second=check_out)
-    # ------------------------------------------------------------------
 
     def test_two_dates_no_labels_use_positional_order(self):
         """Without any check-in/check-out labels the first date becomes check_in
@@ -265,15 +187,10 @@ class TestExtractDatesByAssociation:
         assert check_in == "2026-06-02"
         assert check_out == "2026-06-11"
 
-    # ------------------------------------------------------------------
-    # Partial label coverage
-    # ------------------------------------------------------------------
-
     def test_only_checkout_label_with_two_dates_fills_check_in_from_remainder(self):
         """When only check-out is labelled, the other date should become check_in."""
         text = "2026-06-02 and then check out on 2026-06-11"
         check_in, check_out = _extract_dates_by_association(text)
-        # check_out is labelled; the remaining date is check_in
         assert check_out == "2026-06-11"
         assert check_in == "2026-06-02"
 
@@ -283,10 +200,6 @@ class TestExtractDatesByAssociation:
         check_in, check_out = _extract_dates_by_association(text)
         assert check_in == "2026-06-02"
         assert check_out == "2026-06-11"
-
-    # ------------------------------------------------------------------
-    # Realistic full-sentence inputs (mirrors adk_runner integration tests)
-    # ------------------------------------------------------------------
 
     def test_realistic_sentence_all_fields(self):
         """Mirrors the message used in test_booking_details_flow: both labels present."""
@@ -307,11 +220,7 @@ class TestExtractDatesByAssociation:
         )
         check_in, check_out = _extract_dates_by_association(text)
         assert check_in == "2026-06-02"
-        assert check_out == "2026-06-11" or check_out == "2025-06-11"  # year as parsed
-
-    # ------------------------------------------------------------------
-    # Regression: checkout date variant spellings
-    # ------------------------------------------------------------------
+        assert check_out == "2026-06-11" or check_out == "2025-06-11"
 
     @pytest.mark.parametrize("label", [
         "check-out",

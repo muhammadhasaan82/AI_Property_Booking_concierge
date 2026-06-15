@@ -527,10 +527,7 @@ def match_shortcut(
     """
     global shortcut_router
 
-    # Self-heal after tests/runtime reload the global router from a missing YAML.
-    # reload() is still allowed to create an empty router, but match_shortcut()
-    # should not let that stale empty router permanently disable YAML shortcuts
-    # once the configured shortcuts file exists again.
+
     if not getattr(shortcut_router, "specs", None) and _SHORTCUTS_PATH.exists():
         shortcut_router = _load()
 

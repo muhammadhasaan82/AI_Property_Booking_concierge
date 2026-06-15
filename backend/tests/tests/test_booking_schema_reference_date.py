@@ -19,16 +19,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
-# ---------------------------------------------------------------------------
-# Helpers — import the target functions
-# ---------------------------------------------------------------------------
-
 from app.config.booking_schema_loader import _reference_today, validate_field
-
-
-# ===========================================================================
-# Tests for _reference_today()
-# ===========================================================================
 
 
 class TestReferenceToday:
@@ -89,19 +80,13 @@ class TestReferenceToday:
         assert result == date(2026, 6, 1)
 
 
-# ===========================================================================
-# Tests for validate_field "date" type using _reference_today
-# ===========================================================================
-
-
 class TestValidateFieldDateWithReferenceDate:
     """
     validate_field for date-type fields now uses _reference_today() instead of
     date.today() when checking not_before="today".  These tests verify that a
     fixed reference date is honoured correctly.
     """
-
-    # We patch _reference_today inside the module so the validator uses our stub.
+    
     _MODULE = "app.config.booking_schema_loader._reference_today"
 
     def _ref(self, d: date):
