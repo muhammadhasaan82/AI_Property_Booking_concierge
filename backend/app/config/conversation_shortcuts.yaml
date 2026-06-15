@@ -79,6 +79,31 @@ shortcuts:
       - "proceed"
       - "book it"
       - "yes please"
+    semantic_cues:
+      any:
+        - [yes]
+        - [sure]
+        - [confirm]
+        - [confirmed]
+        - [correct]
+        - [proceed]
+        - [ok]
+        - [okay]
+        - [looks, good]
+        - [all, good]
+        - [everything, correct]
+      none:
+        - [no]
+        - [not]
+        - [dont]
+        - [do, not]
+        - [change]
+        - [update]
+        - [modify]
+        - [edit]
+        - [cancel]
+        - [delete]
+        - [wrong]
 
   booking_review_modify:
     action: modify_booking_review
