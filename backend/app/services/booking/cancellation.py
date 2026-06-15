@@ -205,7 +205,6 @@ def _is_cancellation_rejection(message: str) -> bool:
         "never mind",
     }
 
-# Compatibility wrapper: handle pending cancellation confirmation/rejection deterministically.
 _handle_booking_cancellation_turn_original_v1 = handle_booking_cancellation_turn
 
 async def handle_booking_cancellation_turn(message: str, soft_state: dict):
@@ -283,7 +282,6 @@ async def handle_booking_cancellation_turn(message: str, soft_state: dict):
                     "deterministic_reply": f"Your booking {booking_id} has been successfully cancelled.",
                 }
 
-            # Keep pending state for retry.
             soft_state["booking_cancellation_pending"] = True
             soft_state["booking_cancellation_stage"] = "awaiting_confirmation"
             soft_state["booking_cancellation_id"] = booking_id

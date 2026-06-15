@@ -366,7 +366,6 @@ async def _current_amendment_receipt(message: str, soft_state: dict) -> dict | N
 
     return resolved
 
-# Compatibility wrapper: ensure amended check-in/check-out recompute nights and total.
 from datetime import datetime as _amendment_datetime
 
 _validate_amendment_candidate_original_recompute_v1 = _validate_amendment_candidate

@@ -262,9 +262,9 @@ def _has_search_phrase(message: str) -> bool:
             return True
     return False
 
-from app.services.direct_property_search.city import _normalize  # noqa: F401
+from app.services.direct_property_search.city import _normalize   
 
-from app.services.dynamic_config import get_vocabulary  # noqa: F401
+from app.services.dynamic_config import get_vocabulary   
 
 def _contains_term(text: str, term: str) -> bool:
     normalized_text = _normalize(text or "")

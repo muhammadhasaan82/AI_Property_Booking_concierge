@@ -1,5 +1,5 @@
 """Compiled booking-flow constants loaded from YAML via config.py."""
-from app.services.booking.config import (  # noqa: F401
+from app.services.booking.config import (
     BOOKING_ID_PATTERN,
     RECEIPT_TO_SUCCESSFUL_BOOKING_COLUMNS,
     SUCCESSFUL_BOOKING_TO_RECEIPT_KEYS,

@@ -24,7 +24,6 @@ from app.config.booking_flow_loader import (
 
 logger = logging.getLogger(__name__)
 
-# Re-export stage sets from YAML with Python fallbacks in loader.
 _ACTIVE_BOOKING_STAGES = get_active_booking_stages()
 _POST_CONFIRMATION_AMENDMENT_STAGES = get_post_confirmation_amendment_stages()
 _FAQ_KEYWORDS = get_faq_keywords()

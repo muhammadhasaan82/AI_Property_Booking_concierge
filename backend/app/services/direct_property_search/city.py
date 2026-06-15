@@ -324,4 +324,4 @@ def _city_clarification_reply(city_match: SupportedCityMatch) -> str:
         return f"{opening} Did you mean {', '.join(suggestions)}?"
     return f"{opening} Please share a supported city so I can search the real property dataset."
 
-from app.services.direct_property_search.extraction import _property_type_terms  # noqa: F401
+from app.services.direct_property_search.extraction import _property_type_terms   
