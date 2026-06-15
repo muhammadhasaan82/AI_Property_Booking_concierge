@@ -208,7 +208,7 @@ def _extract_updates_from_message(
     # Check-out: June 30, 2026
     # Guests: 5
     for field, raw_segment in segments.items():
-        value = (raw_segment or "").strip(" ,.;:-")
+        value = (raw_segment or "").strip().strip(" ,.;:-").strip()
         if not value:
             continue
 
