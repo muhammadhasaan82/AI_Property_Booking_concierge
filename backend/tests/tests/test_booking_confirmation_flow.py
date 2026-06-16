@@ -770,6 +770,27 @@ async def test_lookup_booking_id_cross_session(monkeypatch):
     registration_id = soft_state["booking_registration_id"]
     assert registration_id
     assert registration_id.startswith("BK-")
+    persisted_receipt = dict(soft_state["booking_receipt"])
+    successful_row = {
+        "booking_id": registration_id,
+        "payment_url": persisted_receipt.get("payment_url"),
+    }
+    for receipt_key, db_key in {
+        "guest_name": "user_name",
+        "guest_email": "user_email",
+        "guest_phone": "user_phone",
+        "check_in": "check_in",
+        "check_out": "check_out",
+        "guests": "guests",
+        "nights": "nights",
+        "price_per_night": "price_per_night",
+        "total_amount": "total_amount",
+        "property_title": "property_title",
+        "city": "city",
+        "status": "status",
+    }.items():
+        if receipt_key in persisted_receipt:
+            successful_row[db_key] = persisted_receipt[receipt_key]
 
     fresh_snapshot = _build_status_check_snapshot({})
 
@@ -779,19 +800,29 @@ async def test_lookup_booking_id_cross_session(monkeypatch):
         f"{registration_id}",
     ]
 
-    for query in queries:
-        status_reply, route_pre_adk = await _run_status_check_turn(
-            monkeypatch,
-            fresh_snapshot,
-            query,
-        )
-        assert route_pre_adk.await_count == 0
-        assert registration_id in status_reply
-        assert "confirmed" in status_reply.lower()
-        assert "Jane Doe" in status_reply
-        assert "jane@example.com" in status_reply
-        assert "June 2, 2026" in status_reply
-        assert "June 11, 2026" in status_reply
+    with (
+        patch(
+            "app.services.booking.persistence.get_booking_status",
+            AsyncMock(return_value={"ok": False, "error": "not found"}),
+        ),
+        patch(
+            "app.observability.db_logging.get_successful_booking_status",
+            AsyncMock(return_value=successful_row),
+        ),
+    ):
+        for query in queries:
+            status_reply, route_pre_adk = await _run_status_check_turn(
+                monkeypatch,
+                fresh_snapshot,
+                query,
+            )
+            assert route_pre_adk.await_count == 0
+            assert registration_id in status_reply
+            assert "confirmed" in status_reply.lower()
+            assert "Jane Doe" in status_reply
+            assert "jane@example.com" in status_reply
+            assert "June 2, 2026" in status_reply
+            assert "June 11, 2026" in status_reply
 
 
 @pytest.mark.asyncio
