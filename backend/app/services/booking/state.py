@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 from app.config.booking_schema_loader import (
+    get_amendable_fields,
     get_field_aliases,
     get_required_fields,
     get_required_numeric_fields,
@@ -166,14 +167,34 @@ def _ensure_property_seeded(soft_state: Dict[str, Any]) -> Dict[str, Any]:
     _seed_property_fields(soft_state, state)
     return _replace_booking_state(soft_state, state)
 
-def _modification_field_from_message(message: str) -> Optional[str]:
+def _modification_fields_from_message(message: str) -> List[str]:
     normalized = _normalize(message)
+    if not normalized:
+        return []
+
     alias_map = _field_alias_map()
     field_order = ["property_id"] + get_ask_order()
+    allowed_fields = set(get_amendable_fields()) | {"property_id"}
+
+    matches: List[Tuple[int, str]] = []
     for field in field_order:
-        aliases = alias_map.get(field, [])
+        if field not in allowed_fields:
+            continue
+        aliases = sorted(alias_map.get(field, []), key=len, reverse=True)
         for alias in aliases:
-            if re.search(rf"\b{re.escape(alias)}\b", normalized):
-                return field
-    return None
+            match = re.search(rf"\b{re.escape(alias)}\b", normalized)
+            if match:
+                matches.append((match.start(), field))
+                break
+
+    ordered_fields: List[str] = []
+    for _pos, field in sorted(matches, key=lambda item: item[0]):
+        if field not in ordered_fields:
+            ordered_fields.append(field)
+    return ordered_fields
+
+
+def _modification_field_from_message(message: str) -> Optional[str]:
+    fields = _modification_fields_from_message(message)
+    return fields[0] if fields else None
 

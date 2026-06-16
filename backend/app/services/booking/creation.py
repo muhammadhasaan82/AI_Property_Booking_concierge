@@ -14,6 +14,7 @@ from app.agents.status_codes import Status
 from app.agents.tools.search import get_all_available_cities, return_to_previous_results
 from app.agents.tools.support import check_faq
 from app.config.agent_config_loader import cfg
+from app.config.booking_schema_loader import get_amendment_display_name, get_amendment_intent_verbs
 from app.services.observability.langfuse_observer import get_observer, summarize_booking_state
 from app.services.faq_interruption import clear_faq_interruption, sync_alias_keys
 from app.services.booking.amendment import (
@@ -33,6 +34,7 @@ from app.services.booking.formatting import (
 from app.services.booking.state import (
     _ensure_property_seeded,
     _modification_field_from_message,
+    _modification_fields_from_message,
     _normalize,
     _property_title_from_soft_state,
     _resolve_selected_property_from_soft_state,
@@ -149,20 +151,50 @@ def resume_booking_flow(soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "deterministic_reply": _review_reply(summary),
     }
 
+def _format_modification_field_list(fields: List[str]) -> str:
+    names = [get_amendment_display_name(field) for field in fields]
+    names = [name for name in names if name]
+    if not names:
+        return "booking details"
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+def _has_review_modification_verb(message: str) -> bool:
+    normalized = _normalize(message)
+    verbs = [verb for verb in get_amendment_intent_verbs() if verb]
+    if not verbs:
+        return False
+    return any(re.search(rf"\b{re.escape(verb)}\b", normalized) for verb in verbs)
+
+
 def handle_review_modification_request(message: str, soft_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    field = _modification_field_from_message(message)
-    if field == "property_id":
+    fields = _modification_fields_from_message(message)
+    field = fields[0] if fields else _modification_field_from_message(message)
+
+    if field == "property_id" or "property_id" in fields:
         soft_state["booking_stage"] = "awaiting_property_reselection"
         soft_state["last_presented_view"] = "property_list"
         return return_to_previous_results(soft_state)
 
-    if field:
+    detail_fields = [field for field in fields if field != "property_id"]
+    if not detail_fields and field:
+        detail_fields = [field]
+
+    if detail_fields:
         soft_state["booking_stage"] = "modifying_details"
-        set_awaiting_field(soft_state, [field])
+        set_awaiting_field(soft_state, detail_fields)
+
+        if len(detail_fields) == 1:
+            reply = _friendly_prompt_for_field(detail_fields[0])
+        else:
+            reply = f"Sure, please provide the correct {_format_modification_field_list(detail_fields)}."
+
         return {
             "status": Status.GATHERING_INFO,
-            "missing_fields": [field],
-            "deterministic_reply": _friendly_prompt_for_field(field),
+            "missing_fields": detail_fields,
+            "deterministic_reply": reply,
         }
 
     soft_state["booking_stage"] = "awaiting_modification_choice"
@@ -276,29 +308,30 @@ async def handle_active_booking_turn(
 
     if stage in {"awaiting_confirmation", "awaiting_modification_choice"}:
         normalized = _normalize(message)
+        modification_fields = _modification_fields_from_message(message)
         should_interpret_as_modification = (
             stage == "awaiting_modification_choice"
-            or re.search(r"\b(change|update|modify|edit)\b", normalized) is not None
+            or _has_review_modification_verb(message)
         )
         if should_interpret_as_modification:
-            field = _modification_field_from_message(message)
-            if field == "property_id":
+            if "property_id" in modification_fields:
                 return handle_review_modification_request(message, soft_state)
-            if field:
+
+            if modification_fields:
                 inline_updates, _mentioned_fields, inline_errors = _extract_updates_from_message(
                     message,
-                    field,
+                    modification_fields[0],
                 )
                 soft_state["booking_stage"] = "modifying_details"
-                set_awaiting_field(soft_state, [field])
-                if field in inline_updates and field not in inline_errors:
+                set_awaiting_field(soft_state, modification_fields)
+                has_inline_update = any(
+                    field in inline_updates and field not in inline_errors
+                    for field in modification_fields
+                )
+                if has_inline_update:
                     stage = "modifying_details"
                 else:
-                    return {
-                        "status": Status.GATHERING_INFO,
-                        "missing_fields": [field],
-                        "deterministic_reply": _friendly_prompt_for_field(field),
-                    }
+                    return handle_review_modification_request(message, soft_state)
             elif stage == "awaiting_modification_choice":
                 return {
                     "status": Status.GATHERING_INFO,

@@ -104,6 +104,15 @@ shortcuts:
         - [cancel]
         - [delete]
         - [wrong]
+        - [incorrect]
+        - [email]
+        - [phone]
+        - [name]
+        - [date]
+        - [check, in]
+        - [check, out]
+        - [guest]
+        - [guests]
 
   booking_review_modify:
     action: modify_booking_review
@@ -119,6 +128,23 @@ shortcuts:
       - "change dates"
       - "change guests"
       - "change property"
+    semantic_cues:
+      any:
+        - [no]
+        - [wrong]
+        - [incorrect]
+        - [change]
+        - [update]
+        - [modify]
+        - [edit]
+        - [fix]
+        - [correct]
+      none:
+        - [yes]
+        - [confirm]
+        - [sure]
+        - [proceed]
+        - [book]
 
   resume_booking_after_faq:
     action: resume_booking_flow
