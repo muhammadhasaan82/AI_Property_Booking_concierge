@@ -60,3 +60,24 @@ def test_scoring_reports_forbidden_text():
     )
     assert not result.passed
     assert any("forbidden text present" in failure for failure in result.failures)
+
+
+def test_strict_scoring_fails_when_failures_are_non_empty():
+    result = _score(
+        Expected(response_contains=["Los Angeles", "missing phrase"]),
+        scoring=ScoringConfig(
+            weights={"routing": 0.2, "args": 0.2, "state": 0.2, "response": 0.3, "safety": 0.1},
+            pass_threshold=0.8,
+            strict=True,
+        ),
+    )
+    assert result.score >= 0.8
+    assert result.failures
+    assert not result.passed
+
+
+def test_non_strict_weighted_scoring_can_pass_with_warnings():
+    result = _score(Expected(response_contains=["Los Angeles", "missing phrase"]))
+    assert result.score >= 0.8
+    assert result.failures
+    assert result.passed

@@ -37,3 +37,11 @@ def test_multi_turn_samples_validate_turns():
         for turn in sample.turns:
             assert turn.user
             assert turn.expected is not None
+
+
+def test_beijing_and_tehran_unsupported_cases_are_independent():
+    dataset = load_dataset(DATASET)
+    by_id = {sample.id: sample for sample in dataset.samples}
+    assert by_id["unsupported_beijing_block_01"].type == "single_turn"
+    assert by_id["unsupported_tehran_block_01"].type == "single_turn"
+    assert "unsupported_beijing_tehran_block_01" not in by_id
