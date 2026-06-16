@@ -20,12 +20,13 @@ except Exception:
 from app.components.faq_enhanced.constants import (
     CHROMA_PATH, EMBED_MODEL, EMBED_NORMALIZE, FAQ_COLLECTION_NAME,
     OPENAI_API_KEY, OPENAI_CHAT_MODEL, RAG_LOCAL_MODELS_ONLY, _BACKEND_ROOT,
+    _RETRIEVAL_CFG,
 )
 from app.services.dynamic_config import get_retrieval_config, get_vocabulary
 logger = logging.getLogger(__name__)
 
 from app.components.faq_enhanced.canonical import _build_canonical_documents, _merge_ranked_docs
-from app.components.faq_enhanced.embeddings import _SentenceTransformerEmbeddings, _local_model_load
+from app.components.faq_enhanced.embeddings import _SentenceTransformerEmbeddings, _is_local_model_reference, _local_model_load
 
 class FAQService:
     """

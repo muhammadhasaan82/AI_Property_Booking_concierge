@@ -11,6 +11,13 @@ from app.components.faq_enhanced.constants import RAG_LOCAL_MODELS_ONLY
 logger = logging.getLogger(__name__)
 
 
+def _is_local_model_reference(model_name: str) -> bool:
+    try:
+        return os.path.exists(os.path.expanduser(str(model_name)))
+    except OSError:
+        return False
+
+
 @contextmanager
 def _local_model_load(enabled: bool):
     if not enabled:

@@ -268,7 +268,7 @@ async def handle_booking_cancellation_turn(message: str, soft_state: dict):
                 else bool(booking_ok)
             )
 
-            if sb_ok and booking_ok_bool:
+            if sb_ok or booking_ok_bool:
                 for key in (
                     "booking_cancellation_pending",
                     "booking_cancellation_stage",

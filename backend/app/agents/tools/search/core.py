@@ -69,7 +69,7 @@ from app.agents.tools.search.normalize import (
     _split_amenities_by_known,
     _split_amenity_input,
 )
-from app.agents.tools.search.pagination import _build_search_page_payload, paginate_stored_results
+from app.agents.tools.search.pagination import _build_search_page_payload, _get_active_option_window, paginate_stored_results
 from app.agents.tools.search.planner import (
     _apply_planner_to_results,
     _build_dynamic_constraints_from_inputs,
