@@ -95,9 +95,10 @@ def _sync_facade_monkeypatches_to_adk_modules() -> None:
     import app.services.adk_runner.invocation as _invocation
     import app.services.adk_runner.session_service as _session_service
     import app.services.adk_runner.state_helpers as _state_helpers
+    import app.services.adk_runner.coverage_followups as _coverage_followups
 
     facade = sys.modules[__name__]
-    modules = (_turn, _handlers, _rendering, _invocation, _session_service, _state_helpers)
+    modules = (_turn, _handlers, _rendering, _invocation, _session_service, _state_helpers, _coverage_followups)
 
     names = [
         "get_session_snapshot",
@@ -136,9 +137,10 @@ def _sync_facade_monkeypatches_to_adk_modules_v3() -> None:
     import app.services.adk_runner.invocation as _invocation
     import app.services.adk_runner.session_service as _session_service
     import app.services.adk_runner.state_helpers as _state_helpers
+    import app.services.adk_runner.coverage_followups as _coverage_followups
 
     facade = sys.modules[__name__]
-    modules = (_turn, _handlers, _rendering, _invocation, _session_service, _state_helpers)
+    modules = (_turn, _handlers, _rendering, _invocation, _session_service, _state_helpers, _coverage_followups)
 
     names = [
         "get_session_snapshot",
