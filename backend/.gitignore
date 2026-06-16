@@ -6,6 +6,12 @@ __pycache__/
 .env
 frontend/.env.bak
 
+# Generated eval/report-card outputs
+evaluation/eval_results/*
+!evaluation/eval_results/.gitkeep
+evaluation/exports/*
+!evaluation/exports/.gitkeep
+
 # Model/cache files
 backend/models_cache/
 models_cache/
