@@ -53,3 +53,4 @@ mem0ai>=0.2.2
 
 # --- tests ---
 pytest>=9.0.2
+pytest-asyncio>=1.4.0
