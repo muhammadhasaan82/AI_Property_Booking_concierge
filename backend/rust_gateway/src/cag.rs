@@ -202,7 +202,13 @@ fn normalize(input: &str) -> String {
     input
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -318,7 +324,10 @@ mod tests {
 
     #[test]
     fn test_normalize() {
-        assert_eq!(normalize("  What TIME is Check-In??  "), "what time is check-in");
+        assert_eq!(
+            normalize("  What TIME is Check-In??  "),
+            "what time is check-in"
+        );
         assert_eq!(normalize(""), "");
         assert_eq!(normalize("!!!"), "");
     }

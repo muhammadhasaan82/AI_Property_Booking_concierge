@@ -1,7 +1,7 @@
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use serde_json::Value;
 
 /// A single cache entry with TTL.
 struct CacheEntry {
@@ -65,11 +65,14 @@ impl Cache {
         }
 
         tracing::debug!(key = %key, ttl_secs = ttl.as_secs(), "Cache SET");
-        store.insert(key, CacheEntry {
-            value,
-            created_at: Instant::now(),
-            ttl,
-        });
+        store.insert(
+            key,
+            CacheEntry {
+                value,
+                created_at: Instant::now(),
+                ttl,
+            },
+        );
     }
 
     /// Remove all expired entries.
@@ -108,10 +111,10 @@ impl Cache {
 pub mod ttl {
     use std::time::Duration;
 
-    pub const PROPERTY_SEARCH: Duration = Duration::from_secs(300);   // 5 minutes
-    pub const FAQ_ANSWER: Duration = Duration::from_secs(900);        // 15 minutes
-    pub const SESSION_STATE: Duration = Duration::from_secs(1800);    // 30 minutes
-    pub const PRICING: Duration = Duration::from_secs(60);            // 1 minute
+    pub const PROPERTY_SEARCH: Duration = Duration::from_secs(300); // 5 minutes
+    pub const FAQ_ANSWER: Duration = Duration::from_secs(900); // 15 minutes
+    pub const SESSION_STATE: Duration = Duration::from_secs(1800); // 30 minutes
+    pub const PRICING: Duration = Duration::from_secs(60); // 1 minute
 }
 
 /// Generate a cache key from request data.
@@ -120,7 +123,8 @@ pub fn cache_key(prefix: &str, data: &Value) -> String {
     let canonical = if let Some(obj) = data.as_object() {
         let mut sorted: Vec<_> = obj.iter().collect();
         sorted.sort_by_key(|(k, _)| k.as_str());
-        let sorted_map: serde_json::Map<String, Value> = sorted.into_iter()
+        let sorted_map: serde_json::Map<String, Value> = sorted
+            .into_iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         serde_json::to_string(&Value::Object(sorted_map)).unwrap_or_default()
@@ -144,7 +148,11 @@ mod tests {
     #[test]
     fn test_cache_set_get() {
         let cache = Cache::new(100);
-        cache.set("key1".to_string(), json!({"result": 42}), Duration::from_secs(60));
+        cache.set(
+            "key1".to_string(),
+            json!({"result": 42}),
+            Duration::from_secs(60),
+        );
         let val = cache.get("key1");
         assert!(val.is_some());
         assert_eq!(val.unwrap()["result"], 42);
@@ -159,7 +167,11 @@ mod tests {
     #[test]
     fn test_cache_expired() {
         let cache = Cache::new(100);
-        cache.set("key1".to_string(), json!({"result": 1}), Duration::from_millis(1));
+        cache.set(
+            "key1".to_string(),
+            json!({"result": 1}),
+            Duration::from_millis(1),
+        );
         std::thread::sleep(Duration::from_millis(5));
         assert!(cache.get("key1").is_none());
     }

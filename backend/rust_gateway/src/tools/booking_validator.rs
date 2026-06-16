@@ -1,6 +1,6 @@
-use serde_json::{json, Value};
-use chrono::NaiveDate;
 use super::Tool;
+use chrono::NaiveDate;
+use serde_json::{json, Value};
 
 /// Validates booking requests for completeness, date logic, and safety.
 pub struct BookingValidatorTool;
@@ -17,7 +17,15 @@ impl Tool for BookingValidatorTool {
 
     fn confidence(&self, input: &Value) -> f64 {
         let mut score: f64 = 0.0;
-        let booking_keys = ["property_id", "check_in", "check_out", "user_id", "guests", "name", "email"];
+        let booking_keys = [
+            "property_id",
+            "check_in",
+            "check_out",
+            "user_id",
+            "guests",
+            "name",
+            "email",
+        ];
         for key in &booking_keys {
             if input.get(*key).is_some() {
                 score += 0.15;
@@ -31,13 +39,19 @@ impl Tool for BookingValidatorTool {
         let mut warnings: Vec<String> = Vec::new();
 
         // Required fields
-        let property_id = input.get("property_id").and_then(|v| v.as_str()).unwrap_or("");
+        let property_id = input
+            .get("property_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if property_id.is_empty() {
             errors.push("property_id is required".to_string());
         }
 
         let check_in_str = input.get("check_in").and_then(|v| v.as_str()).unwrap_or("");
-        let check_out_str = input.get("check_out").and_then(|v| v.as_str()).unwrap_or("");
+        let check_out_str = input
+            .get("check_out")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         if check_in_str.is_empty() {
             errors.push("check_in date is required (YYYY-MM-DD)".to_string());
@@ -51,10 +65,16 @@ impl Tool for BookingValidatorTool {
         let check_out = NaiveDate::parse_from_str(check_out_str, "%Y-%m-%d").ok();
 
         if !check_in_str.is_empty() && check_in.is_none() {
-            errors.push(format!("Invalid check_in date format: '{}'. Use YYYY-MM-DD.", check_in_str));
+            errors.push(format!(
+                "Invalid check_in date format: '{}'. Use YYYY-MM-DD.",
+                check_in_str
+            ));
         }
         if !check_out_str.is_empty() && check_out.is_none() {
-            errors.push(format!("Invalid check_out date format: '{}'. Use YYYY-MM-DD.", check_out_str));
+            errors.push(format!(
+                "Invalid check_out date format: '{}'. Use YYYY-MM-DD.",
+                check_out_str
+            ));
         }
 
         let mut nights: i64 = 0;
@@ -82,7 +102,10 @@ impl Tool for BookingValidatorTool {
             errors.push("guests must be at least 1".to_string());
         }
         if guests > 20 {
-            warnings.push(format!("Large party ({} guests) — may require special arrangements.", guests));
+            warnings.push(format!(
+                "Large party ({} guests) — may require special arrangements.",
+                guests
+            ));
         }
 
         // User info validation

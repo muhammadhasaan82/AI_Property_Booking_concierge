@@ -1,23 +1,23 @@
-mod gateway;
-mod tools;
 mod cache;
-mod toon;
-mod config;
 mod cag;
+mod config;
+mod gateway;
 mod rate_limiter;
+mod tools;
+mod toon;
 
 use crate::tools::Tool;
+use arc_swap::ArcSwap;
+use axum::body::Body;
+use axum::response::{IntoResponse, Response};
 use axum::{
     extract::{DefaultBodyLimit, State},
-    http::{StatusCode, HeaderMap},
+    http::{HeaderMap, StatusCode},
     routing::{get, post},
     Json, Router,
 };
-use axum::body::Body;
-use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use arc_swap::ArcSwap;
 use tower_http::cors::{Any, CorsLayer};
 
 struct AppState {
@@ -30,11 +30,7 @@ struct AppState {
 async fn health() -> Json<Value> {
     Json(json!({"ok": true, "service": "rust_gateway", "version": "0.1.0"}))
 }
-async fn execute(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    body: String,
-) -> Response {
+async fn execute(State(state): State<Arc<AppState>>, headers: HeaderMap, body: String) -> Response {
     let content_type = headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
@@ -65,7 +61,10 @@ async fn execute(
         if let Some(hit) = state.cag_store.load().try_intercept(query) {
             tracing::info!(
                 "[CAG] Cache Hit: Intercepted query '{}' (policy={}, match={}, score={:.3})",
-                query, hit.policy_id, hit.match_type, hit.score
+                query,
+                hit.policy_id,
+                hit.match_type,
+                hit.score
             );
             let cag_response = json!({
                 "ok": true,
@@ -79,7 +78,10 @@ async fn execute(
             });
             return make_response(&headers, &cag_response);
         } else {
-            tracing::info!("[CAG] Cache Miss: Passing to database for query '{}'", query);
+            tracing::info!(
+                "[CAG] Cache Miss: Passing to database for query '{}'",
+                query
+            );
         }
     }
 
@@ -95,7 +97,10 @@ async fn execute(
     let result = gateway::process_request(&data, &context, &state.registry);
 
     if result.get("ok") == Some(&json!(true)) {
-        let intent = result.get("intent").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let intent = result
+            .get("intent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let ttl = match intent {
             "search" => cache::ttl::PROPERTY_SEARCH,
             "booking" | "status" => cache::ttl::SESSION_STATE,
@@ -128,10 +133,7 @@ fn make_response(headers: &HeaderMap, value: &Value) -> Response {
     }
 }
 
-async fn tool_search(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+async fn tool_search(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Json<Value> {
     let tool = state.registry.select(&body);
     match tool {
         Some(t) if t.name() == "property_search" => Json(t.execute(&body)),
@@ -150,10 +152,7 @@ async fn tool_validate_booking(
     Json(tool.execute(&body))
 }
 
-async fn tool_pricing(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+async fn tool_pricing(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Json<Value> {
     let tool = tools::pricing::PricingTool::new(state.thresholds.pricing.clone());
     Json(tool.execute(&body))
 }
@@ -166,10 +165,7 @@ async fn tool_sentiment(
     Json(tool.execute(&body))
 }
 
-async fn tool_fraud(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+async fn tool_fraud(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> Json<Value> {
     let tool = tools::fraud_check::FraudCheckTool::new(state.thresholds.fraud.clone());
     Json(tool.execute(&body))
 }
@@ -188,11 +184,7 @@ async fn cag_stats(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(state.cag_store.load().stats())
 }
 
-async fn reload_cag(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Response {
-  
+async fn reload_cag(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let expected = std::env::var("ADMIN_TOKEN").unwrap_or_default();
     if expected.trim().is_empty() {
         let body = json!({"ok": false, "error": "ADMIN_TOKEN not configured"});
@@ -215,7 +207,10 @@ async fn reload_cag(
     let new_store = cag::CagStore::new(new_config);
     let policy_count = new_store.policy_count();
     state.cag_store.store(Arc::new(new_store));
-    tracing::info!("[CAG] hot-reload complete, {} policies active", policy_count);
+    tracing::info!(
+        "[CAG] hot-reload complete, {} policies active",
+        policy_count
+    );
 
     Json(json!({
         "ok": true,
@@ -239,10 +234,12 @@ async fn main() {
     let registry = tools::build_default_registry(&thresholds, &vader_lexicon);
     tracing::info!("Registered {} tools", registry.list_tools().len());
 
-
     let cag_config = config::load_cag_config();
     let cag_store_inner = cag::CagStore::new(cag_config);
-    tracing::info!("[CAG] Initialized with {} policies", cag_store_inner.policy_count());
+    tracing::info!(
+        "[CAG] Initialized with {} policies",
+        cag_store_inner.policy_count()
+    );
     let cag_store = ArcSwap::from(Arc::new(cag_store_inner));
 
     let cache = cache::Cache::new(10_000);
@@ -255,34 +252,28 @@ async fn main() {
         vader_lexicon,
     });
 
-
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-
     let app = Router::new()
-
         .route("/health", get(health))
         .route("/execute", post(execute))
         .route("/tools", get(list_tools))
         .route("/cache/stats", get(cache_stats))
         .route("/cag/stats", get(cag_stats))
-
         .route("/admin/reload-cag", post(reload_cag))
-        
         .route("/tools/search", post(tool_search))
         .route("/tools/validate-booking", post(tool_validate_booking))
         .route("/tools/pricing", post(tool_pricing))
         .route("/tools/sentiment", post(tool_sentiment))
         .route("/tools/fraud", post(tool_fraud))
         .layer(DefaultBodyLimit::disable())
-        
         .layer(rate_limiter::RateLimitLayer::from_env())
         .layer(cors)
         .with_state(state);
-    
+
     let port = std::env::var("RUST_PORT").unwrap_or_else(|_| "3001".to_string());
     let addr = format!("0.0.0.0:{}", port);
     tracing::info!("Rust Gateway listening on {}", addr);

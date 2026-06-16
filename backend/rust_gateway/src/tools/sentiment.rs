@@ -1,6 +1,6 @@
+use super::Tool;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use super::Tool;
 
 /// VADER-inspired sentiment analysis tool.
 /// Uses a built-in lexicon for fast, deterministic scoring.
@@ -28,8 +28,12 @@ impl Tool for SentimentTool {
 
     fn confidence(&self, input: &Value) -> f64 {
         // Sentiment is a support tool — lower priority unless explicitly about text analysis
-        if input.get("analyze_sentiment").is_some() { return 0.9; }
-        if input.get("feedback").is_some() || input.get("review").is_some() { return 0.7; }
+        if input.get("analyze_sentiment").is_some() {
+            return 0.9;
+        }
+        if input.get("feedback").is_some() || input.get("review").is_some() {
+            return 0.7;
+        }
         if input.get("text").is_some() || input.get("message").is_some() {
             // Low priority to avoid stealing from other tools
             return 0.15;
@@ -38,7 +42,8 @@ impl Tool for SentimentTool {
     }
 
     fn execute(&self, input: &Value) -> Value {
-        let text = input.get("text")
+        let text = input
+            .get("text")
             .or_else(|| input.get("message"))
             .or_else(|| input.get("review"))
             .or_else(|| input.get("feedback"))
@@ -46,7 +51,8 @@ impl Tool for SentimentTool {
             .unwrap_or("");
 
         let lexicon = &self.lexicon;
-        let words: Vec<&str> = text.split_whitespace()
+        let words: Vec<&str> = text
+            .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
             .filter(|w| !w.is_empty())
             .collect();
@@ -60,7 +66,9 @@ impl Tool for SentimentTool {
         for (i, word) in words.iter().enumerate() {
             let lower = word.to_lowercase();
             if let Some(score) = lexicon.get(lower.as_str()) {
-                if *score == 0.0 { continue; } // booster, skip direct scoring
+                if *score == 0.0 {
+                    continue;
+                } // booster, skip direct scoring
 
                 // Apply booster if previous word is an intensifier
                 let mut final_score = *score;
@@ -139,7 +147,8 @@ mod tests {
     #[test]
     fn test_negative_sentiment() {
         let tool = SentimentTool::new(crate::config::load_vader_lexicon().words);
-        let input = json!({"text": "Terrible experience, the room was dirty and the service was awful"});
+        let input =
+            json!({"text": "Terrible experience, the room was dirty and the service was awful"});
         let result = tool.execute(&input);
         assert_eq!(result["label"], "negative");
         assert!(result["compound"].as_f64().unwrap() < 0.0);

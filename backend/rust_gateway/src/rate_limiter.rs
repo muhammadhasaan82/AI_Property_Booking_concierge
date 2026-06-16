@@ -211,7 +211,10 @@ where
 
             let response = (
                 StatusCode::TOO_MANY_REQUESTS,
-                [("content-type", "application/json"), ("retry-after", &window_secs.to_string())],
+                [
+                    ("content-type", "application/json"),
+                    ("retry-after", &window_secs.to_string()),
+                ],
                 body.to_string(),
             )
                 .into_response();

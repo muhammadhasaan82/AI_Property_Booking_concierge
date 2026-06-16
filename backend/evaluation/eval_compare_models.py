@@ -18,7 +18,7 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _BACKEND = _HERE.parent
-RUN_SUITE = _HERE / "run_eval_suite.py"
+V2_EVAL = _HERE / "v2_eval.py"
 
 def run_suite_with_model(model: str, golden: str, out_path: Path) -> dict:
     env = os.environ.copy()
@@ -27,30 +27,40 @@ def run_suite_with_model(model: str, golden: str, out_path: Path) -> dict:
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        sys.executable, str(RUN_SUITE),
-        "--golden", golden,
-        "--json", "--out", str(out_path),
-        "--threshold-tool", "0.0",
-        "--threshold-args", "0.0",
-        "--threshold-intent", "0.0",
+        sys.executable, str(V2_EVAL),
+        "--dataset", golden,
+        "--json",
+        "--out", str(out_path),
+        "--fail-under", "0.0",
     ]
     print(f"\n=== Running with model={model} ===")
     res = subprocess.run(cmd, env=env, cwd=_BACKEND)
     if res.returncode not in (0, 1):
-        raise RuntimeError(f"run_eval_suite.py failed (rc={res.returncode})")
+        raise RuntimeError(f"v2_eval.py failed (rc={res.returncode})")
     with open(out_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def diff_matrics(a: dict, b: dict) -> dict:
+def _metrics(payload: dict) -> dict:
+    report = payload.get("report_card") or {}
+    return {
+        "pass_rate": float(report.get("pass_rate") or 0.0),
+        "average_score": float(report.get("average_score") or 0.0),
+        "deterministic_score": float(report.get("deterministic_score") or 0.0),
+        "failed_cases": float(report.get("failed_cases") or 0.0),
+        "partial_pass_cases": float(report.get("partial_pass_cases") or 0.0),
+    }
+
+def diff_metrics(a: dict, b: dict) -> dict:
+    a_metrics = _metrics(a)
+    b_metrics = _metrics(b)
     keys = (
-        "tool_selection_accuracy",
-        "arg_extraction_accuracy",
-        "frame_intent_accuracy",
-        "policy_agreement_rate",
-        "error_rate",
-        "avg_latency_ms",
+        "pass_rate",
+        "average_score",
+        "deterministic_score",
+        "failed_cases",
+        "partial_pass_cases",
     )
-    return {k: round((b["metrics"][k] - a["metrics"][k]), 4) for k in keys}
+    return {k: round((b_metrics[k] - a_metrics[k]), 4) for k in keys}
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -67,19 +77,19 @@ def main() -> int:
     a_payload = run_suite_with_model(args.baseline, args.golden, a_path)
     b_payload = run_suite_with_model(args.candidate, args.golden, b_path)
 
-    delta = diff_matrics(a_payload, b_payload)
+    delta = diff_metrics(a_payload, b_payload)
 
     summary = {
         "baseline_model": args.baseline,
         "candidate_model": args.candidate,
-        "baseline_metrics": a_payload["metrics"],
-        "candidate_metrics": b_payload["metrics"],
+        "baseline_metrics": _metrics(a_payload),
+        "candidate_metrics": _metrics(b_payload),
         "delta_candidate_minus_baseline": delta,
     }
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
-    print("\n=== Δ candidate - baseline ===")
+    print("\n=== Delta candidate - baseline ===")
     for k, v in delta.items():
         sing = "+" if v >= 0 else ""
         print(f"    {k:<32} {sing}{v}")

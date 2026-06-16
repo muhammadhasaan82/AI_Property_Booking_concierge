@@ -1,6 +1,6 @@
-use serde_json::{json, Value};
 use super::Tool;
 use crate::config::FraudThresholds;
+use serde_json::{json, Value};
 
 /// Fraud and sanity checks on booking/payment data.
 pub struct FraudCheckTool {
@@ -21,16 +21,28 @@ impl Tool for FraudCheckTool {
     fn can_handle(&self, input: &Value) -> bool {
         // Only handle if explicitly requested or has fraud-related context
         input.get("check_fraud").is_some()
-            || (input.get("email").is_some() && input.get("phone").is_some() && input.get("amount").is_some())
+            || (input.get("email").is_some()
+                && input.get("phone").is_some()
+                && input.get("amount").is_some())
     }
 
     fn confidence(&self, input: &Value) -> f64 {
-        if input.get("check_fraud").is_some() { return 0.95; }
+        if input.get("check_fraud").is_some() {
+            return 0.95;
+        }
         let mut score: f64 = 0.0;
-        if input.get("email").is_some() { score += 0.1; }
-        if input.get("phone").is_some() { score += 0.1; }
-        if input.get("amount").is_some() { score += 0.1; }
-        if input.get("guests").is_some() { score += 0.05; }
+        if input.get("email").is_some() {
+            score += 0.1;
+        }
+        if input.get("phone").is_some() {
+            score += 0.1;
+        }
+        if input.get("amount").is_some() {
+            score += 0.1;
+        }
+        if input.get("guests").is_some() {
+            score += 0.05;
+        }
         score.min(0.4) // Stay below other tools unless explicitly requested
     }
 
@@ -46,8 +58,14 @@ impl Tool for FraudCheckTool {
             }
             // Disposable email domains
             // TODO: Move this list to config/tool_registry.toml for operational updates without recompilation.
-            let disposable = ["tempmail.com", "throwaway.email", "guerrillamail.com",
-                            "mailinator.com", "10minutemail.com", "yopmail.com"];
+            let disposable = [
+                "tempmail.com",
+                "throwaway.email",
+                "guerrillamail.com",
+                "mailinator.com",
+                "10minutemail.com",
+                "yopmail.com",
+            ];
             let domain = email.split('@').last().unwrap_or("");
             if disposable.iter().any(|d| domain == *d) {
                 flags.push("disposable_email".to_string());

@@ -65,9 +65,25 @@ Services started:
 - `AI Booking UI` → http://localhost:8501
 - `rust_gateway` → http://localhost:3001
 
+## GitHub Pages
+
+GitHub Pages hosts only the static frontend in `frontend_static/`. It cannot run
+the FastAPI backend, Chainlit UI, Redis/session state, Supabase/Postgres, the
+Rust gateway, or LLM provider calls.
+
+Use `.github/workflows/pages.yml` to publish the static site to:
+
+```text
+https://muhammadhasaan82.github.io/AI_Property_Booking_concierge/
+```
+
+For live chat from Pages, deploy the backend API separately and set the GitHub
+repository variable `PUBLIC_API_BASE_URL` to that public HTTPS backend URL. See
+`docs/github-pages.md` for setup details.
+
 ## Production Checklist
 
-- [ ] Set `CORS` origins to specific frontend domain in `app/main.py`
+- [ ] Set `BACKEND_CORS_ORIGINS` to specific frontend domains
 - [ ] Use a strong PostgreSQL `DATABASE_URL` (not SQLite)
 - [ ] Set `STRIPE_WEBHOOK_SECRET` for payment webhooks
 - [ ] Enable HTTPS termination at reverse proxy (nginx/caddy)
