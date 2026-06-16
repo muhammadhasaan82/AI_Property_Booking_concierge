@@ -31,6 +31,7 @@ class EvalTurn:
 class ScoringConfig:
     weights: dict[str, float] = field(default_factory=dict)
     pass_threshold: float = 0.8
+    strict: bool = False
 
 
 @dataclass
@@ -86,6 +87,7 @@ def _scoring_from(raw: dict[str, Any] | None, default: dict[str, Any] | None) ->
     return ScoringConfig(
         weights=dict(data.get("weights") or {}),
         pass_threshold=float(data.get("pass_threshold", 0.8)),
+        strict=bool(data.get("strict", False)),
     )
 
 

@@ -73,6 +73,16 @@ def build_report_card(results: list[CaseResult], *, fail_under: float = 1.0) -> 
         for result in results
         if not result.passed
     ]
+    partial_passes = [
+        {
+            "id": result.id,
+            "score": result.score,
+            "tags": result.tags,
+            "warnings": result.failures,
+        }
+        for result in results
+        if result.passed and result.failures
+    ]
     slowest = sorted(
         [{"id": result.id, "latency_ms": result.latency_ms, "score": result.score} for result in results],
         key=lambda item: item["latency_ms"],
@@ -84,6 +94,7 @@ def build_report_card(results: list[CaseResult], *, fail_under: float = 1.0) -> 
         "total_cases": total,
         "passed_cases": passed,
         "failed_cases": total - passed,
+        "partial_pass_cases": len(partial_passes),
         "pass_rate": _percent(pass_rate),
         "average_score": round(average_score, 4),
         "deterministic_score": round(deterministic_score, 4),
@@ -91,6 +102,7 @@ def build_report_card(results: list[CaseResult], *, fail_under: float = 1.0) -> 
         "per_category": per_category,
         "latency_ms": _latency([result.latency_ms for result in results]),
         "failures": failures,
+        "warnings": partial_passes,
         "top_regressions": top_regressions,
         "slowest_cases": slowest,
         "ci": {
@@ -112,6 +124,8 @@ def render_terminal_report(report: dict[str, Any]) -> str:
         "AI Report Card",
         "==============",
         f"Cases: {report['passed_cases']}/{report['total_cases']} passed ({report['pass_rate']}%)",
+        f"Hard failures: {report['failed_cases']}",
+        f"Partial pass warnings: {report['partial_pass_cases']}",
         f"Average score: {report['average_score']:.4f}",
         f"Deterministic score: {report['deterministic_score']:.4f}",
         f"LLM judge score: {report['llm_judge_score'] if report['llm_judge_score'] is not None else 'skipped'}",
@@ -140,6 +154,14 @@ def render_terminal_report(report: dict[str, Any]) -> str:
     else:
         lines.append("Failures: none")
     lines.append("")
+    if report["warnings"]:
+        lines.append("Warnings / Partial Passes")
+        for warning in report["warnings"][:20]:
+            first_warning = warning["warnings"][0] if warning["warnings"] else "weighted pass with warning"
+            lines.append(f"- {warning['id']} score={warning['score']:.4f}: {first_warning}")
+    else:
+        lines.append("Warnings / Partial Passes: none")
+    lines.append("")
     lines.append("Slowest Cases")
     for item in report["slowest_cases"][:5]:
         lines.append(f"- {item['id']}: {item['latency_ms']} ms")
@@ -151,6 +173,8 @@ def render_markdown_report(report: dict[str, Any]) -> str:
         "# AI Report Card",
         "",
         f"- Cases: {report['passed_cases']}/{report['total_cases']} passed ({report['pass_rate']}%)",
+        f"- Hard failures: `{report['failed_cases']}`",
+        f"- Partial pass warnings: `{report['partial_pass_cases']}`",
         f"- Average score: `{report['average_score']:.4f}`",
         f"- Deterministic score: `{report['deterministic_score']:.4f}`",
         f"- LLM judge score: `{report['llm_judge_score'] if report['llm_judge_score'] is not None else 'skipped'}`",
@@ -167,6 +191,12 @@ def render_markdown_report(report: dict[str, Any]) -> str:
     if report["failures"]:
         for failure in report["failures"]:
             lines.append(f"- `{failure['id']}` score `{failure['score']:.4f}`: {'; '.join(failure['failures'])}")
+    else:
+        lines.append("None.")
+    lines.extend(["", "## Warnings / Partial Passes", ""])
+    if report["warnings"]:
+        for warning in report["warnings"]:
+            lines.append(f"- `{warning['id']}` score `{warning['score']:.4f}`: {'; '.join(warning['warnings'])}")
     else:
         lines.append("None.")
     return "\n".join(lines) + "\n"

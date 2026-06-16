@@ -230,8 +230,11 @@ def score_turn(
     score = sum(scores[key] * float(weights.get(key, 0.0)) for key in scores) / total_weight
     if exception:
         score = min(score, 0.2)
+    passed = score >= scoring.pass_threshold and not exception
+    if scoring.strict and failures:
+        passed = False
     return ScoreResult(
-        passed=score >= scoring.pass_threshold and not exception,
+        passed=passed,
         score=round(score, 4),
         scores={key: round(value, 4) for key, value in scores.items()},
         failures=failures,
