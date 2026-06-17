@@ -67,6 +67,12 @@ from app.config.conversation_shortcuts_loader import match_shortcut
 from app.config.service_coverage_loader import evaluate_message_coverage
 from app.services.observability.langfuse_observer import get_observer
 
+from app.services.adk_runner.coverage_followups import (
+    _maybe_handle_property_refinement_followup,
+    _maybe_handle_service_coverage_followup,
+)
+
+
 async def _maybe_handle_faq_resume_turn(
     *,
     session_id: str,
@@ -262,36 +268,35 @@ async def _maybe_record_unsupported_region(
     session_id: str,
     country: str | None,
 ) -> None:
-    """Persist only last_unsupported_region; do not touch booking/search state."""
+    """Persist unsupported-region follow-up state without touching booking/search state."""
     if not country:
         return
     try:
         snapshot = await get_session_snapshot(session_id)
         if not isinstance(snapshot, dict):
-            return
+            snapshot = {"state": {}, "history": [], "meta": {}}
+
         state = snapshot.get("state")
         if not isinstance(state, dict):
-            return
+            state = {}
+
         soft_state = state.get("soft_state")
         if not isinstance(soft_state, dict):
             soft_state = {}
         else:
             soft_state = dict(soft_state)
+
         soft_state["last_unsupported_region"] = country
-        persisted_state = _state_with_persisted_soft_state(state, soft_state)
-        meta = snapshot.get("meta") or {}
-        await save_session_snapshot(
+        soft_state["service_coverage_stage"] = "awaiting_city_list_confirmation"
+
+        await _persist_service_coverage_state(
             session_id=session_id,
-            history=snapshot.get("history", []),
-            state=persisted_state,
-            metadata={
-                key: meta[key]
-                for key in ("app_name", "user_id", "last_update_time")
-                if key in meta
-            },
+            snapshot=snapshot,
+            state=state,
+            soft_state=soft_state,
         )
     except Exception as exc:
-        logger.debug("[service_coverage] Could not persist last_unsupported_region: %s", exc)
+        logger.debug("[service_coverage] Could not persist unsupported-region follow-up: %s", exc)
 
 async def _maybe_handle_active_booking_turn(
     *,

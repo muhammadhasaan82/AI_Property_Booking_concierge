@@ -8,7 +8,7 @@ coverage:
     - US
     - USA
   unsupported_region_response: >-
-    This application is only available for the United States region only.
+    We are sorry, the desired property is not available. This service is currently available for the United States only. If you are in the US and your city is not found, please be patient as we are expanding across the country. Would you like me to list the cities where our service is available?
   allow_dataset_regions_outside_supported_market: false
 
 city_country_map:
@@ -26,6 +26,9 @@ city_country_map:
   Lahore: Pakistan
   Karachi: Pakistan
   Islamabad: Pakistan
+  Seoul: South Korea
+  Beijing: China
+  Tehran: Iran
   Dubai: United Arab Emirates
 
 region_aliases:
@@ -37,6 +40,16 @@ region_aliases:
   Pakistan:
     - pakistan
     - pk
+  South Korea:
+    - south korea
+    - korea
+    - seoul
+  China:
+    - china
+    - beijing
+  Iran:
+    - iran
+    - tehran
   United Arab Emirates:
     - uae
     - united arab emirates

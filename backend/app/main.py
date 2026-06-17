@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 import sys
+from urllib.parse import urlsplit
 
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -31,10 +33,39 @@ from app.services.observability.langfuse_observer import (
 app = FastAPI(title="AI Concierge & Calling Agent")
 logger = logging.getLogger(__name__)
 
+
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:8501",
+    "http://localhost:3000",
+    "http://127.0.0.1:8501",
+    "https://muhammadhasaan82.github.io",
+)
+
+
+def _origin_only(value: str) -> str:
+    text = (value or "").strip().rstrip("/")
+    if not text or text == "*":
+        return text
+    parsed = urlsplit(text)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return text
+
+
+def _get_cors_origins() -> list[str]:
+    raw = os.getenv("BACKEND_CORS_ORIGINS") or os.getenv("CORS_ORIGINS") or ""
+    if not raw.strip():
+        return list(DEFAULT_CORS_ORIGINS)
+    origins = [_origin_only(part) for part in raw.split(",")]
+    return [origin for origin in origins if origin]
+
+
+CORS_ORIGINS = _get_cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials="*" not in CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

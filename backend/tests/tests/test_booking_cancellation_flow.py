@@ -242,6 +242,41 @@ async def test_negated_cancellation_is_rejection(monkeypatch, message):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I do not want to cancel my booking",
+        "I don't want to cancel my booking",
+        "dont cancel my booking",
+        "do not delete my booking",
+        "keep my booking",
+        "never mind, don't cancel",
+    ],
+)
+async def test_negated_cancellation_without_confirmation_does_not_start_flow(message):
+    from app.services.booking.cancellation import handle_booking_cancellation_turn
+
+    soft_state = {
+        "booking_receipt": dict(_TEST_RECEIPT),
+        "booking_cancellation_pending": True,
+        "booking_cancellation_id": "BK-20260601-12345678",
+        "booking_cancellation_receipt": dict(_TEST_RECEIPT),
+    }
+
+    payload = await handle_booking_cancellation_turn(message, soft_state)
+
+    assert payload["status"] == "cancellation_not_requested"
+    assert payload["deterministic_reply"] == (
+        "Okay, I will not cancel your booking. Your booking remains unchanged."
+    )
+    assert "booking_cancellation_pending" not in soft_state
+    assert "booking_cancellation_stage" not in soft_state
+    assert "booking_cancellation_id" not in soft_state
+    assert "booking_cancellation_receipt" not in soft_state
+    assert soft_state["booking_receipt"]["status"] == "confirmed"
+
+
+@pytest.mark.asyncio
 async def test_db_failure_keeps_pending_cancellation_state(monkeypatch):
     snapshot = _build_cancellation_snapshot({
         "booking_cancellation_pending": True,

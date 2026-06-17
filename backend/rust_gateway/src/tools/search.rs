@@ -1,6 +1,5 @@
-use serde_json::{json, Value};
 use super::Tool;
-
+use serde_json::{json, Value};
 
 pub struct PropertySearchTool;
 
@@ -9,8 +8,16 @@ impl PropertySearchTool {
         if wanted.is_empty() {
             return true;
         }
-        let a = row_city.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
-        let b = wanted.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        let a = row_city
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        let b = wanted
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
         a == b
     }
 
@@ -41,27 +48,44 @@ impl Tool for PropertySearchTool {
 
     fn confidence(&self, input: &Value) -> f64 {
         let mut score: f64 = 0.0;
-        let keys = ["location", "city", "budget", "beds", "amenities", "property_type", "query_text"];
+        let keys = [
+            "location",
+            "city",
+            "budget",
+            "beds",
+            "amenities",
+            "property_type",
+            "query_text",
+        ];
         for key in &keys {
             if input.get(*key).is_some() {
                 score += 0.15;
             }
         }
 
-        if score > 0.3 { score += 0.1; }
+        if score > 0.3 {
+            score += 0.1;
+        }
         score.min(1.0)
     }
 
     fn execute(&self, input: &Value) -> Value {
-        let location = input.get("location")
+        let location = input
+            .get("location")
             .or_else(|| input.get("city"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
         let budget = input.get("budget").and_then(|v| v.as_f64());
         let beds = input.get("beds").and_then(|v| v.as_i64());
-        let property_type = input.get("property_type").and_then(|v| v.as_str()).unwrap_or("");
-        let query_text = input.get("query_text").and_then(|v| v.as_str()).unwrap_or("");
+        let property_type = input
+            .get("property_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let query_text = input
+            .get("query_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let max_results = input
             .get("max_results")
             .and_then(|v| v.as_u64())
@@ -85,8 +109,7 @@ impl Tool for PropertySearchTool {
             })
             .unwrap_or_default();
 
-
-            let properties = input.get("properties").and_then(|v| v.as_array());
+        let properties = input.get("properties").and_then(|v| v.as_array());
 
         let mut results: Vec<Value> = Vec::new();
 
@@ -114,7 +137,8 @@ impl Tool for PropertySearchTool {
                 }
 
                 if !property_type.is_empty() {
-                    let p_type = p.get("property_type")
+                    let p_type = p
+                        .get("property_type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .trim()
@@ -128,19 +152,24 @@ impl Tool for PropertySearchTool {
                 let row_amenities: Vec<String> = p
                     .get("amenities")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|a| a.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|a| a.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
 
                 if !Self::matches_amenities(&row_amenities, &wanted_amenities) {
                     continue;
                 }
 
-
                 if !query_text.is_empty() && location.is_empty() && property_type.is_empty() {
                     let hay = format!(
                         "{} {} {} {}",
                         p.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                        p.get("property_type").and_then(|v| v.as_str()).unwrap_or(""),
+                        p.get("property_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(""),
                         p_city,
                         p.get("description").and_then(|v| v.as_str()).unwrap_or("")
                     )
@@ -157,19 +186,27 @@ impl Tool for PropertySearchTool {
                 results.push(p.clone());
             }
 
-
             results.sort_by(|a, b| {
-                let price_a = a.get("price_per_night").and_then(|v| v.as_f64()).unwrap_or(f64::MAX);
-                let price_b = b.get("price_per_night").and_then(|v| v.as_f64()).unwrap_or(f64::MAX);
-                let cmp = price_a.partial_cmp(&price_b).unwrap_or(std::cmp::Ordering::Equal);
+                let price_a = a
+                    .get("price_per_night")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(f64::MAX);
+                let price_b = b
+                    .get("price_per_night")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(f64::MAX);
+                let cmp = price_a
+                    .partial_cmp(&price_b)
+                    .unwrap_or(std::cmp::Ordering::Equal);
                 if cmp != std::cmp::Ordering::Equal {
                     return cmp;
                 }
                 let rating_a = a.get("rating").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let rating_b = b.get("rating").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
+                rating_b
+                    .partial_cmp(&rating_a)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
-
         }
 
         let total_matches = results.len();
@@ -261,48 +298,51 @@ mod tests {
         assert!(!tool.can_handle(&json!({"booking_id": "abc"})));
     }
 }
-    #[test]
-    fn test_property_type_exact_match_not_substring() {
-        let tool = PropertySearchTool;
-        let input = json!({
-            "location": "New York",
-            "property_type": "apartment",
-            "properties": [
-                {"id": "p1", "city": "New York", "price_per_night": 100.0, "property_type": "Apartment"},
-                {"id": "p2", "city": "New York", "price_per_night": 110.0, "property_type": "Duplex"},
-                {"id": "p3", "city": "New York", "price_per_night": 120.0, "property_type": "House"},
-                {"id": "p4", "city": "New York", "price_per_night": 130.0, "property_type": "Loft"},
-                {"id": "p5", "city": "New York", "price_per_night": 90.0, "property_type": "Apartment"}
-            ]
-        });
-        let result = tool.execute(&input);
-        assert_eq!(result["count"], 2, "should return only 2 apartments");
-        let ids: Vec<&str> = result["results"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|r| r["id"].as_str())
-            .collect();
-        assert!(ids.contains(&"p1"), "p1 apartment must be in results");
-        assert!(ids.contains(&"p5"), "p5 apartment must be in results");
-        assert!(!ids.contains(&"p2"), "p2 duplex must NOT be in results");
-        assert!(!ids.contains(&"p3"), "p3 house must NOT be in results");
-        assert!(!ids.contains(&"p4"), "p4 loft must NOT be in results");
-    }
+#[test]
+fn test_property_type_exact_match_not_substring() {
+    let tool = PropertySearchTool;
+    let input = json!({
+        "location": "New York",
+        "property_type": "apartment",
+        "properties": [
+            {"id": "p1", "city": "New York", "price_per_night": 100.0, "property_type": "Apartment"},
+            {"id": "p2", "city": "New York", "price_per_night": 110.0, "property_type": "Duplex"},
+            {"id": "p3", "city": "New York", "price_per_night": 120.0, "property_type": "House"},
+            {"id": "p4", "city": "New York", "price_per_night": 130.0, "property_type": "Loft"},
+            {"id": "p5", "city": "New York", "price_per_night": 90.0, "property_type": "Apartment"}
+        ]
+    });
+    let result = tool.execute(&input);
+    assert_eq!(result["count"], 2, "should return only 2 apartments");
+    let ids: Vec<&str> = result["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert!(ids.contains(&"p1"), "p1 apartment must be in results");
+    assert!(ids.contains(&"p5"), "p5 apartment must be in results");
+    assert!(!ids.contains(&"p2"), "p2 duplex must NOT be in results");
+    assert!(!ids.contains(&"p3"), "p3 house must NOT be in results");
+    assert!(!ids.contains(&"p4"), "p4 loft must NOT be in results");
+}
 
-    #[test]
-    fn test_plural_property_type_excluded() {
-        // "apartments" (plural) must NOT match "Apartment" rows after Python
-        // normalization. This test verifies Rust does exact match only.
-        let tool = PropertySearchTool;
-        let input = json!({
-            "property_type": "apartments",   // NOT canonical — Python should have normalized first
-            "properties": [
-                {"id": "p1", "city": "NYC", "price_per_night": 100.0, "property_type": "Apartment"}
-            ]
-        });
-        let result = tool.execute(&input);
-        // Rust exact match: "apartment" != "apartments" → 0 results
-        // This confirms Python normalization is REQUIRED before calling Rust.
-        assert_eq!(result["count"], 0, "plural form must not match without normalization");
-    }
+#[test]
+fn test_plural_property_type_excluded() {
+    // "apartments" (plural) must NOT match "Apartment" rows after Python
+    // normalization. This test verifies Rust does exact match only.
+    let tool = PropertySearchTool;
+    let input = json!({
+        "property_type": "apartments",   // NOT canonical — Python should have normalized first
+        "properties": [
+            {"id": "p1", "city": "NYC", "price_per_night": 100.0, "property_type": "Apartment"}
+        ]
+    });
+    let result = tool.execute(&input);
+    // Rust exact match: "apartment" != "apartments" → 0 results
+    // This confirms Python normalization is REQUIRED before calling Rust.
+    assert_eq!(
+        result["count"], 0,
+        "plural form must not match without normalization"
+    );
+}

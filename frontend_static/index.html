@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Property Booking Concierge</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="config.js"></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div>
+        <p class="eyebrow">Static GitHub Pages frontend</p>
+        <h1>AI Property Booking Concierge</h1>
+        <p class="lede">
+          Search properties, check backend health, and connect to the hosted API when it is configured.
+        </p>
+      </div>
+      <a class="repo-link" href="https://github.com/muhammadhasaan82/AI_Property_Booking_concierge" rel="noreferrer" target="_blank">
+        GitHub repository
+      </a>
+    </header>
+
+    <main class="layout">
+      <section class="panel status-panel" aria-labelledby="status-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">API status</p>
+            <h2 id="status-title">Backend connection</h2>
+          </div>
+          <span id="statusBadge" class="badge badge-warning">Not checked</span>
+        </div>
+
+        <label for="apiBaseUrl">Backend API base URL</label>
+        <div class="url-row">
+          <input id="apiBaseUrl" type="url" placeholder="https://your-backend.example.com">
+          <button id="saveConfigButton" type="button">Save</button>
+        </div>
+        <p id="configNotice" class="notice">
+          Backend API is not configured. Set PUBLIC_API_BASE_URL in repository variables, or enter a URL here for this browser.
+        </p>
+
+        <div class="actions">
+          <button id="healthButton" type="button">Check health</button>
+          <a id="docsLink" class="button secondary disabled" href="#" aria-disabled="true">Open API docs</a>
+        </div>
+
+        <pre id="healthOutput" class="output" aria-live="polite">No health check yet.</pre>
+      </section>
+
+      <section class="panel chat-panel" aria-labelledby="chat-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Live API demo</p>
+            <h2 id="chat-title">Concierge chat</h2>
+          </div>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite">
+          <div class="message assistant">
+            Configure a public backend API URL, then ask about properties, booking status, or policies.
+          </div>
+        </div>
+
+        <form id="chatForm" class="chat-form">
+          <input id="messageInput" type="text" autocomplete="off" placeholder="Show me condos in Los Angeles">
+          <button type="submit">Send</button>
+        </form>
+        <p class="hint">
+          GitHub Pages hosts this frontend only. FastAPI, Redis, Supabase, the Rust gateway, and model providers must run on a separate backend host.
+        </p>
+      </section>
+
+      <section class="panel report-panel" aria-labelledby="report-title">
+        <p class="eyebrow">AI Report Card</p>
+        <h2 id="report-title">Latest deterministic eval gate</h2>
+        <dl class="metric-grid">
+          <div>
+            <dt>Dataset</dt>
+            <dd>Golden set v2</dd>
+          </div>
+          <div>
+            <dt>CI gate</dt>
+            <dd>Fail under 0.85</dd>
+          </div>
+          <div>
+            <dt>Mode</dt>
+            <dd>Offline deterministic by default</dd>
+          </div>
+        </dl>
+        <p class="hint">
+          CI publishes full eval JSON and Markdown artifacts from <code>backend/evaluation/eval_results/</code>.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

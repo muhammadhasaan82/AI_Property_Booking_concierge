@@ -16,10 +16,14 @@ collect → evaluate → clean → train → swap → re-evaluate.
 
 ```bash
 cd backend
-python evaluation/run_eval_suite.py --json --out evaluation/eval_results/baseline.json
+python evaluation/v2_eval.py \
+  --dataset evaluation/golden_set.yaml \
+  --json \
+  --out evaluation/eval_results/baseline.json \
+  --fail-under 0.0
 ```
 
-Record the metrics — this is your "before" measurement.
+Record the `report_card` metrics - this is your "before" measurement.
 
 ## 2. Export training data
 
@@ -84,7 +88,9 @@ python evaluation/eval_compare_models.py \
     --candidate ft:openai:gpt-5-nano:org:concierge-router:abcd1234
 ```
 
-Look for positive deltas on `tool_selection_accuracy`, `arg_extraction_accuracy`, and `frame_intent_accuracy`. Negative deltas on `policy_override_rate` mean the model now agrees with the policy router more often (good).
+Look for positive deltas on `pass_rate`, `average_score`, and
+`deterministic_score`. Watch `failed_cases` and `partial_pass_cases` closely
+because strict safety cases should not regress.
 
 ## 5. Promote or rollback
 

@@ -13,7 +13,7 @@ from app.services.dynamic_config import get_vocabulary as _get_vocabulary
 
 logger = logging.getLogger(__name__)
 
-from app.components.nlp_engine.config import _get_field_prototypes, _get_vocab, _name_full_pattern
+from app.components.nlp_engine.config import _get_field_prototypes, _get_nlp_thresholds, _get_vocab, _name_full_pattern
 from app.components.nlp_engine.models import _get_spacy, _get_st_model, _max_semantic_similarity
 from app.components.nlp_engine.constants import ISO_DATE_PATTERN, UUID_PATTERN
 import re

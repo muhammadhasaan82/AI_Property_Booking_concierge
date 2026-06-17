@@ -42,6 +42,8 @@ from app.services.adk_runner.handlers import (
     _maybe_handle_booking_status_check,
     _maybe_handle_faq_resume_turn,
     _maybe_handle_search_state_shortcut,
+    _maybe_handle_property_refinement_followup,
+    _maybe_handle_service_coverage_followup,
     _maybe_record_unsupported_region,
 )
 from app.services.adk_runner.rendering import (
@@ -170,6 +172,18 @@ async def run_adk_turn(
         yield deterministic_reply
         return
 
+    with trace.span(name="service_coverage_followup"):
+        service_coverage_payload = await _maybe_handle_service_coverage_followup(
+            session_id=session_id,
+            message=cleaned_message,
+        )
+    if service_coverage_payload:
+        deterministic_reply = str(service_coverage_payload.get("deterministic_reply") or "").strip()
+        if deterministic_reply:
+            trace.end()
+            yield deterministic_reply
+            return
+
     with trace.span(name="service_coverage_guard"):
         coverage_decision = evaluate_message_coverage(cleaned_message)
     if coverage_decision.blocked and coverage_decision.message:
@@ -229,6 +243,18 @@ async def run_adk_turn(
         trace.end()
         yield "I'm sorry, I couldn't process your request. Could you try again?"
         return
+
+    with trace.span(name="property_refinement_followup"):
+        property_refinement_payload = await _maybe_handle_property_refinement_followup(
+            session_id=session_id,
+            message=cleaned_message,
+        )
+    if property_refinement_payload:
+        deterministic_reply = str(property_refinement_payload.get("deterministic_reply") or "").strip()
+        if deterministic_reply:
+            trace.end()
+            yield deterministic_reply
+            return
 
     with trace.span(name="booking_flow"):
         booking_payload = await _maybe_handle_active_booking_turn(

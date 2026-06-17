@@ -133,6 +133,8 @@ booking:
     - modify
     - fix
     - correct
+    - wrong
+    - incorrect
 
   amendment_context_markers:
     - "this booking"

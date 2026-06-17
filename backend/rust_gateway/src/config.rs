@@ -93,7 +93,10 @@ pub fn load_cag_config() -> crate::cag::CagConfig {
             Err(err) => tracing::warn!("[CAG] Failed to parse {}: {}. CAG disabled.", path, err),
         }
     } else {
-        tracing::warn!("[CAG] Config not found at {}. CAG disabled (all queries pass through).", path);
+        tracing::warn!(
+            "[CAG] Config not found at {}. CAG disabled (all queries pass through).",
+            path
+        );
     }
     crate::cag::CagConfig::default()
 }

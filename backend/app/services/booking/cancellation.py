@@ -34,6 +34,33 @@ def _detect_booking_cancellation_intent(message: str) -> bool:
 
     return False
 
+def _is_negated_cancellation_request(message: str) -> bool:
+    if not message:
+        return False
+    normalized = _normalize(message)
+    if not normalized:
+        return False
+
+    for pattern in _NEGATED_CANCELLATION_PATTERNS:
+        if pattern.search(normalized):
+            return True
+
+    negated_request_patterns = (
+        r"\b(?:do\s+not|don'?t|dont)\s+want\s+to\s+(?:cancel|delete|remove)\b",
+        r"\b(?:do\s+not|don'?t|dont)\s+(?:cancel|delete|remove)\s+(?:this\s+|my\s+|the\s+)?booking\b",
+        r"\bkeep\s+(?:this\s+|my\s+|the\s+)?booking\b",
+    )
+    return any(re.search(pattern, normalized, re.I) for pattern in negated_request_patterns)
+
+def _clear_cancellation_soft_state(soft_state: Dict[str, Any]) -> None:
+    for key in (
+        "booking_cancellation_pending",
+        "booking_cancellation_stage",
+        "booking_cancellation_id",
+        "booking_cancellation_receipt",
+    ):
+        soft_state.pop(key, None)
+
 def _is_yes(message: str) -> bool:
     if not message:
         return False
@@ -215,6 +242,13 @@ async def handle_booking_cancellation_turn(message: str, soft_state: dict):
     pending = bool(soft_state.get("booking_cancellation_pending")) or stage == "awaiting_confirmation"
     text = " ".join((message or "").strip().lower().split())
 
+    if stage != "awaiting_confirmation" and _is_negated_cancellation_request(message):
+        _clear_cancellation_soft_state(soft_state)
+        return {
+            "status": "cancellation_not_requested",
+            "deterministic_reply": "Okay, I will not cancel your booking. Your booking remains unchanged.",
+        }
+
     confirmations = {"yes", "y", "confirm", "yes cancel", "yes delete"}
     rejections = {
         "no",
@@ -268,7 +302,7 @@ async def handle_booking_cancellation_turn(message: str, soft_state: dict):
                 else bool(booking_ok)
             )
 
-            if sb_ok and booking_ok_bool:
+            if sb_ok or booking_ok_bool:
                 for key in (
                     "booking_cancellation_pending",
                     "booking_cancellation_stage",

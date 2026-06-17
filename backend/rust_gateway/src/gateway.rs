@@ -1,5 +1,5 @@
-use serde_json::{json, Value};
 use crate::tools::ToolRegistry;
+use serde_json::{json, Value};
 
 // ---------------------------------------------------------------------------
 // Intent inference – heuristic detection from raw JSON keys
@@ -111,30 +111,42 @@ pub fn infer_intent(data: &Value) -> InferredIntent {
     };
 
     let search_score = score_keys(&config.intents.search);
-    if search_score > 0.0 { scores.push((InferredIntent::Search, search_score)); }
+    if search_score > 0.0 {
+        scores.push((InferredIntent::Search, search_score));
+    }
 
     let booking_score = score_keys(&config.intents.booking);
-    if booking_score > 0.0 { scores.push((InferredIntent::Booking, booking_score)); }
+    if booking_score > 0.0 {
+        scores.push((InferredIntent::Booking, booking_score));
+    }
 
     let status_score = score_keys(&config.intents.status);
-    if status_score > 0.0 { scores.push((InferredIntent::Status, status_score)); }
+    if status_score > 0.0 {
+        scores.push((InferredIntent::Status, status_score));
+    }
 
     let payment_score = score_keys(&config.intents.payment);
-    if payment_score > 0.0 { scores.push((InferredIntent::Payment, payment_score)); }
+    if payment_score > 0.0 {
+        scores.push((InferredIntent::Payment, payment_score));
+    }
 
     // FAQ signals
     if let Some(q) = data.get("question").and_then(|v| v.as_str()) {
         let q_lower = q.to_lowercase();
         if let Some(keywords) = &config.intents.faq.keywords {
             let count = keywords.iter().filter(|w| q_lower.contains(*w)).count();
-            let faq_score = (count as f64) * config.intents.faq.weight + config.intents.faq.base_score.unwrap_or(0.0);
+            let faq_score = (count as f64) * config.intents.faq.weight
+                + config.intents.faq.base_score.unwrap_or(0.0);
             scores.push((InferredIntent::Faq, faq_score));
         }
     }
 
     // Select highest-scoring intent
     scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    scores.first().map(|(intent, _)| intent.clone()).unwrap_or(InferredIntent::Unknown)
+    scores
+        .first()
+        .map(|(intent, _)| intent.clone())
+        .unwrap_or(InferredIntent::Unknown)
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +166,8 @@ pub fn process_request(data: &Value, context: &Value, registry: &ToolRegistry) -
     // Safety: never execute destructive actions without required data
     if intent == InferredIntent::Booking {
         let required = ["property_id", "check_in", "check_out"];
-        let missing: Vec<&str> = required.iter()
+        let missing: Vec<&str> = required
+            .iter()
             .filter(|k| data.get(**k).is_none())
             .copied()
             .collect();
