@@ -18,16 +18,49 @@ function cleanBaseUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
-function getApiBaseUrl() {
-  return cleanBaseUrl(localStorage.getItem(storageKey) || config.API_BASE_URL || "");
+function normalizeBackendOrigin(rawUrl) {
+  const raw = String(rawUrl || "").trim();
+  if (!raw) return "";
+
+  try {
+    const url = new URL(raw.startsWith("http") ? raw : "http://" + raw);
+    url.pathname = url.pathname.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
+    url.search = "";
+    url.hash = "";
+    let normalized = url.toString().replace(/\/$/, "");
+    if (!raw.startsWith("http") && normalized.startsWith("http://")) {
+      normalized = normalized.substring(7);
+    }
+    return normalized;
+  } catch (e) {
+    return raw.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
+  }
+}
+
+function getBackendOrigin() {
+  return normalizeBackendOrigin(localStorage.getItem(storageKey) || config.API_BASE_URL || "");
+}
+
+function apiUrl(path) {
+  const backendOrigin = getBackendOrigin();
+  if (!backendOrigin) return "";
+  const cleanPath = String(path || "").replace(/^\/+/, "");
+  return `${backendOrigin}/api/v1/${cleanPath}`;
+}
+
+function docsUrl() {
+  const backendOrigin = getBackendOrigin();
+  if (!backendOrigin) return "";
+  return `${backendOrigin}/docs`;
 }
 
 function updateConfigState() {
-  const apiBaseUrl = getApiBaseUrl();
-  apiInput.value = apiBaseUrl;
-  const configured = Boolean(apiBaseUrl);
+  const backendOrigin = getBackendOrigin();
+  const rawUrl = localStorage.getItem(storageKey) || config.API_BASE_URL || "";
+  apiInput.value = rawUrl;
+  const configured = Boolean(backendOrigin);
   configNotice.hidden = configured;
-  docsLink.href = configured ? `${apiBaseUrl}/docs` : "#";
+  docsLink.href = configured ? docsUrl() : "#";
   docsLink.classList.toggle("disabled", !configured);
   docsLink.setAttribute("aria-disabled", configured ? "false" : "true");
   messageInput.disabled = !configured;
@@ -55,18 +88,19 @@ function addMessage(role, text) {
 }
 
 async function checkHealth() {
-  const apiBaseUrl = getApiBaseUrl();
-  if (!apiBaseUrl) {
+  const backendOrigin = getBackendOrigin();
+  if (!backendOrigin) {
     setBadge("Not configured", "warning");
     healthOutput.textContent = "Backend API is not configured.";
     return;
   }
 
   setBadge("Checking", "warning");
-  healthOutput.textContent = `GET ${apiBaseUrl}/health`;
+  const targetUrl = apiUrl("health");
+  healthOutput.textContent = `GET ${targetUrl}`;
 
   try {
-    const response = await fetch(`${apiBaseUrl}/health`, {
+    const response = await fetch(targetUrl, {
       method: "GET",
       headers: { Accept: "application/json" }
     });
@@ -86,11 +120,15 @@ async function checkHealth() {
 }
 
 async function sendChatMessage(message) {
-  const apiBaseUrl = getApiBaseUrl();
+  const targetUrl = apiUrl("chat/message");
+  if (!targetUrl) {
+    addMessage("assistant", "I could not reach the backend chat API. API is not configured.");
+    return;
+  }
   addMessage("user", message);
 
   try {
-    const response = await fetch(`${apiBaseUrl}/chat/message`, {
+    const response = await fetch(targetUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

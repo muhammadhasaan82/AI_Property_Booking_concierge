@@ -70,6 +70,7 @@ from app.services.observability.langfuse_observer import get_observer
 from app.services.adk_runner.coverage_followups import (
     _maybe_handle_property_refinement_followup,
     _maybe_handle_service_coverage_followup,
+    _persist_service_coverage_state,
 )
 
 
