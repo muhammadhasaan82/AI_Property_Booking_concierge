@@ -244,3 +244,69 @@ def test_debug_config_includes_service_coverage():
     assert coverage["enabled"] is True
     assert "United States" in coverage["supported_countries"]
     assert "allow_dataset_regions_outside_supported_market" in coverage
+
+
+@pytest.mark.asyncio
+async def test_unsupported_region_followup_flow(monkeypatch):
+    _install_router()
+
+    snapshot = {
+        "state": {"soft_state": {}},
+        "history": [],
+        "meta": {
+            "app_name": "ai_concierge",
+            "user_id": "u-coverage-followup",
+            "last_update_time": 1.0,
+        },
+    }
+
+    async def fake_get_session_snapshot(_session_id):
+        return snapshot
+
+    async def fake_save_session_snapshot(*, session_id, history, state, metadata):
+        snapshot["state"] = state
+        snapshot["history"] = history
+        snapshot["meta"].update(metadata or {})
+
+    async def _boom(*_args, **_kwargs):
+        raise AssertionError("ADK runner must not be invoked in this follow-up flow")
+
+    fake_runner = type("FakeRunner", (), {"run_async": staticmethod(_boom)})()
+    monkeypatch.setattr(adk_runner, "_get_runner", lambda: fake_runner)
+    monkeypatch.setattr(adk_runner, "get_session_snapshot", fake_get_session_snapshot)
+    monkeypatch.setattr(adk_runner, "save_session_snapshot", fake_save_session_snapshot)
+    monkeypatch.setattr(adk_runner, "sanitize_input", lambda m: (m, True))
+    monkeypatch.setattr(adk_runner, "sanitize_output", lambda m: m)
+
+    # First turn: block Lahore
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn(
+        "u-coverage-followup",
+        "s-coverage-followup",
+        "I am looking for condo in Lahore",
+    ):
+        chunks.append(chunk)
+
+    reply1 = "".join(chunks)
+    assert "United States" in reply1
+
+    soft_state1 = snapshot["state"]["soft_state"]
+    assert soft_state1.get("service_coverage_stage") == "awaiting_city_list_confirmation"
+    assert soft_state1.get("last_unsupported_region") == "Pakistan"
+
+    # Second turn: user says "yes" to get available cities
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn(
+        "u-coverage-followup",
+        "s-coverage-followup",
+        "yes",
+    ):
+        chunks.append(chunk)
+
+    reply2 = "".join(chunks)
+    assert "Which city do you want to book with?" in reply2
+    assert "New York" in reply2
+
+    soft_state2 = snapshot["state"]["soft_state"]
+    assert soft_state2.get("service_coverage_stage") == "awaiting_supported_city_choice"
+
