@@ -278,7 +278,6 @@ async def test_unsupported_region_followup_flow(monkeypatch):
     monkeypatch.setattr(adk_runner, "sanitize_input", lambda m: (m, True))
     monkeypatch.setattr(adk_runner, "sanitize_output", lambda m: m)
 
-    # First turn: block Lahore
     chunks = []
     async for chunk in adk_runner.run_adk_turn(
         "u-coverage-followup",
@@ -294,7 +293,6 @@ async def test_unsupported_region_followup_flow(monkeypatch):
     assert soft_state1.get("service_coverage_stage") == "awaiting_city_list_confirmation"
     assert soft_state1.get("last_unsupported_region") == "Pakistan"
 
-    # Second turn: user says "yes" to get available cities
     chunks = []
     async for chunk in adk_runner.run_adk_turn(
         "u-coverage-followup",
@@ -310,3 +308,35 @@ async def test_unsupported_region_followup_flow(monkeypatch):
     soft_state2 = snapshot["state"]["soft_state"]
     assert soft_state2.get("service_coverage_stage") == "awaiting_supported_city_choice"
 
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn(
+        "u-coverage-followup",
+        "s-coverage-followup",
+        "Los Angeles",
+    ):
+        chunks.append(chunk)
+
+    reply3 = "".join(chunks)
+    assert "Which property type do you want to book?" in reply3
+    assert "Apartment" in reply3
+    assert "Condo" in reply3
+    assert "$" not in reply3
+    assert "/night" not in reply3
+    assert "I found 128 properties" not in reply3
+    assert "1." not in reply3
+
+    soft_state3 = snapshot["state"]["soft_state"]
+    assert soft_state3.get("service_coverage_stage") == "awaiting_property_type_choice"
+    assert soft_state3.get("service_coverage_selected_city") == "Los Angeles"
+
+    chunks = []
+    async for chunk in adk_runner.run_adk_turn(
+        "u-coverage-followup",
+        "s-coverage-followup",
+        "condo",
+    ):
+        chunks.append(chunk)
+
+    reply4 = "".join(chunks)
+    assert "Los Angeles" in reply4
+    assert "Condo" in reply4
