@@ -170,7 +170,7 @@ async def _maybe_handle_service_coverage_followup(
     cities = _coverage_available_cities()
 
     if stage == "awaiting_city_list_confirmation":
-        soft_state["service_coverage_stage"] = "awaitinfg_supported_city_choice"
+        soft_state["service_coverage_stage"] = "awaiting_supported_city_choice"
         await _persist_service_coverage_state(
             session_id=session_id,
             snapshot=snapshot,
