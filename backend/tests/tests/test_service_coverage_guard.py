@@ -278,7 +278,6 @@ async def test_unsupported_region_followup_flow(monkeypatch):
     monkeypatch.setattr(adk_runner, "sanitize_input", lambda m: (m, True))
     monkeypatch.setattr(adk_runner, "sanitize_output", lambda m: m)
 
-    # First turn: block Lahore
     chunks = []
     async for chunk in adk_runner.run_adk_turn(
         "u-coverage-followup",
@@ -294,7 +293,6 @@ async def test_unsupported_region_followup_flow(monkeypatch):
     assert soft_state1.get("service_coverage_stage") == "awaiting_city_list_confirmation"
     assert soft_state1.get("last_unsupported_region") == "Pakistan"
 
-    # Second turn: user says "yes" to get available cities
     chunks = []
     async for chunk in adk_runner.run_adk_turn(
         "u-coverage-followup",
