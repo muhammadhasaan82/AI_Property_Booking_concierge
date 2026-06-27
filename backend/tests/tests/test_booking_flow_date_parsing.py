@@ -187,6 +187,22 @@ class TestExtractDatesByAssociation:
         assert check_in == "2026-06-02"
         assert check_out == "2026-06-11"
 
+    def test_yearless_reversed_summer_dates_stay_comparable(self, monkeypatch):
+        monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-27")
+        check_in, check_out = _extract_dates_by_association(
+            "check-out date 23 june and check in date is 13 july"
+        )
+        assert check_in == "2026-07-13"
+        assert check_out == "2026-06-23"
+
+    def test_yearless_december_to_january_still_crosses_year(self, monkeypatch):
+        monkeypatch.setenv("BOOKING_REFERENCE_DATE", "2026-06-27")
+        check_in, check_out = _extract_dates_by_association(
+            "check in date is 30 december and check-out date 2 january"
+        )
+        assert check_in == "2026-12-30"
+        assert check_out == "2027-01-02"
+
     def test_only_checkout_label_with_two_dates_fills_check_in_from_remainder(self):
         """When only check-out is labelled, the other date should become check_in."""
         text = "2026-06-02 and then check out on 2026-06-11"

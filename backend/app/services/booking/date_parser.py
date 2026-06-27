@@ -40,6 +40,35 @@ def _format_month_day(month: int, day: int, year: int) -> Optional[str]:
     except ValueError:
         return None
 
+def _parse_yearless_month_day_span(text: str) -> Optional[Tuple[int, int]]:
+    if not text or re.search(r"\b\d{4}\b", text):
+        return None
+
+    patterns = (
+        re.compile(
+            r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+of)?\s+(?P<month>[a-z]+)\b",
+            re.I,
+        ),
+        re.compile(
+            r"\b(?P<month>[a-z]+)\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?\b",
+            re.I,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(text)
+        if not match:
+            continue
+        month = _MONTHS.get(str(match.group("month")).lower())
+        if month is None:
+            continue
+        day = int(match.group("day"))
+        try:
+            date(2000, month, day)
+        except ValueError:
+            return None
+        return month, day
+    return None
+
 def _parse_yearless_month_day(day: int, month_raw: str) -> Optional[str]:
     month = _MONTHS.get(str(month_raw).lower())
     if month is None:
@@ -209,6 +238,66 @@ def _find_all_dates(text: str) -> List[Tuple[str, int, int]]:
             last_end = end
     return filtered
 
+def _date_from_config_format(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        year, month, day = (int(part) for part in str(value).split("-"))
+        return date(year, month, day)
+    except (TypeError, ValueError):
+        return None
+
+def _entry_for_date(
+    dates_found: List[Tuple[str, int, int]],
+    value: Optional[str],
+) -> Optional[Tuple[str, int, int]]:
+    if not value:
+        return None
+    for entry in dates_found:
+        if entry[0] == value:
+            return entry
+    return None
+
+def _normalize_yearless_associated_pair(
+    text: str,
+    dates_found: List[Tuple[str, int, int]],
+    check_in_date: Optional[str],
+    check_out_date: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Keep paired yearless check-in/check-out dates in the user's apparent year.
+
+    Single yearless dates still roll forward to the next future occurrence. For
+    paired dates, however, a checkout like "23 june" should not become next year
+    when the same sentence says check-in is "13 july"; that masks the user's
+    reversed dates and bypasses checkout-after-checkin validation.
+    """
+    check_in_dt = _date_from_config_format(check_in_date)
+    check_out_dt = _date_from_config_format(check_out_date)
+    if not check_in_dt or not check_out_dt or check_out_dt.year <= check_in_dt.year:
+        return check_in_date, check_out_date
+
+    check_in_entry = _entry_for_date(dates_found, check_in_date)
+    check_out_entry = _entry_for_date(dates_found, check_out_date)
+    if not check_in_entry or not check_out_entry:
+        return check_in_date, check_out_date
+
+    check_in_span = text[check_in_entry[1]:check_in_entry[2]]
+    check_out_span = text[check_out_entry[1]:check_out_entry[2]]
+    check_in_month_day = _parse_yearless_month_day_span(check_in_span)
+    check_out_month_day = _parse_yearless_month_day_span(check_out_span)
+    if not check_in_month_day or not check_out_month_day:
+        return check_in_date, check_out_date
+
+    check_in_month, _check_in_day = check_in_month_day
+    check_out_month, check_out_day = check_out_month_day
+
+    if check_in_month >= 10 and check_out_month <= 3:
+        return check_in_date, check_out_date
+
+    adjusted_check_out = _format_month_day(check_out_month, check_out_day, check_in_dt.year)
+    return check_in_date, adjusted_check_out or check_out_date
+
 def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Associate one or two date mentions in `text` with `check_in` and `check_out`.
@@ -232,7 +321,12 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
         first_date_start = dates_found[0][1]
         last_label_end = max(m.end() for m in check_in_matches + check_out_matches)
         if last_label_end <= first_date_start:
-            return dates_found[0][0], dates_found[1][0]
+            return _normalize_yearless_associated_pair(
+                text,
+                dates_found,
+                dates_found[0][0],
+                dates_found[1][0],
+            )
 
     if len(dates_found) >= 2 and check_out_matches and not check_in_matches:
         last_check_out = max(check_out_matches, key=lambda match: match.start())
@@ -244,7 +338,12 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
         if check_out_date:
             for d_val, _, _ in dates_found:
                 if d_val != check_out_date:
-                    return d_val, check_out_date
+                    return _normalize_yearless_associated_pair(
+                        text,
+                        dates_found,
+                        d_val,
+                        check_out_date,
+                    )
 
     check_in_date = None
     check_out_date = None
@@ -273,7 +372,12 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
             check_in_date = d_val
         elif best_type == "check_out":
             check_out_date = d_val
-        return check_in_date, check_out_date
+        return _normalize_yearless_associated_pair(
+            text,
+            dates_found,
+            check_in_date,
+            check_out_date,
+        )
 
     for d_val, d_start, d_end in dates_found:
         best_type = None
@@ -315,5 +419,9 @@ def _extract_dates_by_association(text: str) -> Tuple[Optional[str], Optional[st
                     check_in_date = d_val
                     break
                     
-    return check_in_date, check_out_date
-
+    return _normalize_yearless_associated_pair(
+        text,
+        dates_found,
+        check_in_date,
+        check_out_date,
+    )
